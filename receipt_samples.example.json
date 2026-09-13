@@ -1,0 +1,39 @@
+{
+  "_комментарий": [
+    "Шаблон локальных образцов чеков для тестов. Скопируй его в receipt_samples.json",
+    "(файл в .gitignore) и подставь свои фото и суммы — тогда receipt_test.py прогонит",
+    "разбор на реальных чеках и сверит результат с эталоном.",
+    "Пути к фото можно давать относительно корня проекта или абсолютными.",
+    "Образца нет — соответствующая проверка просто пропускается.",
+    "description — короткое пояснение для отчёта теста (необязательно).",
+    "Все токены из name_tokens должны найтись в названиях позиций (регистр не важен)."
+  ],
+  "dns": {
+    "photo": "data/receipts/sample-electronics.png",
+    "total": 1234.0,
+    "category": "техника",
+    "is_grocery": false,
+    "min_items": 2,
+    "name_tokens": ["бп", "корпус"]
+  },
+  "grocery": {
+    "photo": "data/receipts/sample-grocery.png",
+    "total": 1234.56,
+    "is_grocery": true,
+    "leisure": true,
+    "min_items": 10,
+    "sum_tolerance": 120,
+    "name_tokens": ["пиво"],
+    "junk_tokens": ["пив"]
+  },
+  "narrow": {
+    "photo": "data/receipts/sample-narrow.jpg",
+    "extra_photos": ["data/receipts/sample-narrow-compressed.jpg"],
+    "total": 1234.0,
+    "item_count": 4,
+    "item_sums": [1.0, 2.0, 3.0, 4.0],
+    "store": "Название магазина",
+    "name_tokens": ["пакет", "вино"],
+    "qty_check": {"sum": 2.0, "qty": 2}
+  }
+}

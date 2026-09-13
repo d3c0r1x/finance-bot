@@ -1,0 +1,20 @@
+# Секреты и окружение
+.env
+.venv/
+venv/
+
+# Питон
+__pycache__/
+*.pyc
+
+# Данные владельца: база, фото чеков, отчёты
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Личные образцы чеков для тестов (шаблон — receipt_samples.example.json)
+receipt_samples.json
+
+# Логи
+*.log

@@ -1,0 +1,269 @@
+import os
+
+import aiosqlite
+from datetime import datetime, timedelta
+from config import DB_PATH, USERS
+from database.models import CREATE_TABLES, INITIAL_DEBTS
+
+
+def _now_iso() -> str:
+    """Локальное время в ISO — чтобы сравнения с datetime.now() были корректны
+    (SQLite CURRENT_TIMESTAMP хранит UTC, мы сравниваем с локальным временем)."""
+    return datetime.now().isoformat(sep=" ")
+
+
+async def init_db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executescript(CREATE_TABLES)
+        # Инициализация долгов, если таблица пустая
+        cursor = await db.execute("SELECT COUNT(*) FROM debts")
+        count = (await cursor.fetchone())[0]
+        if count == 0:
+            await db.executemany(
+                "INSERT OR IGNORE INTO debts (id, name, initial_amount, current_amount, interest_rate, min_payment) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                INITIAL_DEBTS,
+            )
+        await db.commit()
+
+
+async def ensure_user(telegram_id: int, display_name: str | None = None):
+    """Регистрирует пользователя и синхронизирует имя из Telegram для панели."""
+    info = USERS.get(telegram_id)
+    if not info:
+        return
+    name = (display_name or info.get("name") or "Пользователь").strip()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO users (telegram_id, name, role) VALUES (?, ?, ?)",
+            (telegram_id, name, info["role"]),
+        )
+        if display_name:
+            await db.execute("UPDATE users SET name = ? WHERE telegram_id = ?", (name, telegram_id))
+        await db.commit()
+
+
+async def add_transaction(user_id, amount, category, subcategory=None, description=None,
+                          tx_type="expense", debt_target=None, source="text") -> int:
+    """Добавляет транзакцию и возвращает её id. Для платежа по долгу уменьшает остаток
+    и закрывает долг при полном погашении."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """INSERT INTO transactions
+               (user_id, amount, category, subcategory, description, tx_type, debt_target, source, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, amount, category, subcategory, description, tx_type, debt_target, source, _now_iso()),
+        )
+        transaction_id = cursor.lastrowid
+        # Если это платёж по долгу, уменьшаем остаток
+        if tx_type == "debt_payment" and debt_target:
+            await db.execute(
+                "UPDATE debts SET current_amount = MAX(0, current_amount - ?) WHERE id = ?",
+                (amount, debt_target),
+            )
+            cursor = await db.execute("SELECT current_amount FROM debts WHERE id = ?", (debt_target,))
+            row = await cursor.fetchone()
+            if row and row[0] == 0:
+                await db.execute("UPDATE debts SET status = 'closed' WHERE id = ?", (debt_target,))
+        await db.commit()
+    return transaction_id
+
+
+async def get_transaction(transaction_id: int, user_id: int | None = None):
+    """Возвращает запись только владельцу — используется для повторения и отмены."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = "SELECT * FROM transactions WHERE id = ?"
+        params = [transaction_id]
+        if user_id is not None:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        cursor = await db.execute(query, params)
+        return await cursor.fetchone()
+
+
+async def get_recent_transactions(user_id: int, limit: int = 8):
+    """Последние записи пользователя для быстрого контроля расходов."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM transactions WHERE user_id = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?", (user_id, limit))
+        return await cursor.fetchall()
+
+
+async def delete_transaction(transaction_id: int, user_id: int) -> bool:
+    """Удаляет запись владельца и её позиции; платёж по долгу возвращает остаток."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM transactions WHERE id = ? AND user_id = ?",
+            (transaction_id, user_id))
+        row = await cursor.fetchone()
+        if not row:
+            return False
+        if row["tx_type"] == "debt_payment" and row["debt_target"]:
+            await db.execute(
+                "UPDATE debts SET current_amount = current_amount + ?, status = 'active' "
+                "WHERE id = ?", (row["amount"], row["debt_target"]))
+        await db.execute("DELETE FROM receipt_items WHERE transaction_id = ?", (transaction_id,))
+        await db.execute("DELETE FROM transactions WHERE id = ? AND user_id = ?",
+                         (transaction_id, user_id))
+        await db.commit()
+        return True
+
+
+async def add_receipt_items(transaction_id: int, items: list[dict]) -> None:
+    """Сохраняет позиции чека, чтобы потом можно было смотреть и анализировать покупки."""
+    if not items:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executemany(
+            "INSERT INTO receipt_items (transaction_id, name, qty, price, sum) VALUES (?, ?, ?, ?, ?)",
+            [(transaction_id, item.get("name") or "Позиция", item.get("qty") or 1,
+              item.get("price") or 0, item.get("sum") or 0) for item in items[:100]],
+        )
+        await db.commit()
+
+
+async def get_receipt_items(transaction_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM receipt_items WHERE transaction_id = ? ORDER BY id", (transaction_id,))
+        return await cursor.fetchall()
+
+
+async def get_receipt_price_history(user_id: int, limit: int = 500):
+    """Позиции прошлых чеков пользователя для сравнения цен.
+
+    История возвращается до текущего момента; новый чек ещё не сохранён, поэтому он не
+    может сам повлиять на свою рекомендацию. Сопоставление названий живёт в сервисе,
+    а база отвечает только за полную и изолированную выборку пользователя.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT i.name, i.qty, i.price, i.sum, t.created_at, t.description "
+            "FROM receipt_items i JOIN transactions t ON t.id = i.transaction_id "
+            "WHERE t.user_id = ? AND t.tx_type = 'expense' "
+            "ORDER BY t.created_at DESC, i.id DESC LIMIT ?",
+            (user_id, limit),
+        )
+        return await cursor.fetchall()
+
+
+async def get_transactions(user_id=None, days=30, tx_type=None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        since = (datetime.now() - timedelta(days=days)).isoformat(sep=" ")
+        query = "SELECT * FROM transactions WHERE created_at > ?"
+        params: list = [since]
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        if tx_type:
+            query += " AND tx_type = ?"
+            params.append(tx_type)
+        query += " ORDER BY created_at DESC"
+        cursor = await db.execute(query, params)
+        return await cursor.fetchall()
+
+
+async def has_transactions(user_id=None) -> bool:
+    """Есть ли у пользователя хоть одна запись — по этому определяем, новый он или нет."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        query = "SELECT 1 FROM transactions"
+        params: list = []
+        if user_id:
+            query += " WHERE user_id = ?"
+            params.append(user_id)
+        cursor = await db.execute(query + " LIMIT 1", params)
+        return await cursor.fetchone() is not None
+
+
+async def get_monthly_spending(user_id=None):
+    """Возвращает траты по категориям за текущий месяц."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        first_day = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(sep=" ")
+        query = """
+            SELECT category, SUM(amount) as total
+            FROM transactions
+            WHERE created_at > ? AND tx_type = 'expense'
+        """
+        params = [first_day]
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        query += " GROUP BY category"
+        cursor = await db.execute(query, params)
+        return dict(await cursor.fetchall())
+
+
+async def get_debts(include_closed=False):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = "SELECT * FROM debts"
+        if not include_closed:
+            query += " WHERE status = 'active'"
+        query += " ORDER BY interest_rate DESC"
+        cursor = await db.execute(query)
+        return await cursor.fetchall()
+
+
+async def get_debt(debt_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM debts WHERE id = ?", (debt_id,))
+        return await cursor.fetchone()
+
+
+async def get_total_spent_this_month(user_id=None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        first_day = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(sep=" ")
+        query = "SELECT SUM(amount) FROM transactions WHERE created_at > ? AND tx_type = 'expense'"
+        params = [first_day]
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        cursor = await db.execute(query, params)
+        row = await cursor.fetchone()
+        return row[0] or 0
+
+
+async def get_month_income(user_id=None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        first_day = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(sep=" ")
+        query = "SELECT SUM(amount) FROM transactions WHERE created_at > ? AND tx_type = 'income'"
+        params = [first_day]
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        cursor = await db.execute(query, params)
+        row = await cursor.fetchone()
+        return row[0] or 0
+
+
+async def set_setting(key: str, value: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        await db.commit()
+
+
+async def get_setting(key: str, default=None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = await cursor.fetchone()
+        return row[0] if row else default
+
+
+async def get_all_settings() -> dict:
+    """Все настройки одной выборкой (бюджет читается на каждое сообщение)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT key, value FROM settings")
+        return {key: value for key, value in await cursor.fetchall()}
