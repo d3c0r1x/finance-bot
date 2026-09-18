@@ -349,6 +349,50 @@ INCOME_KEYWORDS = ("зарплат", "аванс", "премия", "доход",
                    "вернули", "кешбэк", "кэшбэк")
 
 
+# ─── Категоризация магазинов банковской выписки ──────────────────────────
+
+# Правила по ключевым словам — первая линия, модель достаётся остальным.
+MERCHANT_RULES = {
+    "еда": ("пят", "магнит", "лента", "ашан", "вкусвилл", "дикси", "перекрёсток", "перекресток",
+            "продукт", "гастроном", "монетка", "бристоль", "красное&белое", "винлаб",
+            "шаурма", "шаверма", "пицц", "суши", "бургер", "макдоналдс", "вкусно и точка",
+            "додо", "dominos", "мегаполюс", "агрокомплекс", "молочн", "мяснов", "абрикос",
+            "pyaterochka", "magnit", "perekrestok", "lenta ", "ashan", "dixy", "vkusvill",
+            "shaverma", "bristol", "krasnoe&belo", "magnit cosmet"),
+    "транспорт": ("азс", "лукойл", "газпромнефть", "роснефть", "татнефть", "такси", "яндекс go",
+                  "автобус", "транспортн", "парков", "каршер", "ситидрайв", "делимобиль",
+                  "ржд", "суперпоток", "taxi", "lukoil", "rosneft", "gazprom oil", "avtodor", "дорплат"),
+    "техника": ("днс", "dns", "мвидео", "м.видео", "ситилинк", "эльдорадо", "технопоинт",
+                "юмей", "ozon", "вайлдберриз", "wildberries", "яндекс маркет", "алиэкспресс",
+                "hoff", "юлмарт", "регард", "citilink", "mvideo"),
+    "здоровье": ("аптек", "аптек", "горздрав", "рсб", "вита", "клиник", "стоматолог", "медиц",
+                 "инвитро", "гемотест", "поликлин", "фитнес", "спортзал", "олимп",
+                 "aptek", "apteka", "pharmacy", "aptech"),
+    "досуг": ("кино", "кинотеатр", "steam", "playstation", "мир игр",
+              "кафе", "ресторан", "кофейн", "кофе хауз", "шоколадниц", "ск сити", "синема",
+              "боулинг", "billiard", "бильярд", "антикафе", "t-bundle", "sochipark", "парк"),
+    "одежда": ("одежда", "обув", "спортмастер", "sportmaster", "зара", "zara", "h&m",
+               "глория джинс", "фамилия", "экко", "эконика", "goldapple"),
+    "жилье": ("жкх", "гис жкх", "управляющ", "домо", "аренда", "мебель", "леруа", "строй",
+              "сбермаркет доставка"),
+    "долги": ("кредит", "платёж по", "сбербанк", "перевод по номеру"),
+}
+
+
+def rule_category(merchant: str) -> str | None:
+    """Категория магазина по правилам или None — тогда решает модель."""
+    low = merchant.lower()
+    if not low:
+        return None
+    # Такси пишется как «YANDEX*4121*GO» — звёздочки и номер внутри ломают подстроки.
+    if re.search(r"yandex[^a-z]*go|яндекс\s*go", low):
+        return "транспорт"
+    for category, words in MERCHANT_RULES.items():
+        if any(w in low for w in words):
+            return category
+    return None
+
+
 def _extract_amount(text: str) -> float:
     """Достаёт сумму из текста: «2000», «2 000», «2к», «2 тыс», «3450,50»."""
     compact = text.replace("\u00a0", " ")
@@ -682,3 +726,93 @@ async def get_recommendation(context: str) -> str:
     except Exception:
         return ("🤖 Не удалось получить совет: Ollama недоступен.\n"
                 f"Запусти модель командой `ollama pull {OLLAMA_MODEL}`.")
+
+
+# ─── Категоризация магазинов выписки: правила + один батч модели ─────────
+
+BATCH_SYSTEM = """Ты — ассистент личного бюджета. Тебе дают список магазинов из банковской выписки.
+Для КАЖДОГО магазина из списка укажи категорию расходов. Только валидный JSON, без пояснений.
+
+Схема ответа: {"категории": {"<магазин>": "<категория>", ...}}
+Категория — строго одно из: еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее.
+
+Важно: названия латиницей — это русская транслитерация. Расшифровывай их:
+APTEKA/APTECHNOE = аптека (здоровье), MOROZHENOYE = мороженое (еда), KOFEYNYA = кофейня (досуг),
+PRODUKTY = продукты (еда), TABACHNAYA = табачная (прочее), STOLOVAYA = столовая (еда).
+Ориентиры: супермаркеты, продукты, доставка еды — «еда»; аптеки и клиники — «здоровье»;
+такси, АЗС, платные дороги — «транспорт»; маркетплейсы (Ozon, Wildberries) — «техника»;
+кафе и развлечения — «досуг»; одежда — «одежда»; ЖКХ и аренда — «жилье».
+Если совсем непонятно (номер точки, аббревиатура) — «прочее». Верни все строки списка."""
+
+
+def _norm_key(name: str) -> str:
+    """APTEKA_SOVETSKAYA 13 -> aptekasovetskaya13: без регистра, пунктуации и ё."""
+    text = name.lower().replace("ё", "е")
+    return re.sub(r"[^a-zа-я0-9]", "", text)
+
+
+def _match_requested(response_key: str, chunk: list[str], norm_index: dict[str, str]) -> str | None:
+    """Сопоставляет ключ ответа модели с именем из запроса.
+
+    Модель отвечает ключами в нижнем регистре и слегка переписывает названия
+    («stolovaya» вместо «STOLOVAYA 1», «moryazhenoye» вместо «MOROZHENOYE 3»).
+    Порядок: точное совпадение после нормализации → уникальный префикс →
+    нечёткое совпадение → None.
+    """
+    import difflib
+
+    key = _norm_key(response_key)
+    if key in norm_index:
+        return norm_index[key]
+    prefixes = [name for name in chunk if _norm_key(name).startswith(key) and key]
+    if len(prefixes) == 1:
+        return prefixes[0]
+    close = difflib.get_close_matches(key, list(norm_index), n=1, cutoff=0.8)
+    return norm_index[close[0]] if close else None
+
+
+async def classify_merchants(merchants: list[str]) -> dict[str, str]:
+    """Категории для уникальных магазинов выписки: правила, затем батчи модели.
+
+    Модель страхует только то, что не покрыл словарь. Ключи её ответа
+    сопоставляются с запросом нечётко — имена она переписывает. Ошибки модели
+    и таймауты дают «прочее», не падение.
+    """
+    result: dict[str, str] = {}
+    unknown: list[str] = []
+    for name in merchants:
+        category = rule_category(name)
+        if category:
+            result[name] = category
+        else:
+            unknown.append(name)
+    if not unknown:
+        return result
+
+    try:
+        model = await resolve_model()
+        # Порции по 10 магазинов: на них модель отвечает за каждую строку,
+        # на длинных порциях отвечает частично или «прочее» на всё подряд.
+        for chunk_start in range(0, len(unknown), 10):
+            chunk = unknown[chunk_start:chunk_start + 10]
+            norm_index = {_norm_key(name): name for name in chunk}
+            listing = "\n".join(f"- {name}" for name in chunk)
+            content = await asyncio.wait_for(
+                asyncio.to_thread(_chat, BATCH_SYSTEM, listing, model,
+                                  json_mode=True, num_predict=3072, temperature=0.0),
+                timeout=max(AI_ADVICE_TIMEOUT, 180),
+            )
+            mapping = loads_lenient(content).get("категории") or {}
+            if not isinstance(mapping, dict):
+                mapping = {}
+            for response_key, raw_category in mapping.items():
+                name = _match_requested(str(response_key), chunk, norm_index)
+                if name is None:
+                    continue
+                category = str(raw_category or "").strip().lower()
+                result[name] = category if category in VALID_CATEGORIES else "прочее"
+    except Exception:
+        pass
+    for name in unknown:
+        result.setdefault(name, "прочее")
+    return result

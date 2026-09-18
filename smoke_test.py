@@ -2061,7 +2061,7 @@ async def main():
     sources = "".join(open(f, encoding="utf-8").read() for f in (
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "handlers", name)
         for name in ("main_menu.py", "expenses.py", "reports.py", "debts.py", "settings.py",
-                     "onboarding.py")
+                     "onboarding.py", "bank_import.py")
     ))
     for kb in (main_menu_kb.get_main_menu_inline_kb(), main_menu_kb.get_confirm_kb(),
                main_menu_kb.get_debts_kb(), main_menu_kb.get_settings_kb(),
@@ -2137,6 +2137,60 @@ async def main():
     assert expense_kb.get_review_fix_kb(5, many, page=99)
     assert len(expense_kb.get_review_fix_kb(5, many, page=99).inline_keyboard) == 3
     print("✅ Все клавиатуры строятся и каждая кнопка имеет обработчик")
+
+    # ─── Импорт банковской выписки: парсер, классификация типов, дедуп ───
+    from handlers import bank_import
+    from services.bank_statement import (BankOp, Statement, _classify, _merchant,
+                                         _card_from_body, _clean_body)
+    from ai.llm import rule_category
+
+    assert _classify("Оплата в PYATEROCHKA 20174", -500) == "purchase"
+    assert _classify("Пополнение. Система быстрых платежей", 1000) == "income"
+    assert _classify("Внутренний перевод между своими счетами", -700) == "internal"
+    assert _classify("Снятие наличных в банкомате", -3000) == "withdrawal"
+    assert _classify("Перевод по номеру телефона", -200) == "transfer_out"
+    assert _merchant("Оплата в PYATEROCHKA 20174 Voronezh RUS") == "PYATEROCHKA"
+    assert _merchant("Оплата услуг T-Bank.T-Bundle") == "T-Bank.T-Bundle"
+    assert _card_from_body("Оплата в MAGNIT\nKrasnodar RUS\n1234") == "1234"
+    assert _card_from_body("Оплата в MAGNIT\nKrasnodar RUS\n—") == ""
+    assert "T-Bank.T-Bundle" in _clean_body("Оплата в T-Bank.T-\nBundle", "")
+
+    # Классификация магазинов: правила покрывают сети, модель — остальное (без сети — фолбэк).
+    assert rule_category("PYATEROCHKA") == "еда"
+    assert rule_category("APTEKA_SOVETSKAYA 13") == "здоровье"
+    assert rule_category("YANDEX*4121*GO") == "транспорт"
+    cats = await bank_import._cached_merchant_categories({"НЕИЗВЕСТНЫЙ МАГАЗИН"}, verdict_user)
+    assert cats.get("НЕИЗВЕСТНЫЙ МАГАЗИН") == "прочее"
+
+    ops = [BankOp(date="2026-09-17", time="14:44", amount=-500.0, kind="purchase",
+                  merchant="PYATEROCHKA", description="Оплата в PYATEROCHKA", card="1234"),
+           BankOp(date="2026-09-17", time="20:10", amount=1500.0, kind="income",
+                  merchant="", description="Пополнение. СБП", card=""),
+           BankOp(date="2026-09-16", time="09:00", amount=-300.0, kind="internal",
+                  merchant="", description="Внутренний перевод", card="")]
+    # expense_sum считает по всем списаниям (включая перевод) — сверка честная,
+    # расхождение с итогами банка покажет, что перевод не должен был попасть в операции.
+    st = Statement(ops=ops, expected_expense=800.0, expected_income=1500.0, totals_found=True)
+    assert st.check_ok and st.expense_sum == 800.0 and st.income_sum == 1500.0
+    st_broken = Statement(ops=ops, expected_expense=999.0, expected_income=0.0, totals_found=True)
+    assert not st_broken.check_ok
+    purchases, incomes, skipped = bank_import._split(ops)
+    assert len(purchases) == 1 and len(incomes) == 1 and len(skipped) == 1
+    text = bank_import.summary_text(st)
+    assert "копейка" in text and "500" in text
+    broken_text = bank_import.summary_text(st_broken)
+    assert "не сошлась" in broken_text, broken_text
+    assert bank_import._statement_from_state({"bank_ops": [vars(o) for o in ops],
+                                              "bank_expected": [800.0, 1500.0],
+                                              "bank_totals_found": True}).check_ok
+    # Дедупликация: записали, прочитали из базы — второй импорт ничего не добавляет.
+    row = bank_import._row(ops[0], "еда")
+    ids = await database.add_transactions_bulk(verdict_user, [row])
+    history = [dict(r) for r in await database.get_transactions(user_id=verdict_user, days=370)]
+    fresh = [o for o in ops[:1] if bank_import._op_key(o) not in bank_import._existing_keys(history)]
+    assert not fresh, "дубль не отсекся"
+    assert await database.delete_transactions_by_ids(verdict_user, ids, source="bank") == 1
+    print("✅ Импорт выписки: парсер, типы операций, классификация, дедуп, undo")
 
     print("\n🎉 Смоук-тест пройден полностью")
     if os.path.exists(_TEST_DB):

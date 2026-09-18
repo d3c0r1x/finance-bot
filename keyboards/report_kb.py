@@ -33,6 +33,9 @@ def get_report_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🎯 Цель на месяц", callback_data="report_goal"),
             InlineKeyboardButton(text="🛒 Список покупок", callback_data="report_shopping"),
         ],
+        [
+            InlineKeyboardButton(text="🏦 Выписка из банка", callback_data="bank_hint"),
+        ],
     ])
 
 

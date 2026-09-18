@@ -21,7 +21,7 @@ from config import (BOT_TOKEN, DATA_DIR, HIDE_MENU_BUTTON, OLLAMA_MODEL,
                     RECEIPTS_DIR, USERS, VISION_ENABLED, VISION_MODEL)
 from database.db import init_db
 from services.scheduler import register_scheduler
-from handlers import main_menu, expenses, reports, debts, settings, onboarding  # noqa: F401
+from handlers import main_menu, expenses, reports, debts, settings, onboarding, bank_import  # noqa: F401
 
 class RetryingSession(AiohttpSession):
     """Повторяет запросы к Telegram при сетевых сбоях.
@@ -137,6 +137,7 @@ async def main():
     dp.include_router(reports.router)    # колбэки отчётов и диаграмм
     dp.include_router(debts.router)      # колбэки долгов
     dp.include_router(settings.router)
+    dp.include_router(bank_import.router)  # импорт PDF-выписки: до свободного ввода
     dp.include_router(onboarding.router) # шаги приветственной настройки — до свободного ввода
     dp.include_router(main_menu.router)  # /start, кнопки меню и свободный ввод — последними
 

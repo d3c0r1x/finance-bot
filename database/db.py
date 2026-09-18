@@ -61,29 +61,46 @@ async def ensure_user(telegram_id: int, display_name: str | None = None):
 
 
 async def add_transaction(user_id, amount, category, subcategory=None, description=None,
-                          tx_type="expense", debt_target=None, source="text") -> int:
+                          tx_type="expense", debt_target=None, source="text",
+                          created_at: str | None = None) -> int:
     """Добавляет транзакцию и возвращает её id. Для платежа по долгу уменьшает остаток
-    и закрывает долг при полном погашении."""
+    и закрывает долг при полном погашении. created_at — ISO-строка для истории
+    из банковской выписки; None означает «сейчас»."""
+    ids = await add_transactions_bulk(
+        user_id, [(amount, category, subcategory, description, tx_type, debt_target, source, created_at)],
+    )
+    return ids[0]
+
+
+async def add_transactions_bulk(user_id, rows: list[tuple]) -> list[int]:
+    """Пакетная вставка транзакций (импорт выписки): один коммит на весь файл.
+
+    Каждая строка: (amount, category, subcategory, description, tx_type,
+    debt_target, source, created_at). Возвращает id в порядке вставки.
+    """
+    ids: list[int] = []
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            """INSERT INTO transactions
-               (user_id, amount, category, subcategory, description, tx_type, debt_target, source, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, amount, category, subcategory, description, tx_type, debt_target, source, _now_iso()),
-        )
-        transaction_id = cursor.lastrowid
-        # Если это платёж по долгу, уменьшаем остаток
-        if tx_type == "debt_payment" and debt_target:
-            await db.execute(
-                "UPDATE debts SET current_amount = MAX(0, current_amount - ?) WHERE id = ?",
-                (amount, debt_target),
+        for (amount, category, subcategory, description,
+             tx_type, debt_target, source, created_at) in rows:
+            cursor = await db.execute(
+                """INSERT INTO transactions
+                   (user_id, amount, category, subcategory, description, tx_type, debt_target, source, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, amount, category, subcategory, description, tx_type,
+                 debt_target, source, created_at or _now_iso()),
             )
-            cursor = await db.execute("SELECT current_amount FROM debts WHERE id = ?", (debt_target,))
-            row = await cursor.fetchone()
-            if row and row[0] == 0:
-                await db.execute("UPDATE debts SET status = 'closed' WHERE id = ?", (debt_target,))
+            ids.append(cursor.lastrowid)
+            if tx_type == "debt_payment" and debt_target:
+                await db.execute(
+                    "UPDATE debts SET current_amount = MAX(0, current_amount - ?) WHERE id = ?",
+                    (amount, debt_target),
+                )
+                cursor = await db.execute("SELECT current_amount FROM debts WHERE id = ?", (debt_target,))
+                row = await cursor.fetchone()
+                if row and row[0] == 0:
+                    await db.execute("UPDATE debts SET status = 'closed' WHERE id = ?", (debt_target,))
         await db.commit()
-    return transaction_id
+    return ids
 
 
 async def get_transaction(transaction_id: int, user_id: int | None = None):
@@ -127,6 +144,32 @@ async def find_similar_transaction(user_id: int, amount: float, tx_type: str = "
             (user_id, tx_type, float(amount or 0), since),
         )
         return await cursor.fetchone()
+
+
+async def delete_transactions_by_ids(user_id: int, ids: list[int],
+                                     source: str | None = None) -> int:
+    """Удаляет несколько записей владельца (отмена импорта выписки).
+
+    source — страховка: удаляем только строки импорта, даже если ids испорчены.
+    """
+    clean = [int(i) for i in ids if i]
+    if not clean:
+        return 0
+    removed = 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        placeholders = ",".join("?" for _ in clean)
+        query = f"DELETE FROM transactions WHERE id IN ({placeholders}) AND user_id = ?"
+        params: list = list(clean) + [user_id]
+        if source:
+            query += " AND source = ?"
+            params.append(source)
+        cursor = await db.execute(query, params)
+        removed = cursor.rowcount or 0
+        await db.execute(
+            f"DELETE FROM receipt_items WHERE transaction_id IN ({placeholders})",
+            clean)
+        await db.commit()
+    return removed
 
 
 async def delete_transaction(transaction_id: int, user_id: int) -> bool:
