@@ -351,6 +351,24 @@ async def main():
           and any(button.text == "💸 Добавить трату" for row in kb.keyboard for button in row),
           str(kb))
 
+    # Все чеки этого блока после проверок удаляются: каталог цен, список покупок и
+    # дайджест ниже засеивают свои данные сами, а натёкшая история ломала бы их проверки
+    # (на CI фото нет — синтетический чек записывается всегда, локально реальные фото
+    # давали другие товары, поэтому дефект был виден только на CI).
+    import aiosqlite
+    from config import DB_PATH as verdict_db
+    from database.db import (delete_transaction, get_receipt_items,
+                             save_receipt_verdicts)
+
+    async def receipt_ids() -> set[int]:
+        async with aiosqlite.connect(verdict_db) as db:
+            cursor = await db.execute(
+                "SELECT DISTINCT t.id FROM transactions t JOIN receipt_items i "
+                "ON i.transaction_id = t.id WHERE t.user_id = 1111")
+            return {row[0] for row in await cursor.fetchall()}
+
+    receipts_at_start = await receipt_ids()
+
     print("— Фото чека целиком —")
     # Пока ни один чек не разбирался, экран необязательных покупок говорит об этом прямо,
     # а не показывает нуль (нуль читался бы как «необязательного нет»).
@@ -466,18 +484,6 @@ async def main():
     # напоминание о совете в карточке записи — в момент покупки, а не через отчёт.
     # Чек для этой проверки — продуктовый: вердикт «вредно» у техники правила не выдают,
     # и выдумывать его в фикстуре значило бы проверять поведение, которого у бота нет.
-    import aiosqlite
-    from config import DB_PATH as verdict_db
-    from database.db import (delete_transaction, get_receipt_items,
-                             save_receipt_verdicts)
-
-    async def receipt_ids() -> set[int]:
-        async with aiosqlite.connect(verdict_db) as db:
-            cursor = await db.execute(
-                "SELECT DISTINCT t.id FROM transactions t JOIN receipt_items i "
-                "ON i.transaction_id = t.id WHERE t.user_id = 1111")
-            return {row[0] for row in await cursor.fetchall()}
-
     before_ids = await receipt_ids()
     # Предыдущие сценарии записали чеки на ту же сумму 589,80 за последние минуты, а окно
     # дублей — 10 минут: на быстрой машине (CI) синтетический чек здесь честно встречает
@@ -515,10 +521,11 @@ async def main():
     check("в напоминании есть название товара из чека",
           any(chips in t for t in sent), f"ответы: {sent}")
 
-    # За собой убираем: эти чеки нужны были только проверке, а на каталог цен и отчёт
-    # о необязательных покупках они бы влияли — три покупки одного товара это уже история.
+    # За собой убираем всё, что записал фото-блок: каталог цен и отчёт о необязательных
+    # покупках ниже засеивают свои данные сами, а три покупки одного товара — уже история,
+    # которая ломала бы их проверки.
     session.photo_override = None
-    for receipt_id in (await receipt_ids()) - before_ids:
+    for receipt_id in (await receipt_ids()) - receipts_at_start:
         await delete_transaction(receipt_id, 1111)
 
     print("— Панель подтверждения платежа —")

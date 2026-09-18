@@ -576,9 +576,47 @@ def _drop_qty_tail(name: str) -> str:
     return " ".join(tokens)
 
 
+# Лидирующий мусор названия: прилипшая шапка чека. Компания — формы ООО/ИП,
+# реквизиты — короткие метки полей чека, магазины — сети, которые встречаются шапкой.
+HEADER_TOKEN_EXACT = frozenset({"ооо", "ип", "оао", "зао", "пао", "ао", "чек", "сайт",
+                                "инн", "кпп", "лента", "магнит", "дикси", "днс", "видео"})
+HEADER_TOKEN_STEMS = ("кассов", "кассир", "касса", "квитанц", "смен", "документ", "ценник",
+                      "пятероч", "агроторг", "перекрест", "вкусвилл", "ашан", "мвидео")
+
+
+def _is_header_token(token: str) -> bool:
+    """Токен похож на реквизит шапки, а не на слово названия товара."""
+    normalized = re.sub(r"[^a-z0-9а-яё]", "", token.lower().replace("ё", "е"))
+    if not normalized:
+        return True  # чистая пунктуация — огрызок OCR
+    if normalized.isdigit():
+        return len(normalized) <= 4  # «000», номер магазина; длинное число может быть артикулом
+    if len(normalized) <= 2:
+        return True  # огрызок OCR
+    if normalized in HEADER_TOKEN_EXACT:
+        return True
+    return any(normalized.startswith(stem) for stem in HEADER_TOKEN_STEMS)
+
+
+def _strip_leading_header(text: str) -> str:
+    """Отрезает прилипшую шапку: «000 ПЯТЁРОЧКА КАССОВЫЙ ЧЕК МОЛОКО 1Л» → «МОЛОКО 1Л».
+
+    Логотип магазина стоит близко к таблице, и OCR склеивает его с первым товаром —
+    потом такая позиция ломает сопоставление цен и напоминания. Название начинается
+    с первого токена, который не похож на реквизиты; если не похожих нет, текст не трогаем.
+    """
+    tokens = text.split()
+    for index, token in enumerate(tokens):
+        if not _is_header_token(token):
+            stripped = " ".join(tokens[index:])
+            return stripped if stripped else text
+    return text
+
+
 def _clean_name(tokens: list[str]) -> str:
     text = re.sub(r"\s+", " ", " ".join(_join_letter_runs(tokens))).strip()
     text = re.sub(r"^[^0-9A-Za-zА-Яа-яЁё]+", "", text)
+    text = _strip_leading_header(text)
     return _drop_qty_tail(text)[:80]
 
 
