@@ -362,19 +362,24 @@ async def _goal_screen(user_id: int) -> dict:
     entries = await advice.goal_history(user_id)
     unit = await advice.goal_unit(user_id)
     allowed, confirmed = await advice.allowed_keys(user_id), await advice.confirmed_keys(user_id)
-    candidates = advice.goal_candidates(rows, history, allowed, confirmed=confirmed, unit=unit)
+    candidates, skipped = advice.goal_candidates(rows, history, allowed,
+                                                 confirmed=confirmed, unit=unit)
     # Переключать единицу есть смысл только если в другой единице тоже есть что предложить:
     # кнопка, ведущая к пустому экрану, — хуже её отсутствия.
     other = advice.GOAL_SUM if unit == advice.GOAL_COUNT else advice.GOAL_COUNT
-    can_switch = bool(advice.goal_candidates(rows, history, allowed, confirmed=confirmed,
-                                            unit=other, limit=1))
+    other_candidates, _ = advice.goal_candidates(rows, history, allowed, confirmed=confirmed,
+                                                unit=other, limit=1)
+    can_switch = bool(other_candidates)
     progress = advice.goal_progress(goal, history)
-    screen = {"goal": goal, "unit": unit, "can_switch": can_switch, "candidates": candidates}
+    # Словарь собирается здесь целиком, а не дописывается по ходу: по нему сразу видно,
+    # что экран может вернуть три разных состояния — без цели, с активной, с закончившейся.
+    screen = {"goal": goal, "unit": unit, "can_switch": can_switch,
+              "candidates": candidates, "skipped": skipped}
     text = advice.goal_text(goal, progress, entries=entries)
     if not text:
         # История на экране без активной цели: «сколько сдержано» — ответ на вопрос, который
         # иначе негде задать: последнюю цель человек уже убрал, и от неё не осталось следа.
-        parts = [advice.goal_proposals_text(candidates, unit)]
+        parts = [advice.goal_proposals_text(candidates, unit, skipped=skipped)]
         if entries:
             parts.append(advice.goal_history_text(entries))
         screen["text"] = "\n\n".join(parts)

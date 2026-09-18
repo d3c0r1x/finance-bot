@@ -79,14 +79,19 @@ def get_goal_kb(candidates: list[dict], has_goal: bool = False, limit: int = 3,
     Кнопка несёт отпечаток ключа товара, а не номер строки: список кандидатов пересчитывается
     на каждом экране, и номер указывал бы уже на другой товар. Надпись кнопки повторяет шаг
     в той единице, в которой он будет считаться, — иначе человек увидит одну единицу в тексте,
-    а возьмёт цель в другой.
+    а возьмёт цель в другой. Длинное название усекается с многоточием: Telegram переносит
+    подпись кнопки, и широкий список цели превращается в простыню.
     """
     from services.mutelist import digest
+    from utils.formatting import plural_ru
 
     def label(item: dict) -> str:
+        name = str(item["name"])
+        short = name if len(name) <= 24 else name[:23].rstrip() + "…"
         if item.get("unit") == "sum":
-            return (f"💰 Не больше {int(item['limit'])} ₽: {item['name']}")
-        return f"🎯 Не чаще {item['target']} раз: {item['name']}"
+            return f"💰 Не больше {int(item['limit'])} ₽: {short}"
+        times = plural_ru(item["target"], "раз", "раза", "раз")
+        return f"🎯 Не чаще {item['target']} {times}: {short}"
 
     rows = [[InlineKeyboardButton(text=label(item),
                                   callback_data=f"goal_take:{digest(item['key'])}")]

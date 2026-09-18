@@ -1054,7 +1054,7 @@ async def main():
     habit_history = [purchase(day) for day in (2, 16, 30, 44)]
     habit_rows = [stored_row(1, habit_name, "вредно", "rule", 150.0),
                   stored_row(2, habit_name, "вредно", "rule", 150.0)]
-    proposed = goal_candidates(habit_rows, habit_history + [purchase(3, "Молоко 1л", 90.0)])
+    proposed, skipped = goal_candidates(habit_rows, habit_history + [purchase(3, "Молоко 1л", 90.0)])
     assert [item["name"] for item in proposed] == [habit_name], proposed
     assert proposed[0]["baseline"] >= 2 and proposed[0]["target"] == goal_target(
         proposed[0]["monthly"]), proposed[0]
@@ -1064,15 +1064,37 @@ async def main():
     cafe = "Кофе в зернах Lavazza 1кг"
     assert goal_candidates([stored_row(3, cafe, "лишнее", "model"),
                             stored_row(4, cafe, "лишнее", "model")],
-                           [purchase(day, cafe, 899.0) for day in (2, 17, 32)]) == [], \
+                           [purchase(day, cafe, 899.0) for day in (2, 17, 32)]) == ([], []), \
         "обещание не строится на догадке"
     assert goal_candidates([stored_row(5, "Пакет-майка", "лишнее", "rule"),
                             stored_row(6, "Пакет-майка", "лишнее", "rule")],
-                           [purchase(3, "Пакет-майка", 7.0)]) == [], "по одной покупке частоту не измерить"
+                           [purchase(3, "Пакет-майка", 7.0)]) == ([], []), "по одной покупке частоту не измерить"
     assert "нечего предложить" in goal_proposals_text([])
     proposals_text = goal_proposals_text(proposed)
     assert habit_name in proposals_text and "не чаще" in proposals_text, proposals_text
     assert "в месяц" in proposals_text, proposals_text
+    # Товар без денежного шага не пропадает молча при переключении в деньги: он назван
+    # со своей причиной, а пустой экран в деньгах говорит про единицу, а не про чеки.
+    # (Пакет для пробы не годится: его токены — стоп-слова, и ключа у товара нет вовсе.)
+    cheap = "Спички хозяйственные"
+    cheap_rows = [stored_row(7, cheap, "лишнее", "rule", 12.0),
+                  stored_row(8, cheap, "лишнее", "rule", 12.0)]
+    cheap_history = [purchase(day, cheap, 12.0) for day in (2, 16, 30)]
+    money_both, money_skipped = goal_candidates(
+        habit_rows + cheap_rows, habit_history + cheap_history + [purchase(3, "Молоко 1л", 90.0)],
+        unit=GOAL_SUM)
+    assert [item["name"] for item in money_both] == [habit_name], money_both
+    assert [item["name"] for item in money_skipped] == [cheap], money_skipped
+    money_text = goal_proposals_text(money_both, GOAL_SUM, skipped=money_skipped)
+    assert cheap in money_text and "Показаны не все" in money_text, money_text
+    assert "шага в деньгах нет" in money_text, money_text
+    only_skipped, only_skipped_list = goal_candidates(
+        cheap_rows, cheap_history, unit=GOAL_SUM)
+    assert only_skipped == [] and [item["name"] for item in only_skipped_list] == [cheap], \
+        (only_skipped, only_skipped_list)
+    empty_money = goal_proposals_text([], GOAL_SUM, skipped=only_skipped_list)
+    assert "шага нет" in empty_money and "Отправь новые чеки" not in empty_money, empty_money
+    assert "Отправь новые чеки" in goal_proposals_text([])  # в разах прежний честный отказ
 
     # Ход цели: окно — месяц с дня постановки, а не календарный месяц. Покупки привязаны
     # к дню постановки, а не к «столько-то дней назад»: тест не должен зависеть от того,
@@ -1206,8 +1228,8 @@ async def main():
     assert goal_money_step(150.0, 150.0) is None, "шаг равен тратам — обещания нет"
     assert goal_money_step(0.0, 0.0) is None and goal_money_step(300.0, 0.0) is None
 
-    money_candidates = goal_candidates(habit_rows, habit_history + [purchase(3, "Молоко 1л", 90.0)],
-                                       unit=GOAL_SUM)
+    money_candidates, money_skipped2 = goal_candidates(
+        habit_rows, habit_history + [purchase(3, "Молоко 1л", 90.0)], unit=GOAL_SUM)
     assert [item["name"] for item in money_candidates] == [habit_name], money_candidates
     assert money_candidates[0]["unit"] == GOAL_SUM and money_candidates[0]["limit"] == 210, \
         money_candidates[0]
@@ -1223,8 +1245,9 @@ async def main():
     assert await goal_unit(verdict_user) == GOAL_COUNT, "незнакомая единица — это раза"
     await set_goal_unit(verdict_user, GOAL_SUM)
     assert await goal_unit(verdict_user) == GOAL_SUM
-    in_money = goal_candidates(habit_rows, habit_history + [purchase(3, "Молоко 1л", 90.0)],
-                               unit=await goal_unit(verdict_user))
+    in_money, in_money_skipped = goal_candidates(
+        habit_rows, habit_history + [purchase(3, "Молоко 1л", 90.0)],
+        unit=await goal_unit(verdict_user))
     assert in_money and in_money[0]["limit"] == 210, in_money
 
     # Ход цели в деньгах считается по суммам, а не по числу покупок.
