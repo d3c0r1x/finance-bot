@@ -1553,7 +1553,8 @@ async def main():
     await run(photo=True, label="чек со сладким при категорийной цели")
     sent = await run(callback="confirm_expense", label="запись сладкого чека")
     kb = session.markup()
-    buttons = {str(b.callback_data) for row in kb.inline_keyboard for b in row} if kb else set()
+    buttons = ({str(b.callback_data) for row in kb.inline_keyboard for b in row}
+               if kb is not None and hasattr(kb, "inline_keyboard") else set())
     if "confirm_duplicate" in buttons:
         sent = await run(callback="confirm_duplicate", label="«Записать ещё раз» сладкого чека")
     check("сладкое названо в ходе цели в момент покупки",
@@ -1563,7 +1564,8 @@ async def main():
     await run(photo=True, label="чек без сладкого при категорийной цели")
     sent = await run(callback="confirm_expense", label="запись чека без сладкого")
     kb = session.markup()
-    buttons = {str(b.callback_data) for row in kb.inline_keyboard for b in row} if kb else set()
+    buttons = ({str(b.callback_data) for row in kb.inline_keyboard for b in row}
+               if kb is not None and hasattr(kb, "inline_keyboard") else set())
     if "confirm_duplicate" in buttons:
         await run(callback="confirm_duplicate", label="«Записать ещё раз» чека без сладкого")
     check("чек без сладкого напоминания не получает",
