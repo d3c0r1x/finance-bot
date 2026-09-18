@@ -1,25 +1,27 @@
 """Импорт банковской выписки (PDF «Справка о движении средств»).
 
 Путь пользователя: /statement или любой PDF-документ → сводка с честной сверкой
-сумм против итогов банка → «Импортировать» → пакетная запись покупок и
-пополнений с категоризацией магазинов → итог и возможность отменить всё одним
-нажатием. Переводы себе и снятия в аналитику не попадают, повторная загрузка
-того же файла дублей не создаёт (сверка по дате/времени/сумме/описанию).
-Разобранная выписка живёт в FSM-состоянии между сводкой и подтверждением.
+сумм против итогов банка → «Импортировать» → аналитика по записанным операциям
+→ итог с возможностью отменить всё одним нажатием → уточняющие вопросы про
+«прочее»-магазины. Ответ человека становится категорией и понятным именем,
+правка ложится на все операции магазина и запоминается до следующей выписки.
+Переводы себе и снятия в аналитику не попадают, повторная загрузка того же
+файла дублей не создаёт (сверка по дате/времени/сумме/описанию).
 """
+import asyncio
 import json
 from pathlib import Path
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from aiogram.fsm.state import State, StatesGroup
-
-from ai.llm import classify_clarification, classify_merchants
+from ai.llm import classify_clarification, classify_merchants, guess_merchant
 from database.db import (add_transactions_bulk, delete_transactions_by_ids,
-                         get_transactions, update_bank_merchant)
+                         get_setting, get_transactions, set_setting,
+                         update_bank_merchant)
 from services.bank_statement import BankOp, Statement, parse_statement_pdf
 from utils.filters import AccessFilter
 from utils.formatting import format_amount, md_safe
@@ -59,9 +61,13 @@ def _existing_keys(rows: list[dict]) -> set[str]:
 
 
 def _split(ops: list[BankOp]) -> tuple[list[BankOp], list[BankOp], list[BankOp]]:
-    """(покупки, пополнения, прочее). Прочее — переводы и снятия, они не пишутся."""
+    """(покупки, пополнения, прочее). Прочее — переводы и снятия, они не пишутся.
+
+    Возвраты магазина (kind='refund') — тоже пополнения, но со знаком долга:
+    записываются отрицательным доходом, чтобы в отчётах гасили траты магазина.
+    """
     purchases = [o for o in ops if o.amount < 0 and o.kind == "purchase"]
-    incomes = [o for o in ops if o.amount > 0 and o.kind == "income"]
+    incomes = [o for o in ops if o.amount > 0 and o.kind in ("income", "refund")]
     taken = {id(o) for o in purchases} | {id(o) for o in incomes}
     return purchases, incomes, [o for o in ops if id(o) not in taken]
 
@@ -82,15 +88,22 @@ def _fmt_date(iso_date: str) -> str:
 def summary_text(st: Statement) -> str:
     """Сводка выписки с результатом сверки против итогов банка."""
     purchases, incomes, skipped = _split(st.ops)
+    refunds = [o for o in incomes if o.kind == "refund"]
     lines = ["🏦 **Выписка распознана**", ""]
     if st.period:
         start, end = st.period
         lines.append(f"📅 Период: **{_fmt_date(start)} — {_fmt_date(end)}** · операций: {len(st.ops)}")
     lines.append("")
     lines.append(f"🛒 Покупок: **{len(purchases)}** на {format_amount(_expense(purchases))}")
-    lines.append(f"💰 Пополнений: **{len(incomes)}** на {format_amount(_income(incomes))}")
+    income_line = f"💰 Пополнений: **{len(incomes) - len(refunds)}** на " \
+                  f"{format_amount(_income([o for o in incomes if o.kind == 'income']))}"
+    if refunds:
+        income_line += (f"\n↩️ Возвратов магазина: **{len(refunds)}** на "
+                        f"{format_amount(_income(refunds))} — запишу со знаком долга, "
+                        "чтобы в отчётах гасили траты")
+    lines.append(income_line)
     if skipped:
-        lines.append(f"↩️ Пропущу (переводы себе и снятия): {len(skipped)}")
+        lines.append(f"↪️ Пропущу (переводы себе и снятия): {len(skipped)}")
     lines.append("")
     if st.totals_found:
         if st.check_ok:
@@ -122,7 +135,6 @@ def _top_merchants(purchases: list[BankOp], limit: int = 8) -> list[tuple[str, f
 
 async def _cached_merchant_categories(new_merchants: set[str], user_id: int) -> dict[str, str]:
     """Категории магазинов с кэшем в базе: модель зовётся только для незнакомых."""
-    from database.db import get_setting, set_setting
     try:
         categories = dict(json.loads(await get_setting(
             BANK_MERCHANTS_KEY.format(user_id=user_id), "{}")) or {})
@@ -136,23 +148,43 @@ async def _cached_merchant_categories(new_merchants: set[str], user_id: int) -> 
     return categories
 
 
+def _remember_category(user_id: int, name: str, category: str) -> None:
+    """Пишет ответ человека в постоянный кэш категорий (fire-and-forget)."""
+    async def _save() -> None:
+        try:
+            cached = dict(json.loads(await get_setting(
+                BANK_MERCHANTS_KEY.format(user_id=user_id), "{}")) or {})
+        except Exception:
+            cached = {}
+        cached[name] = category
+        await set_setting(BANK_MERCHANTS_KEY.format(user_id=user_id),
+                          json.dumps(cached, ensure_ascii=False))
+    asyncio.create_task(_save())
+
+
 def _row(op: BankOp, category: str) -> tuple:
     """Строка bulk-вставки из операции. Дата — дата операции банка.
 
     subcategory пуста: её заполнит уточнение человека («снековый автомат»),
-    а название магазина и так живёт в описании операции.
+    а название магазина и так живёт в описании операции. Возврат магазина
+    записывается отрицательным доходом — гасит траты этого магазина в отчётах.
     """
-    return (op.amount, category, None, op.description[:100],
-            "expense" if op.amount < 0 else "income",
-            None, "bank", f"{op.date} {op.time}:00")
+    if op.kind == "refund":
+        amount = -abs(op.amount)
+        tx_type = "income"
+    else:
+        amount = op.amount
+        tx_type = "expense" if op.amount < 0 else "income"
+    return (amount, category, None, op.description[:100],
+            tx_type, None, "bank", f"{op.date} {op.time}:00")
 
 
 def _clarify_candidates(ops: list[BankOp], categories: dict[str, str],
                         limit: int = CLARIFY_MAX_QUESTIONS) -> list[tuple[str, float]]:
-    """Прочее»-магазины, о которых стоит спросить: топ по тратам, не меньше порога.
+    """«Прочее»-магазины, о которых стоит спросить: топ по тратам, не меньше порога.
 
     Возврат: (имя магазина, сумма трат). Сортировка по деньгам — вопрос про
-    «терминал, где ушло 12 000 ₽» полезнее вопроса про разовую мелочь.
+    «терминал, где ушло 12 000» полезнее вопроса про разовую мелочь.
     """
     unclear: dict[str, float] = {}
     for op in ops:
@@ -166,9 +198,9 @@ def _clarify_candidates(ops: list[BankOp], categories: dict[str, str],
     return ranked[:limit]
 
 
-def _analytics_text(st: Statement, categories: dict[str, str]) -> str:
-    """Аналитика по импорту: куда ушли деньги по категориям выписки."""
-    purchases, incomes, _ = _split(st.ops)
+def _analytics_text(ops: list[BankOp], categories: dict[str, str]) -> str:
+    """Аналитика по записанным операциям: куда ушли деньги по категориям."""
+    purchases, incomes, _ = _split(ops)
     total = _expense(purchases)
     by_category: dict[str, float] = {}
     unclear: dict[str, float] = {}
@@ -207,6 +239,16 @@ def _skip_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def _guess_kb(guesses: list[dict]) -> InlineKeyboardMarkup:
+    """Кнопки догадок модели под вопросом уточнения."""
+    rows = [[InlineKeyboardButton(text=f"{g['label']} ({g['category']})",
+                                  callback_data=f"bank_guess:{idx}")]
+            for idx, g in enumerate(guesses[:2])]
+    rows.append([InlineKeyboardButton(text="⏭ Пропустить", callback_data="bank_skip")])
+    rows.append([InlineKeyboardButton(text="🤫 Хватит вопросов", callback_data="bank_stop_questions")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _undo_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↩️ Отменить импорт", callback_data="bank_undo")],
@@ -232,9 +274,11 @@ async def bank_hint(callback: CallbackQuery) -> None:
         "Пришли PDF «Справка о движении средств» из приложения банка — сведу её с ботом.\n\n"
         "Что произойдёт:\n"
         "• покупки и пополнения запишутся с категориями магазинов;\n"
+        "• возвраты магазина погасят траты этого магазина;\n"
         "• переводы самому себе и снятия тратами не станут;\n"
         "• повторная загрузка того же файла дублей не создаст;\n"
-        "• после импорта всё можно отменить одной кнопкой.")
+        "• после импорта бот покажет аналитику и спросит про непонятные траты;\n"
+        "• всё можно отменить одной кнопкой.")
     await callback.answer()
 
 
@@ -319,46 +363,50 @@ async def bank_do(callback: CallbackQuery, state: FSMContext) -> None:
     rows = [_row(op, categories.get(op.merchant, "прочее") if op.kind == "purchase" else "прочее")
             for op in fresh]
     inserted = await add_transactions_bulk(user_id, rows)
+    # Отмена удаляет ровно эту пачку: ids храним там же, где и выписку — в состоянии.
     await state.update_data(bank_ids=inserted)
 
-    # Аналитика прежде итога: человек сначала видит, куда ушли деньги.
-    await status.edit_text(_analytics_text(st, categories))
+    await status.edit_text(_analytics_text(fresh, categories))
 
     spent = sum(abs(op.amount) for op in fresh if op.amount < 0)
     earned = sum(op.amount for op in fresh if op.amount > 0)
     n_exp = sum(1 for op in fresh if op.amount < 0)
-    n_inc = len(fresh) - n_exp
+    refunds = sum(1 for op in fresh if op.kind == "refund")
     lines = ["✅ **Импорт готов**", "",
-             f"🛒 Покупок: {n_exp} на {format_amount(round(spent, 2))}",
-             f"💰 Пополнений: {n_inc} на {format_amount(round(earned, 2))}",
-             "",
-             "Теперь отчёты, бюджет и совет ИИ видят полную картину — включая карту."]
+             f"🛒 Покупок: {n_exp} на {format_amount(round(spent, 2))}"]
+    if refunds:
+        lines.append(f"↩️ Возвратов магазина: {refunds} — погасят траты в отчётах")
+    lines += [f"💰 Пополнений: {len(fresh) - n_exp} на {format_amount(round(earned, 2))}",
+              "",
+              "Теперь отчёты, бюджет и совет ИИ видят полную картину — включая карту."]
     await callback.message.answer("\n".join(lines), reply_markup=_undo_kb())
 
     # Уточнения сразу после итога: вопросы идут только про «прочее», на которое
     # ушло заметно денег. Ответы перекраивают уже записанные строки и
     # запоминаются до следующей выписки.
-    await start_clarify(callback.message, state, st, categories, user_id)
+    await start_clarify(callback.message, state, fresh, categories, user_id)
 
 
 @router.callback_query(F.data == "bank_undo")
 async def bank_undo(callback: CallbackQuery, state: FSMContext) -> None:
-    """Отмена последнего импорта: удаляются только строки с source='bank'."""
+    """Отмена последнего импорта: удаляются только строки из FSM-состояния."""
     data = await state.get_data()
     ids = data.get("bank_ids") or []
-    removed = await delete_transactions_by_ids(callback.from_user.id, ids, source="bank")
+    if not ids:
+        await callback.answer("Удалять нечего", show_alert=True)
+        return
     await state.update_data(bank_ids=None)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.answer(f"Удалено операций: {removed}" if removed else "Удалять нечего",
-                          show_alert=True)
+    await callback.answer(f"Удалено операций: {len(ids)}", show_alert=True)
+    await delete_transactions_by_ids(callback.from_user.id, ids, source="bank")
 
 
 # ─── Уточняющие вопросы после импорта ────────────────────────────────────
 
 async def start_clarify(message: Message, state: FSMContext,
-                        st: Statement, categories: dict[str, str], user_id: int) -> None:
+                        fresh: list[BankOp], categories: dict[str, str], user_id: int) -> None:
     """Задаёт первый вопрос про «прочее»-магазин, если есть о чём спрашивать."""
-    candidates = _clarify_candidates(st.ops, categories)
+    candidates = _clarify_candidates(fresh, categories)
     if not candidates:
         return
     await state.update_data(bank_clarify=candidates, bank_clarify_cats=categories)
@@ -379,13 +427,35 @@ async def _ask_next(message: Message, state: FSMContext, user_id: int) -> None:
             "Ответь своими словами — например: «снековый автомат на работе», "
             "«доставка воды домой», «подписка на музыку».")
     await state.set_state(BankClarify.waiting_answer)
-    await message.answer(text, reply_markup=_skip_kb())
+    guesses = await guess_merchant(name)
+    if guesses:
+        await state.update_data(bank_guesses=guesses)
+        text += "\n\nМоя догадка — если верно, нажми:"
+        await message.answer(text, reply_markup=_guess_kb(guesses))
+    else:
+        await state.update_data(bank_guesses=None)
+        await message.answer(text, reply_markup=_skip_kb())
+
+
+def _apply_guess(user_id: int, name: str, guess: dict) -> None:
+    """Применяет догадку как обычный ответ: правка строк + кэш категорий."""
+    async def _apply() -> None:
+        await update_bank_merchant(user_id, name, guess["category"], guess["label"])
+        _remember_category(user_id, name, guess["category"])
+    asyncio.create_task(_apply())
+
+
+async def _advance(message: Message, state: FSMContext, user_id: int) -> None:
+    """Сдвигает очередь и показывает следующий вопрос."""
+    data = await state.get_data()
+    queue = data.get("bank_clarify") or []
+    await state.update_data(bank_clarify=queue[1:])
+    await _ask_next(message, state, user_id)
 
 
 @router.message(BankClarify.waiting_answer, F.text)
 async def clarify_answer(message: Message, state: FSMContext) -> None:
     """Ответ человека → категория и метка → правка записанных операций → следующий вопрос."""
-    from database.db import get_setting, set_setting
     user_id = message.from_user.id
     data = await state.get_data()
     queue = data.get("bank_clarify") or []
@@ -393,25 +463,15 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
         await state.set_state(None)
         await message.answer("Уточнения закончились.")
         return
-    name, amount = queue[0]
+    name, _amount = queue[0]
     parsed = await classify_clarification(message.text or "")
     category, label = parsed["category"], parsed["label"]
 
     updated = await update_bank_merchant(user_id, name, category, label or None)
     categories = dict(data.get("bank_clarify_cats") or {})
     categories[name] = category
-    await state.update_data(bank_clarify=queue[1:], bank_clarify_cats=categories)
-
-    # Ответ человека главнее догадки модели: пишем в постоянный кэш категорий,
-    # иначе следующая выписка снова спросила бы про тот же «TERMINAL 14».
-    try:
-        cached = dict(json.loads(await get_setting(
-            BANK_MERCHANTS_KEY.format(user_id=user_id), "{}")) or {})
-    except Exception:
-        cached = {}
-    cached[name] = category
-    await set_setting(BANK_MERCHANTS_KEY.format(user_id=user_id),
-                      json.dumps(cached, ensure_ascii=False))
+    await state.update_data(bank_clarify_cats=categories)
+    _remember_category(user_id, name, category)
 
     lines = [f"✅ {md_safe(name)} → **{category}**"
              + (f" / {md_safe(label)}" if label else "")]
@@ -419,17 +479,47 @@ async def clarify_answer(message: Message, state: FSMContext) -> None:
         lines.append(f"Записей поправлено: {updated}.")
     lines.append("Запомню это и для следующих выписок.")
     await message.answer("\n".join(lines))
-    await _ask_next(message, state, user_id)
+    await _advance(message, state, user_id)
+
+
+@router.callback_query(BankClarify.waiting_answer, F.data.startswith("bank_guess:"))
+async def clarify_guess(callback: CallbackQuery, state: FSMContext) -> None:
+    """Человек подтвердил догадку кнопкой — то же, что свободный ответ."""
+    user_id = callback.from_user.id
+    data = await state.get_data()
+    queue = data.get("bank_clarify") or []
+    guesses = data.get("bank_guesses") or []
+    if not queue or not guesses:
+        await callback.answer("Вопрос уже неактуален", show_alert=True)
+        return
+    try:
+        guess = guesses[int(callback.data.split(":", 1)[1])]
+    except (ValueError, IndexError):
+        await callback.answer("Не понял выбор", show_alert=True)
+        return
+    name, _amount = queue[0]
+
+    updated = await update_bank_merchant(user_id, name, guess["category"], guess["label"])
+    categories = dict(data.get("bank_clarify_cats") or {})
+    categories[name] = guess["category"]
+    await state.update_data(bank_clarify_cats=categories)
+    _remember_category(user_id, name, guess["category"])
+
+    lines = [f"✅ {md_safe(name)} → **{guess['category']}** / {md_safe(guess['label'])}"]
+    if updated:
+        lines.append(f"Записей поправлено: {updated}.")
+    lines.append("Запомню это и для следующих выписок.")
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("\n".join(lines))
+    await callback.answer()
+    await _advance(callback.message, state, user_id)
 
 
 @router.callback_query(BankClarify.waiting_answer, F.data == "bank_skip")
 async def clarify_skip(callback: CallbackQuery, state: FSMContext) -> None:
     """Пропуск одного вопроса: магазин остаётся в «прочее»."""
-    data = await state.get_data()
-    queue = data.get("bank_clarify") or []
-    await state.update_data(bank_clarify=queue[1:])
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _ask_next(callback.message, state, callback.from_user.id)
+    await _advance(callback.message, state, callback.from_user.id)
     await callback.answer()
 
 

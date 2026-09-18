@@ -853,3 +853,42 @@ async def classify_clarification(answer: str) -> dict:
                 "label": label}
     except Exception:
         return fallback
+
+
+# ─── Догадки-кнопки под вопросом уточнения ───────────────────────────────
+
+GUESS_SYSTEM = """Ты — ассистент личного бюджета. В банковской выписке встретился магазин
+с техническим названием. Дай до двух правдоподобных догадок, что это за место,
+ТОЛЬКО если название реально подсказывает (латиница — русская транслитерация).
+Только валидный JSON: {"догадки": [{"category": "<категория>", "label": "<1-3 слова>"}, ...]}
+Категория — одно из: еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее.
+Примеры: APTECHNOE UCHREZHD-IE -> аптека (здоровье); OST. DINAMO -> остановка (транспорт);
+KOFEYNYA -> кофейня (досуг). Если название ничего не подсказывает (номер точки, аббревиатура) —
+верни {"догадки": []}."""
+
+
+async def guess_merchant(name: str) -> list[dict]:
+    """Догадки, что за магазин: до двух (категория, метка) для кнопок под вопросом.
+
+    Без гипотезы возвращает пустой список — тогда под вопросом остаются только
+    свободный ответ и пропуск. Ошибки модели не ломают цикл уточнений.
+    """
+    try:
+        model = await resolve_model()
+        content = await asyncio.wait_for(
+            asyncio.to_thread(_chat, GUESS_SYSTEM, name[:120], model,
+                              json_mode=True, num_predict=150, temperature=0.0),
+            timeout=AI_PARSE_TIMEOUT,
+        )
+        raw = loads_lenient(content).get("догадки") or []
+        guesses = []
+        for item in (raw[:2] if isinstance(raw, list) else []):
+            if not isinstance(item, dict):
+                continue
+            category = str(item.get("category") or "").strip().lower()
+            label = str(item.get("label") or "").strip()[:30]
+            if category in VALID_CATEGORIES and label:
+                guesses.append({"category": category, "label": label})
+        return guesses
+    except Exception:
+        return []

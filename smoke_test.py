@@ -2177,7 +2177,7 @@ async def main():
     assert st.check_ok and st.expense_sum == 800.0 and st.income_sum == 1500.0
     st_broken = Statement(ops=ops, expected_expense=999.0, expected_income=0.0, totals_found=True)
     assert not st_broken.check_ok
-    purchases, incomes, skipped = bank_import._split(ops)
+    purchases, incomes, skipped = bank_import._split(st.ops)
     assert len(purchases) == 1 and len(incomes) == 1 and len(skipped) == 1
     text = bank_import.summary_text(st)
     assert "копейка" in text and "500" in text
@@ -2205,8 +2205,7 @@ async def main():
     cand = bank_import._clarify_candidates(clar_ops, {"PYATEROCHKA": "еда"})
     assert [n for n, _ in cand] == ["TERMINAL 14", "LIZONKA"], cand
     assert cand[0] == ("TERMINAL 14", 12000.0)  # сортировка по деньгам
-    analytics = bank_import._analytics_text(
-        Statement(ops=clar_ops, totals_found=False), {"PYATEROCHKA": "еда"})
+    analytics = bank_import._analytics_text(clar_ops, {"PYATEROCHKA": "еда"})
     assert "Аналитика выписки" in analytics and "TERMINAL 14" in analytics
     # Перекатегоризация правит записанные строки магазина и не задваивается.
     clar_row = bank_import._row(clar_ops[0], "прочее")
