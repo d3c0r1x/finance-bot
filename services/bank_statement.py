@@ -20,7 +20,7 @@ class BankOp:
     date: str            # ISO «2026-09-18»
     time: str            # «06:40»
     amount: float        # отрицательное — списание, положительное — пополнение
-    kind: str            # purchase, income, transfer_out, internal, withdrawal, fee
+    kind: str            # purchase, refund, income, transfer_out, internal, withdrawal, fee
     merchant: str        # вычищенное название магазина или «»
     description: str     # полное описание операции
     card: str            # последние 4 цифры карты или «»
@@ -102,8 +102,8 @@ def _total_for_label(flow: str, label: str) -> tuple[float, int] | None:
     match = re.search(rf"{_TOTAL_AMOUNT}\s*{escaped}", flow)
     if match:
         return _parse_ru_amount(match.group(1)), match.start()
-    # Запасной: метка, затем значение.
-    match = re.search(rf"{escaped}\s*{_TOTAL_AMOUNT}", flow)
+    # Запасной: метка, затем значение (встречается в выписках без двоеточия и с другим вёрсткой).
+    match = re.search(rf"{escaped[:-1]}\s*{_TOTAL_AMOUNT}", flow)
     if match:
         return _parse_ru_amount(match.group(1)), match.start()
     return None
@@ -126,6 +126,8 @@ def _classify(body: str, amount: float) -> str:
         return "internal"
     if "снятие наличных" in low or low.startswith("снятие"):
         return "withdrawal"
+    if "возврат" in low and amount > 0:
+        return "refund"  # магазин вернул деньги за покупку, а не «доход»
     if amount > 0:
         return "income"  # пополнения, кэшбэк, проценты
     if "оплата в " in low or "оплата услуг" in low or "оплата заказа" in low:
@@ -137,6 +139,11 @@ def _classify(body: str, amount: float) -> str:
 
 _CITY_LINE_RE = re.compile(r"\s+[A-ZА-Я][a-zа-я]{2,}\s+RUS$")
 
+# Банковские обёртки вокруг названия: платёжные шлюзы и лейблы карты.
+_MERCHANT_PREFIXES = (
+    "YM*", "Y.M*", "OZON*", "T-Bank.", "Т-Банк.", "PLATON*", "MTS*",
+)
+
 
 def _merchant(description: str) -> str:
     """Название магазина из первой строки описания: без города, страны и кода точки."""
@@ -145,10 +152,14 @@ def _merchant(description: str) -> str:
         if first.startswith(prefix):
             first = first[len(prefix):]
             break
+    for bank_prefix in _MERCHANT_PREFIXES:
+        if first.startswith(bank_prefix):
+            first = first[len(bank_prefix):]
+            break
     first = _CITY_LINE_RE.sub("", first)
     first = re.sub(r"\s+RUS$", "", first)
     first = re.sub(r"\s+\d{4,6}$", "", first)  # код магазина: PYATEROCHKA 20174
-    return first.strip(" .,")
+    return first.strip(" .,*—")
 
 
 def _clean_body(body: str, card: str) -> str:
@@ -179,6 +190,8 @@ def parse_statement_pdf(path: str | Path) -> Statement:
     """Разбирает PDF-выписку Т-Банка. Бросает ValueError, если операции не найдены."""
     reader = PdfReader(str(path))
     flow = "\n".join(page.extract_text() or "" for page in reader.pages)
+    # Неразрывные пробелы ломают регулярки и суммы — выравниваем на обычные до всего.
+    flow = flow.replace("\u00a0", " ").replace("\u202f", " ")
     if "движении средств" not in flow and "движения средств" not in flow:
         raise ValueError("Это не похоже на справку о движении средств")
 

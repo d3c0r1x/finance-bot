@@ -15,9 +15,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from ai.llm import classify_merchants
+from aiogram.fsm.state import State, StatesGroup
+
+from ai.llm import classify_clarification, classify_merchants
 from database.db import (add_transactions_bulk, delete_transactions_by_ids,
-                         get_transactions)
+                         get_transactions, update_bank_merchant)
 from services.bank_statement import BankOp, Statement, parse_statement_pdf
 from utils.filters import AccessFilter
 from utils.formatting import format_amount, md_safe
@@ -27,6 +29,16 @@ router.message.filter(AccessFilter())
 router.callback_query.filter(AccessFilter())
 
 BANK_MERCHANTS_KEY = "bank_merchants:{user_id}"  # кэш категорий магазинов между импортами
+
+# Порог вопроса: магазин с суммой меньше порога не заслуживает диалога —
+# вопросы должны стоить человеку меньше, чем польза от точной категории.
+CLARIFY_MIN_SPENT = 300.0
+CLARIFY_MAX_QUESTIONS = 6
+
+
+class BankClarify(StatesGroup):
+    """Цикл уточнений после импорта: бот спрашивает, человек отвечает."""
+    waiting_answer = State()
 
 
 def _op_key(op: BankOp) -> str:
@@ -125,16 +137,73 @@ async def _cached_merchant_categories(new_merchants: set[str], user_id: int) -> 
 
 
 def _row(op: BankOp, category: str) -> tuple:
-    """Строка bulk-вставки из операции. Дата — дата операции банка."""
-    return (op.amount, category, op.merchant or None, op.description[:100],
+    """Строка bulk-вставки из операции. Дата — дата операции банка.
+
+    subcategory пуста: её заполнит уточнение человека («снековый автомат»),
+    а название магазина и так живёт в описании операции.
+    """
+    return (op.amount, category, None, op.description[:100],
             "expense" if op.amount < 0 else "income",
             None, "bank", f"{op.date} {op.time}:00")
+
+
+def _clarify_candidates(ops: list[BankOp], categories: dict[str, str],
+                        limit: int = CLARIFY_MAX_QUESTIONS) -> list[tuple[str, float]]:
+    """Прочее»-магазины, о которых стоит спросить: топ по тратам, не меньше порога.
+
+    Возврат: (имя магазина, сумма трат). Сортировка по деньгам — вопрос про
+    «терминал, где ушло 12 000 ₽» полезнее вопроса про разовую мелочь.
+    """
+    unclear: dict[str, float] = {}
+    for op in ops:
+        if op.kind != "purchase" or not op.merchant:
+            continue
+        if categories.get(op.merchant, "прочее") != "прочее":
+            continue
+        unclear[op.merchant] = unclear.get(op.merchant, 0.0) - op.amount
+    ranked = sorted(((name, round(amount, 2)) for name, amount in unclear.items()
+                     if amount >= CLARIFY_MIN_SPENT), key=lambda kv: -kv[1])
+    return ranked[:limit]
+
+
+def _analytics_text(st: Statement, categories: dict[str, str]) -> str:
+    """Аналитика по импорту: куда ушли деньги по категориям выписки."""
+    purchases, incomes, _ = _split(st.ops)
+    total = _expense(purchases)
+    by_category: dict[str, float] = {}
+    unclear: dict[str, float] = {}
+    for op in purchases:
+        category = categories.get(op.merchant, "прочее") if op.merchant else "прочее"
+        amount = -op.amount
+        by_category[category] = by_category.get(category, 0.0) + amount
+        if category == "прочее" and op.merchant:
+            unclear[op.merchant] = unclear.get(op.merchant, 0.0) + amount
+    icons = {"еда": "🍕", "транспорт": "🚌", "жилье": "🏠", "досуг": "🎬", "одежда": "👕",
+             "здоровье": "💊", "работа": "💼", "техника": "🖥", "долги": "💳", "прочее": "❔"}
+    lines = ["📊 **Аналитика выписки**", ""]
+    for category, amount in sorted(by_category.items(), key=lambda kv: -kv[1]):
+        share = round(amount / total * 100) if total else 0
+        lines.append(f"{icons.get(category, '❔')} {category}: {format_amount(round(amount, 2))} · {share}%")
+    lines.append("")
+    lines.append(f"Всего покупок: {format_amount(round(total, 2))} за период выписки.")
+    if unclear:
+        top_unclear = sorted(unclear.items(), key=lambda kv: -kv[1])[:3]
+        names = ", ".join(md_safe(name) for name, _ in top_unclear)
+        lines.append(f"Больше всего неясного ушло на: {names}.")
+    return "\n".join(lines)
 
 
 def _confirm_kb(count: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"✅ Импортировать {count} операций", callback_data="bank_do")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="bank_cancel")],
+    ])
+
+
+def _skip_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ Пропустить", callback_data="bank_skip")],
+        [InlineKeyboardButton(text="🤫 Хватит вопросов", callback_data="bank_stop_questions")],
     ])
 
 
@@ -252,6 +321,9 @@ async def bank_do(callback: CallbackQuery, state: FSMContext) -> None:
     inserted = await add_transactions_bulk(user_id, rows)
     await state.update_data(bank_ids=inserted)
 
+    # Аналитика прежде итога: человек сначала видит, куда ушли деньги.
+    await status.edit_text(_analytics_text(st, categories))
+
     spent = sum(abs(op.amount) for op in fresh if op.amount < 0)
     earned = sum(op.amount for op in fresh if op.amount > 0)
     n_exp = sum(1 for op in fresh if op.amount < 0)
@@ -261,7 +333,12 @@ async def bank_do(callback: CallbackQuery, state: FSMContext) -> None:
              f"💰 Пополнений: {n_inc} на {format_amount(round(earned, 2))}",
              "",
              "Теперь отчёты, бюджет и совет ИИ видят полную картину — включая карту."]
-    await status.edit_text("\n".join(lines), reply_markup=_undo_kb())
+    await callback.message.answer("\n".join(lines), reply_markup=_undo_kb())
+
+    # Уточнения сразу после итога: вопросы идут только про «прочее», на которое
+    # ушло заметно денег. Ответы перекраивают уже записанные строки и
+    # запоминаются до следующей выписки.
+    await start_clarify(callback.message, state, st, categories, user_id)
 
 
 @router.callback_query(F.data == "bank_undo")
@@ -274,3 +351,94 @@ async def bank_undo(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_reply_markup(reply_markup=None)
     await callback.answer(f"Удалено операций: {removed}" if removed else "Удалять нечего",
                           show_alert=True)
+
+
+# ─── Уточняющие вопросы после импорта ────────────────────────────────────
+
+async def start_clarify(message: Message, state: FSMContext,
+                        st: Statement, categories: dict[str, str], user_id: int) -> None:
+    """Задаёт первый вопрос про «прочее»-магазин, если есть о чём спрашивать."""
+    candidates = _clarify_candidates(st.ops, categories)
+    if not candidates:
+        return
+    await state.update_data(bank_clarify=candidates, bank_clarify_cats=categories)
+    await _ask_next(message, state, user_id)
+
+
+async def _ask_next(message: Message, state: FSMContext, user_id: int) -> None:
+    """Показывает следующий вопрос или закрывает цикл."""
+    data = await state.get_data()
+    queue = data.get("bank_clarify") or []
+    if not queue:
+        await state.set_state(None)
+        await message.answer("👍 На этом всё. Категории записаны — отчёты уже точнее.")
+        return
+    name, amount = queue[0]
+    text = (f"❓ Что за траты **{md_safe(name)}**?\n"
+            f"За период выписки там ушло {format_amount(amount)}.\n\n"
+            "Ответь своими словами — например: «снековый автомат на работе», "
+            "«доставка воды домой», «подписка на музыку».")
+    await state.set_state(BankClarify.waiting_answer)
+    await message.answer(text, reply_markup=_skip_kb())
+
+
+@router.message(BankClarify.waiting_answer, F.text)
+async def clarify_answer(message: Message, state: FSMContext) -> None:
+    """Ответ человека → категория и метка → правка записанных операций → следующий вопрос."""
+    from database.db import get_setting, set_setting
+    user_id = message.from_user.id
+    data = await state.get_data()
+    queue = data.get("bank_clarify") or []
+    if not queue:
+        await state.set_state(None)
+        await message.answer("Уточнения закончились.")
+        return
+    name, amount = queue[0]
+    parsed = await classify_clarification(message.text or "")
+    category, label = parsed["category"], parsed["label"]
+
+    updated = await update_bank_merchant(user_id, name, category, label or None)
+    categories = dict(data.get("bank_clarify_cats") or {})
+    categories[name] = category
+    await state.update_data(bank_clarify=queue[1:], bank_clarify_cats=categories)
+
+    # Ответ человека главнее догадки модели: пишем в постоянный кэш категорий,
+    # иначе следующая выписка снова спросила бы про тот же «TERMINAL 14».
+    try:
+        cached = dict(json.loads(await get_setting(
+            BANK_MERCHANTS_KEY.format(user_id=user_id), "{}")) or {})
+    except Exception:
+        cached = {}
+    cached[name] = category
+    await set_setting(BANK_MERCHANTS_KEY.format(user_id=user_id),
+                      json.dumps(cached, ensure_ascii=False))
+
+    lines = [f"✅ {md_safe(name)} → **{category}**"
+             + (f" / {md_safe(label)}" if label else "")]
+    if updated:
+        lines.append(f"Записей поправлено: {updated}.")
+    lines.append("Запомню это и для следующих выписок.")
+    await message.answer("\n".join(lines))
+    await _ask_next(message, state, user_id)
+
+
+@router.callback_query(BankClarify.waiting_answer, F.data == "bank_skip")
+async def clarify_skip(callback: CallbackQuery, state: FSMContext) -> None:
+    """Пропуск одного вопроса: магазин остаётся в «прочее»."""
+    data = await state.get_data()
+    queue = data.get("bank_clarify") or []
+    await state.update_data(bank_clarify=queue[1:])
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await _ask_next(callback.message, state, callback.from_user.id)
+    await callback.answer()
+
+
+@router.callback_query(BankClarify.waiting_answer, F.data == "bank_stop_questions")
+async def clarify_stop(callback: CallbackQuery, state: FSMContext) -> None:
+    """Человек устал от вопросов: цикл закрывается, остальное живёт в «прочее»."""
+    await state.update_data(bank_clarify=[])
+    await state.set_state(None)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Хорошо, вопросы закрыл. Магазины остались в «прочее» — "
+                                  "уточнить можно позже через эту же выписку.")
+    await callback.answer()

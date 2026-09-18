@@ -816,3 +816,40 @@ async def classify_merchants(merchants: list[str]) -> dict[str, str]:
     for name in unknown:
         result.setdefault(name, "прочее")
     return result
+
+
+# ─── Уточнение загадочных магазинов выписки ответом человека ─────────────
+
+CLARIFY_SYSTEM = """Ты — ассистент личного бюджета. Пользователь объясняет, что это за магазин
+из банковской выписки (названия в выписке часто технические: «TERMINAL 14», «LIZONKA»).
+Только валидный JSON, без пояснений.
+
+Схема ответа: {"category": "<категория>", "label": "<короткое название для истории>"}
+Категория — строго одно из: еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее.
+Label — 1-3 слова, как этот магазин стоит называть в истории расходов: без номеров, городов и аббревиатур.
+Пример: «снековый автомат на работе» → {"category": "еда", "label": "Снековый автомат"}
+Пример: «доставка воды домой» → {"category": "жилье", "label": "Доставка воды"}
+Если объяснение не про магазин и не про трату — верни {"category": "прочее", "label": ""}."""
+
+
+async def classify_clarification(answer: str) -> dict:
+    """Ответ человека («снековый автомат на работе») → категория + метка для истории.
+
+    Ошибки модели и таймауты дают {"category": "прочее", "label": ""} — уточнение
+    всё равно сохраняется, просто без ярлыка.
+    """
+    fallback = {"category": "прочее", "label": ""}
+    try:
+        model = await resolve_model()
+        content = await asyncio.wait_for(
+            asyncio.to_thread(_chat, CLARIFY_SYSTEM, answer[:500], model,
+                              json_mode=True, num_predict=120, temperature=0.0),
+            timeout=AI_PARSE_TIMEOUT,
+        )
+        parsed = loads_lenient(content)
+        category = str(parsed.get("category") or "").strip().lower()
+        label = str(parsed.get("label") or "").strip()[:40]
+        return {"category": category if category in VALID_CATEGORIES else "прочее",
+                "label": label}
+    except Exception:
+        return fallback

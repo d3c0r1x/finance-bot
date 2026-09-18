@@ -146,6 +146,24 @@ async def find_similar_transaction(user_id: int, amount: float, tx_type: str = "
         return await cursor.fetchone()
 
 
+async def update_bank_merchant(user_id: int, merchant: str, category: str,
+                               subcategory: str | None = None) -> int:
+    """Перекатегоризует все записанные операции импорта одного магазина.
+
+    Уточнение человека («это снековый автомат на работе») правит не одну строку,
+    а всю историю этого магазина — иначе завтра та же покупка снова стала бы «прочее».
+    Возвращает число обновлённых записей.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """UPDATE transactions SET category = ?, subcategory = COALESCE(?, subcategory)
+               WHERE user_id = ? AND source = 'bank' AND subcategory IS NULL AND description LIKE ?""",
+            (category, subcategory, user_id, f"%{merchant}%"))
+        updated = cursor.rowcount or 0
+        await db.commit()
+    return updated
+
+
 async def delete_transactions_by_ids(user_id: int, ids: list[int],
                                      source: str | None = None) -> int:
     """Удаляет несколько записей владельца (отмена импорта выписки).

@@ -2149,8 +2149,11 @@ async def main():
     assert _classify("Внутренний перевод между своими счетами", -700) == "internal"
     assert _classify("Снятие наличных в банкомате", -3000) == "withdrawal"
     assert _classify("Перевод по номеру телефона", -200) == "transfer_out"
+    assert _classify("Возврат за покупку в DNS", 3000) == "refund"
+    assert _classify("Пополнение. СБП", 3000) == "income"  # «возврат» без возврата — не refund
     assert _merchant("Оплата в PYATEROCHKA 20174 Voronezh RUS") == "PYATEROCHKA"
-    assert _merchant("Оплата услуг T-Bank.T-Bundle") == "T-Bank.T-Bundle"
+    assert _merchant("Оплата услуг T-Bank.T-Bundle") == "T-Bundle"  # шлюз банка срезан
+    assert _merchant("Оплата в YM*sochipark") == "sochipark"  # платёжный шлюз срезан
     assert _card_from_body("Оплата в MAGNIT\nKrasnodar RUS\n1234") == "1234"
     assert _card_from_body("Оплата в MAGNIT\nKrasnodar RUS\n—") == ""
     assert "T-Bank.T-Bundle" in _clean_body("Оплата в T-Bank.T-\nBundle", "")
@@ -2190,7 +2193,33 @@ async def main():
     fresh = [o for o in ops[:1] if bank_import._op_key(o) not in bank_import._existing_keys(history)]
     assert not fresh, "дубль не отсекся"
     assert await database.delete_transactions_by_ids(verdict_user, ids, source="bank") == 1
-    print("✅ Импорт выписки: парсер, типы операций, классификация, дедуп, undo")
+    # Уточнения: кандидаты — только заметные «прочее», аналитика считает по категориям.
+    clar_ops = [BankOp(date="2026-09-01", time="10:00", amount=-12000.0, kind="purchase",
+                       merchant="TERMINAL 14", description="Оплата в TERMINAL 14", card=""),
+                BankOp(date="2026-09-02", time="11:00", amount=-3200.0, kind="purchase",
+                       merchant="LIZONKA", description="Оплата в LIZONKA", card=""),
+                BankOp(date="2026-09-03", time="12:00", amount=-500.0, kind="purchase",
+                       merchant="PYATEROCHKA", description="Оплата в PYATEROCHKA", card=""),
+                BankOp(date="2026-09-04", time="09:00", amount=3000.0, kind="refund",
+                       merchant="DNS", description="Возврат за покупку в DNS", card="")]
+    cand = bank_import._clarify_candidates(clar_ops, {"PYATEROCHKA": "еда"})
+    assert [n for n, _ in cand] == ["TERMINAL 14", "LIZONKA"], cand
+    assert cand[0] == ("TERMINAL 14", 12000.0)  # сортировка по деньгам
+    analytics = bank_import._analytics_text(
+        Statement(ops=clar_ops, totals_found=False), {"PYATEROCHKA": "еда"})
+    assert "Аналитика выписки" in analytics and "TERMINAL 14" in analytics
+    # Перекатегоризация правит записанные строки магазина и не задваивается.
+    clar_row = bank_import._row(clar_ops[0], "прочее")
+    clar_ids = await database.add_transactions_bulk(verdict_user, [clar_row])
+    fixed = await database.update_bank_merchant(verdict_user, "TERMINAL 14", "еда", "Снековый автомат")
+    assert fixed == 1, fixed
+    clar_rows = [dict(r) for r in await database.get_transactions(user_id=verdict_user, days=370)
+                 if "TERMINAL" in str(r["description"])]
+    assert clar_rows and clar_rows[0]["category"] == "еда"
+    assert clar_rows[0]["subcategory"] == "Снековый автомат"
+    assert await database.update_bank_merchant(verdict_user, "TERMINAL 14", "досуг", None) == 0
+    assert await database.delete_transactions_by_ids(verdict_user, clar_ids, source="bank") == 1
+    print("✅ Импорт выписки: парсер, типы операций, классификация, дедуп, undo, уточнения")
 
     print("\n🎉 Смоук-тест пройден полностью")
     if os.path.exists(_TEST_DB):
