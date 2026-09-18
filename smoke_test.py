@@ -1907,8 +1907,16 @@ async def main():
     print("✅ Планировщик ежедневной сводки и недельного дайджеста")
 
     # 9.1а Итог закончившейся цели уходит в сводку один раз — и только после удачной отправки.
-    from config import USERS as CONFIG_USERS
+    # Список пользователей планировщика берётся из config.USERS, а тот — из переменных
+    # окружения: без них (чистая машина CI) список пуст. Пользователей добавляем мутацией
+    # словаря, а не присваиванием: scheduler импортирует USERS по значению (from-import),
+    # и новый словарь он бы не увидел. Тест проверяет сводку, а не настройки машины.
+    import config as live_config
     from services import advice as advice_module
+    goal_user, second_user = 7001, 7002
+    live_config.USERS.clear()
+    live_config.USERS.update({goal_user: {"name": "Тест", "role": "owner"},
+                              second_user: {"name": "Второй", "role": "partner"}})
 
     class DigestBot:
         """Бот, который умеет отправлять сводку: одному из чатов отправка рвётся."""
@@ -1921,7 +1929,6 @@ async def main():
                 raise RuntimeError("сеть недоступна")
             self.sent.append((chat_id, text))
 
-    goal_user = next(iter(CONFIG_USERS))
     await advice_module.set_goal(goal_user, {"key": "тест-цель", "name": "Тестовый товар",
                                             "target": 1, "baseline": 3, "usual": 100.0})
     goal_key = advice_module.GOAL_KEY.format(user_id=goal_user)
