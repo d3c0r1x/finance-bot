@@ -479,9 +479,17 @@ async def main():
             return {row[0] for row in await cursor.fetchall()}
 
     before_ids = await receipt_ids()
+    # Предыдущие сценарии записали чеки на ту же сумму 589,80 за последние минуты, а окно
+    # дублей — 10 минут: на быстрой машине (CI) синтетический чек здесь честно встречает
+    # вопрос «уже записан?» и сценарий остаётся без чека с позициями. Подтверждаем дубль
+    # кнопкой — тот же путь, что у человека, не желающего отменять запись.
     session.photo_override = synthetic_receipt_bytes()
     await run(photo=True, label="продуктовый чек для напоминания")
     await run(callback="confirm_expense", label="запись продуктового чека")
+    kb = session.markup()
+    buttons = {str(b.callback_data) for row in kb.inline_keyboard for b in row} if kb else set()
+    if "confirm_duplicate" in buttons:
+        await run(callback="confirm_duplicate", label="«Записать ещё раз» — это новый чек")
 
     fresh_ids = (await receipt_ids()) - before_ids
     async with aiosqlite.connect(verdict_db) as db:
