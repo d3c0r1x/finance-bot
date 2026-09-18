@@ -106,32 +106,54 @@ async def all_profiles() -> dict[int, dict]:
     return profiles
 
 
-async def safe_to_spend(user_id: int, spent: float, income: float | None = None) -> str:
-    """«Безопасно тратить в день» с консервативным резервом.
+async def safe_to_spend(user_id: int, spent: float, income: float | None = None,
+                        today=None) -> str:
+    """«Безопасно тратить в день»: горизонт до зарплаты, минус уже обещанные списания.
 
-    Доход минус траты не весь доступен для спонтанных покупок: оставляем 10% запасом,
-    чтобы один крупный платёж не обнулил рекомендацию. Это не финансовая рекомендация,
-    а прозрачная арифметическая подсказка.
+    Считаем не «до конца месяца», а до ближайшей ожидаемой зарплаты: если доход приходит
+    пятого числа, конец месяца — произвольный срок, а после зарплаты деньги начинаются заново.
+    Дата берётся из истории повторяющихся поступлений.
+
+    Из свободных денег вычитаем то, что точно уйдёт до этого дня: подписки и прочие
+    регулярные платежи. Включить их в «можно тратить» — значит записать уже потраченное
+    в свободные деньги, и подсказка была бы неправдой. Плюс 10% резерва, чтобы один
+    крупный платёж не обнулил рекомендацию. Это не финансовая рекомендация, а прозрачная
+    арифметическая подсказка.
     """
     from datetime import datetime
 
+    from database.db import get_transactions
+    from services import mutelist, recurring
     from utils.formatting import format_amount, plural_ru
 
     plan = await planned_income(user_id)
     if not plan:
         return ""
-    now = datetime.now()
-    days_in_month = (now.replace(month=now.month % 12 + 1, day=1) - now.replace(day=1)).days \
-        if now.month != 12 else 31
-    days_left = max(1, days_in_month - now.day + 1)
+    now = today or datetime.now()
+    days_in_month = (now.replace(month=now.month % 12 + 1, day=1)
+                     - now.replace(day=1)).days if now.month != 12 else 31
+    rows = [dict(row) for row in await get_transactions(user_id=user_id, days=200)]
+    # Отключённые пользователем серии в расчёт не идут: он сказал «это не подписка»
+    subscriptions, _ = mutelist.split(recurring.find_recurring(rows, today=now),
+                                      await mutelist.muted_keys(user_id, mutelist.RECURRING))
+    salary = recurring.next_income(recurring.find_recurring(rows, today=now, tx_type="income"))
+
+    if salary:
+        horizon = max(1, salary["days_left"])
+        until = f"до зарплаты ({horizon} "
+    else:
+        horizon = max(1, days_in_month - now.day + 1)
+        until = f"до конца месяца ({horizon} "
+    promised = recurring.total_before(subscriptions, horizon)
     free = (income or plan) - spent
     reserve = max(0, (income or plan) * 0.10)
-    spendable = free - reserve
+    spendable = free - reserve - promised
+    details = (until + plural_ru(horizon, "день", "дня", "дней") + ")")
+    if promised:
+        details += f", подписки {format_amount(promised)}"
     if spendable <= 0:
-        return (f"🚨 До конца месяца {days_left} "
-                f"{plural_ru(days_left, 'день', 'дня', 'дней')}: свободные деньги ниже "
-                "10% резерва — лучше не добавлять необязательные траты.")
-    per_day = spendable / days_left
+        return (f"🚨 {details.capitalize()}: свободные деньги уже заняты резервом "
+                "и обещанными списаниями — лучше не добавлять необязательные траты.")
+    per_day = spendable / horizon
     return (f"🟢 Безопасно тратить: **{format_amount(round(per_day))}** в день "
-            f"({format_amount(round(spendable))} на {days_left} "
-            f"{plural_ru(days_left, 'день', 'дня', 'дней')}; резерв 10%)")
+            f"({format_amount(round(spendable))} свободно; {details}; резерв 10%)")

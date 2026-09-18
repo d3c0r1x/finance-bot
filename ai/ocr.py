@@ -20,7 +20,7 @@
 import asyncio
 import os
 import re
-import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import RECEIPTS_DIR, TESSERACT_CMD
 
@@ -47,12 +47,14 @@ MIN_WORD_CONFIDENCE = 25
 NUMERIC_WHITELIST = "0123456789.,"
 # максимальный размер картинки для OCR (больше — только медленнее, без пользы)
 MAX_OCR_SIDE = 3200
+# Сколько вариантов предобработки читать одновременно. Каждый вариант — отдельный процесс
+# tesseract, поэтому чтение идёт параллельно: пользователь ждёт самый долгий вариант,
+# а не сумму всех (раньше один чек занимал до 16 секунд).
+OCR_WORKERS = max(2, min(6, (os.cpu_count() or 4) // 2))
 # сколько последних токенов названия берём в позицию (остальное — шапка чека)
 NAME_TOKEN_LIMIT = 12
 # к какому размеру тянем фото перед чтением моделью зрения (мелкий шрифт читается точнее)
 VISION_TARGET_SIDE = 1800
-# бюджет времени на все варианты предобработки, чтобы ответ не ждался минуту
-MAX_OCR_SECONDS = 10.0
 
 # Хвост названия из колонок: «Пакет-майка 1x», «Товар 8», «Вино ix».
 TRAILING_QTY_RE = re.compile(r"(?:\d{1,3}|[lIi1])[xXх]|\d{1,2}$")
@@ -497,14 +499,15 @@ def _split_columns(row: dict, bands: dict) -> tuple[list[str], dict]:
 
 # ─── Перечитывание числовой ячейки ───────────────────────────────────────
 
-def _reread_cell(gray, word: dict, scale: int = 4) -> float | None:
-    """Читает ячейку крупным планом с whitelist цифр — уточняет спорные суммы."""
-    if gray is None or word is None:
+def _reread_region(gray, top: int, bottom: int, left: int, right: int,
+                   scale: int = 4) -> float | None:
+    """Перечитывает вырезанную область крупным планом: только цифры, одна строка (PSM 7)."""
+    if gray is None:
         return None
-    top = max(0, int(word["top"]) - 4)
-    bottom = min(gray.shape[0], int(word["bottom"]) + 4)
-    left = max(0, int(word["left"]) - 6)
-    right = min(gray.shape[1], int(word["right"]) + 6)
+    top = max(0, int(top))
+    bottom = min(gray.shape[0], int(bottom))
+    left = max(0, int(left))
+    right = min(gray.shape[1], int(right))
     if bottom - top < 5 or right - left < 6:
         return None
     try:
@@ -516,6 +519,34 @@ def _reread_cell(gray, word: dict, scale: int = 4) -> float | None:
     except Exception:
         return None
     return _money(text.replace(" ", ""))
+
+
+def _reread_cell(gray, word: dict, scale: int = 4) -> float | None:
+    """Читает ячейку найденного слова крупным планом — уточняет спорные суммы."""
+    if word is None:
+        return None
+    return _reread_region(gray, int(word["top"]) - 4, int(word["bottom"]) + 4,
+                          int(word["left"]) - 6, int(word["right"]) + 6, scale)
+
+
+def _read_sum_cell(gray, row: dict, bands: dict | None) -> float | None:
+    """Читает ячейку «итого» той строки, у которой OCR не прочитал сумму вообще.
+
+    Когда правая ячейка строки теряется целиком, остаток чека — догадка: под неё подходит
+    любая непрочитанная строка. Здесь мы вместо догадки смотрим в то самое место: строка
+    известна по вертикали, а колонка «итого» — по кластерам чисел. Читаем только цифрами,
+    поэтому ответ не может превратиться в название товара.
+    """
+    if gray is None or not bands or not row or not bands.get("sum"):
+        return None
+    column_left, column_right = bands["sum"]
+    # Ячейка бывает шире кластера: число могло уехать влево от общей правой границы.
+    left = int(column_left - (column_right - column_left) * 0.5)
+    right = int(column_right + 12)
+    value = _reread_region(gray, int(row["top"]) - 5, int(row["bottom"]) + 5, left, right)
+    if value is None or not 0 < value < 1_000_000:
+        return None
+    return round(value, 2)
 
 
 # ─── Сборка позиций ──────────────────────────────────────────────────────
@@ -581,7 +612,7 @@ def _row_amount(money: list[dict], quantity: float) -> tuple[float, float]:
     return price, price
 
 
-def _line_item_candidates(rows: list[dict]) -> list[dict]:
+def _line_item_candidates(rows: list[dict], bands: dict | None = None, gray=None) -> list[dict]:
     """Разбор строк кассового блока, когда детектор колонок склеил соседние строки.
 
     На чеках К&Б и похожих магазинов Tesseract иногда видит колонку «итого» отдельной
@@ -629,8 +660,14 @@ def _line_item_candidates(rows: list[dict]) -> list[dict]:
         price, total = _row_amount(money, quantity)
         # Позиция без прочитанной суммы тоже кандидат: её цену может доказать итог чека
         # (в чеках К&Б правая ячейка иногда теряется целиком: «#Пакет-майка 1x»).
-        candidates.append({"name": name, "qty": quantity, "price": price,
-                           "sum": total, "verified": bool(total and price)})
+        candidate = {"name": name, "qty": quantity, "price": price,
+                     "sum": total, "verified": bool(total and price)}
+        if not total:
+            # Суммы нет — сначала смотрим в саму ячейку и только потом доверяем остатку чека
+            hint = _read_sum_cell(gray, row, bands)
+            if hint:
+                candidate["sum_hint"] = hint
+        candidates.append(candidate)
     return candidates
 
 
@@ -822,15 +859,55 @@ def _explained(parsed: dict) -> bool:
     items = parsed.get("items") or []
     if not items or not parsed.get("total"):
         return False
-    if any(item.get("sum", 0) <= 0 or not _is_product_name(item["name"]) for item in items):
+    if any(item.get("sum", 0) <= 0 or not is_product_name(item["name"]) for item in items):
         return False
     return (_gap_to_total(parsed) or 0.0) <= 0.01
 
 
-def _is_product_name(name: str) -> bool:
-    """Название похоже на товар, а не на строку шапки или реквизитов."""
+def is_product_name(name: str) -> bool:
+    """Название похоже на товар, а не на строку шапки, итог или реквизиты.
+
+    Служебные строки проверяются отдельно: без этого разбор из одной строки «ИТОГ 128.85»
+    считался идеально сошедшимся — позиция есть, сумма равна итогу, а покупок в чеке нет.
+    """
     letters = sum(1 for char in name if char.isalpha())
-    return letters >= 3 and letters >= sum(1 for char in name if char.isdigit())
+    return (letters >= 3 and letters >= sum(1 for char in name if char.isdigit())
+            and not is_service_name(name))
+
+
+# Служебные слова чека: они стоят в начале строки и товаром не являются.
+# «карта» сюда не входит намеренно — «карта памяти SD» это настоящий товар.
+SERVICE_MARKERS = ("итог", "итого", "подыт", "всего", "сумма", "стоим", "кассир", "касса",
+                   "смена", "сдачи", "наличн", "безналич", "безнал", "оплат", "скидк", "ценник",
+                   "зачисл", "покупк", "бонус", "ндс", "офд", "эклз", "инн", "кпп", "документ",
+                   "претенз", "возврат", "телефон", "адрес")
+
+
+def looks_like_item_line(name: str) -> bool:
+    """Строка может быть позицией чека: в ней есть слово и нет служебных слов.
+
+    Мягче `is_product_name`: там строка защищает разбор от мусора, а здесь решается,
+    отдавать ли строке остаток чека. Обрывок названия («Пиво ЖИГУЛ.ФИРМ.») — всё ещё
+    позиция, а «MH —», «СДАЧА» и чистые цифры позицией не станут.
+    """
+    letters = sum(1 for char in (name or "") if char.isalpha())
+    return letters >= 3 and not is_service_name(name)
+
+
+def is_service_name(name: str) -> bool:
+    """Служебная строка чека («ИТОГ», «СДАЧА», «КАССА 2»), а не товар.
+
+    Мягче, чем `is_product_name`: название может быть обрывком OCR («Пиво ЖИГУЛ.ФИРМ.»),
+    но служебная строка никогда не станет позицией. Используется там, где строка несёт
+    настоящую сумму чека и отбрасывать её целиком дороже, чем показать криво.
+    """
+    normalized = " ".join((name or "").split()).lower()
+    if not normalized:
+        return True
+    if not any(char.isalpha() for char in normalized):
+        return True  # только цифры и пунктуация — это не название товара
+    head = " ".join(normalized.split()[:2])  # служебные слова стоят в начале строки
+    return any(marker in head for marker in SERVICE_MARKERS)
 
 
 def _name_quality(name: str) -> float:
@@ -854,7 +931,7 @@ def _score_table(parsed: dict) -> float:
     items = parsed.get("items") or []
     if not items:
         return -10.0
-    usable = [item for item in items if item.get("sum", 0) > 0 and _is_product_name(item["name"])]
+    usable = [item for item in items if item.get("sum", 0) > 0 and is_product_name(item["name"])]
     score = sum(_name_quality(item["name"]) for item in usable)
     score += sum(0.5 for item in usable if item.get("verified"))
     score += sum(1.0 for item in usable if item.get("corroborated"))
@@ -864,11 +941,17 @@ def _score_table(parsed: dict) -> float:
     total = parsed.get("total")
     if total:
         score += 6.0  # прочитанный итог — самый надёжный признак чека
-        gap = _gap_to_total(parsed) or 0.0
+        items_sum = sum(item.get("sum", 0) for item in items)
+        gap = abs(items_sum - total)
         if gap <= 0.01:
             score += 10.0
         else:
             score -= (gap / total) * 300.0  # каждый процент остатка — это −3 очка
+            # Позиции — подмножество чека: если они дороже итога, строку посчитали
+            # дважды или цифра пришла из соседней колонки. Такой разбор хуже того,
+            # который просто не дотягивает до итога.
+            if items_sum - total > max(2.0, total * 0.02):
+                score -= 20.0 + ((items_sum - total) / total) * 150.0
     return score
 
 
@@ -890,7 +973,7 @@ def _item_sets(rows: list[dict], bands: dict | None, gray) -> list[list[dict]]:
     plain = _verify_items(_fallback_items(rows), gray)
     if plain:
         sets.append(plain)
-    line_items = _line_item_candidates(rows)
+    line_items = _line_item_candidates(rows, bands, gray)
     if line_items:
         sets.append(_merge_line_candidates([line_items]))
     return sets
@@ -915,16 +998,27 @@ def _sparse_parses(image) -> list[dict]:
 
 
 def _fill_blank_item(items: list[dict], total: float | None) -> list[dict]:
-    """Единственная позиция с непрочитанной суммой забирает остаток чека.
+    """Закрывает непрочитанные суммы позиций: сначала измерением, потом арифметикой.
 
-    В чеках К&Б правая ячейка строки иногда теряется целиком («#Пакет-майка 1x»), но
-    название и напечатанный итог чека есть. Тогда разница «итог минус остальные
-    позиции» и есть цена этой строки — арифметика чека её подтверждает.
+    Порядок важен. `sum_hint` — это число, прочитанное крупным планом в самой ячейке
+    «итого»: это измерение, ему можно верить без дополнительных условий. Остаток чека
+    («итог минус остальные позиции») — уже догадка, поэтому он достаётся только одной
+    оставшейся строке и только если она похожа на товар: строка набирает весь остаток,
+    и выдумать позицию здесь дороже, чем не добрать цену.
     """
-    if not total or not items:
+    if not items:
         return items
+    for item in items:
+        hint = item.pop("sum_hint", None)
+        if item.get("sum", 0) <= 0 and hint and 0 < hint < 1_000_000:
+            item.update(sum=round(hint, 2), price=round(hint, 2), qty=1.0, verified=True,
+                        cell_read=True)
     blank = [item for item in items if item.get("sum", 0) <= 0]
-    if len(blank) != 1:
+    if not total or len(blank) != 1:
+        return items
+    # Остаток чека достаётся только строке, похожей на позицию: строка набирает весь
+    # остаток чека, поэтому здесь важнее не выдумать позицию, чем добрать цену.
+    if not looks_like_item_line(blank[0].get("name", "")):
         return items
     printed = round(sum(item["sum"] for item in items if item.get("sum", 0) > 0), 2)
     gap = round(total - printed, 2)
@@ -975,7 +1069,8 @@ def _close_receipt(parsed: dict, others: list[dict]) -> dict:
     loose[0]["sum"] = round(loose[0]["sum"] + gap, 2)
     if loose[0].get("price"):
         loose[0]["price"] = round(loose[0]["price"] + gap, 2)
-    loose[0]["recovered"] = True
+    # Цена не добрана, а поправлена: строку читали, но цифру пересчитали по остатку
+    loose[0]["corrected"] = True
     return parsed
 
 
@@ -992,6 +1087,140 @@ def _total_candidates(parsed_sets: list[dict]) -> list[float]:
     return totals
 
 
+EMPTY_PARSE = {"items": [], "total": None, "rows": [], "raw_text": "", "score": -10.0,
+               "columns": False, "has_total_row": False, "total_anchor": False, "variant": None}
+
+
+def _read_variants(variants: list) -> list[list[dict]]:
+    """Читает варианты предобработки параллельно и возвращает слова в исходном порядке.
+
+    tesseract — отдельный процесс, поэтому потоки здесь работают по-настоящему: один
+    вариант занимает ~3 с, а весь чек — столько, сколько самый долгий вариант. Порядок
+    результатов жёстко привязан к порядку вариантов: один и тот же чек всегда разбирается
+    одинаково, что важнее пары сэкономленных секунд (именно на этом ломался бюджет времени).
+    """
+    if not variants:
+        return []
+    results: list[list[dict]] = [[] for _ in variants]
+    workers = max(1, min(OCR_WORKERS, len(variants)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_ocr_words, image): index for index, image in enumerate(variants)}
+        for future in as_completed(futures):
+            try:
+                results[futures[future]] = future.result() or []
+            except pytesseract.TesseractError:
+                results[futures[future]] = []  # один битый вариант не должен рушить разбор
+    return results
+
+
+def _candidate_parses(image_path: str) -> tuple[list[dict], dict[int, object]]:
+    """Разборы всех вариантов предобработки одного фото и сами снимки этих вариантов.
+
+    Варианты читаются параллельно, а перебираются по порядку — от самого точного к шумным,
+    с досрочным выходом, когда разбор уже сошёлся с итогом чека.
+    """
+    parsed_sets: list[dict] = []
+    images: dict[int, object] = {}
+    variants = _preprocess_variants(image_path)
+    for variant, (image, words) in enumerate(zip(variants, _read_variants(variants))):
+        if not words:
+            continue
+        images[variant] = image
+        rows = _group_rows(words)
+        bands = _column_bands(rows, image.width)
+        gray = np.array(image.convert("L")) if OCR_AVAILABLE else None
+        raw_text = "\n".join(_row_text(row) for row in rows)
+        has_total_row = any(TOTAL_RE.search(_row_text(row).lower()) for row in rows)
+        total_anchor = any(TOTAL_RE.search(_row_text(row).lower())
+                           and any(value.get("money") for value in _row_values(row))
+                           for row in rows)
+        for items in _item_sets(rows, bands, gray):
+            parsed_sets.append({
+                "items": items, "total": _find_total(rows, bands), "rows": rows,
+                "raw_text": raw_text, "columns": bool(bands), "variant": variant,
+                "has_total_row": has_total_row, "total_anchor": total_anchor,
+            })
+        if any(_explained(parsed) for parsed in parsed_sets):
+            break  # разбор сошёлся с итогом и без мусорных строк — искать больше нечего
+    return parsed_sets, images
+
+
+def _evaluated_candidates(parsed_sets: list[dict]) -> list[dict]:
+    """Разборы, доведённые до сравнения: с итогом, добором остатка и оценкой.
+
+    Итог чека один на весь чек, а варианты читают его по-разному, поэтому перебираются
+    пары «итог × разбор»: побеждает то сочетание, в котором позиции объясняют итог без
+    остатка. Подтверждение позиций ищется в других проходах: тот же layout повторит ту же
+    ошибку, поэтому чужое мнение должно приходить от другого варианта обработки.
+    """
+    candidates: list[dict] = []
+    for total in _total_candidates(parsed_sets) or [None]:
+        for parsed in parsed_sets:
+            others = [item for other in parsed_sets
+                      if other.get("variant") != parsed.get("variant") for item in other["items"]]
+            candidate = {**parsed, "total": total or parsed.get("total")}
+            candidate["items"] = _fill_blank_item([dict(item) for item in parsed["items"]],
+                                                  candidate["total"])
+            _mark_corroborated(candidate, others)
+            _close_receipt(candidate, others)
+            _mark_corroborated(candidate, others)
+            candidate["score"] = _score_table(candidate)
+            candidates.append(candidate)
+    return candidates
+
+
+def _all_candidates(image_path: str) -> list[dict]:
+    """Разборы фото в том виде, в котором их сравнивает `_best_parse`.
+
+    Варианты предобработки дают разные разборы. Если ни один из них не объясняет итог
+    чека целиком, добавляются разреженные чтения (PSM 11) по первым вариантам: этот
+    layout добирает правые ячейки строк, которые обычный режим теряет целиком. Раньше
+    такой добор делался только для одного варианта, и если именно в нём терялся итог
+    чека, верное чтение терялось вместе с ним.
+    """
+    parsed_sets, images = _candidate_parses(image_path)
+    if not parsed_sets:
+        return []
+    rough = max(parsed_sets, key=lambda parsed: _score_table(
+        {**parsed, "items": _fill_blank_item([dict(item) for item in parsed["items"]],
+                                              parsed["total"])}))
+    if not _explained(rough) and rough.get("variant") in images:
+        parsed_sets.extend(_sparse_parses(images[rough["variant"]]))
+    return _evaluated_candidates(parsed_sets)
+
+
+def _pick_best(candidates: list[dict]) -> dict:
+    """Выбирает разбор: сначала тот, что объясняет итог чека целиком, потом — лучший по оценке.
+
+    Разбор, в котором позиции ровно равны напечатанному итогу, случайно не получается.
+    Поэтому он важнее любой «красивой» оценки: оценка сравнивает разборы с разными
+    прочитанными итогами, и разбор с занижённым итогом легко обгоняет полный — именно так
+    с чека пропадала половина покупок.
+    """
+    explained = [candidate for candidate in candidates if _explained(candidate)]
+    return max(explained or candidates, key=lambda candidate: candidate["score"])
+
+
+def parse_candidates(image_path: str, limit: int = 12) -> list[dict]:
+    """Конкурирующие разборы фото с их оценками — для отладки чтения.
+
+    Показывает, из чего выбирал `_best_parse` и почему проигравшие проиграли: строки,
+    прочитанный итог, сумму позиций и оценку. Нужен, когда чек прочитан странно.
+    """
+    candidates = sorted(_all_candidates(image_path), key=lambda candidate: -candidate["score"])
+    if not candidates:
+        return []
+    return [{
+        "variant": candidate.get("variant"),
+        "score": round(candidate["score"], 2),
+        "total": candidate.get("total"),
+        "items_total": round(sum(item["sum"] for item in candidate["items"]), 2),
+        "positions": len(candidate["items"]),
+        "columns": candidate.get("columns"),
+        "names": [item["name"] for item in candidate["items"]][:8],
+    } for candidate in candidates[:limit]]
+
+
 def _best_parse(image_path: str) -> dict:
     """Прогоняет варианты предобработки и выбирает разбор, объясняющий итог чека.
 
@@ -1000,69 +1229,10 @@ def _best_parse(image_path: str) -> dict:
     потерянный пакет и выдуманные суммы. Здесь сравниваются сами разборы вместе с
     итогом чека, и побеждает тот, у которого позиции сходятся с напечатанным итогом.
     """
-    empty = {"items": [], "total": None, "rows": [], "raw_text": "", "score": -10.0,
-             "columns": False, "has_total_row": False, "total_anchor": False, "variant": None}
-    parsed_sets: list[dict] = []
-    images: dict[int, object] = {}
-    started = time.monotonic()
-    for variant, image in enumerate(_preprocess_variants(image_path)):
-        if variant and time.monotonic() - started > MAX_OCR_SECONDS:
-            break  # хватит вариантов: ответ важнее десятых долей точности
-        try:
-            words = _ocr_words(image)
-        except pytesseract.TesseractError:
-            continue
-        if not words:
-            continue
-        images[variant] = image
-        rows = _group_rows(words)
-        bands = _column_bands(rows, image.width)
-        gray = np.array(image.convert("L")) if OCR_AVAILABLE else None
-        raw_text = "\n".join(_row_text(row) for row in rows)
-        for items in _item_sets(rows, bands, gray):
-            parsed_sets.append({
-                "items": items, "total": _find_total(rows, bands), "rows": rows,
-                "raw_text": raw_text, "columns": bool(bands), "variant": variant,
-                "has_total_row": any(TOTAL_RE.search(_row_text(row).lower()) for row in rows),
-                "total_anchor": any(TOTAL_RE.search(_row_text(row).lower())
-                                    and any(value.get("money") for value in _row_values(row))
-                                    for row in rows),
-            })
-        if any(_explained(parsed) for parsed in parsed_sets):
-            break  # разбор сошёлся с итогом и без мусорных строк — искать больше нечего
-    if not parsed_sets:
-        return empty
-
-    best = max(parsed_sets, key=lambda parsed: _score_table(
-        {**parsed, "items": _fill_blank_item([dict(item) for item in parsed["items"]],
-                                              parsed["total"])}))
-    if not _explained(best) and best.get("variant") in images:
-        # Разреженный layout читает правые ячейки, которые обычный режим пропустил целиком
-        parsed_sets.extend(_sparse_parses(images[best["variant"]]))
-
-    # Итог чека один на весь чек, поэтому перебираем разборы вместе с итогом: побеждает
-    # то сочетание, в котором позиции объясняют итог без остатка.
-    totals = _total_candidates(parsed_sets) or [None]
-    best_parsed, best_score = None, None
-    for total in totals:
-        for parsed in parsed_sets:
-            # подтверждение ищем в других проходах: тот же layout повторит ту же ошибку
-            others = [item for other in parsed_sets if other.get("variant") != parsed.get("variant")
-                      for item in other["items"]]
-            candidate = {**parsed, "total": total or parsed.get("total")}
-            candidate["items"] = _fill_blank_item([dict(item) for item in parsed["items"]],
-                                                  candidate["total"])
-            _mark_corroborated(candidate, others)
-            _close_receipt(candidate, others)
-            _mark_corroborated(candidate, others)
-            score = _score_table(candidate)
-            if best_score is None or score > best_score:
-                best_parsed, best_score = candidate, score
-    if best_parsed is None:
-        return empty
-
-    best = best_parsed
-    best["score"] = best_score
+    candidates = _all_candidates(image_path)
+    if not candidates:
+        return dict(EMPTY_PARSE)
+    best = _pick_best(candidates)
     best["items"] = [item for item in best["items"] if item.get("sum", 0) > 0]
     for item in best["items"]:
         item.pop("corroborated", None)

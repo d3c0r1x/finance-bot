@@ -1,9 +1,11 @@
 import os
+import re
+from collections import deque
 
 import aiosqlite
 from datetime import datetime, timedelta
 from config import DB_PATH, USERS
-from database.models import CREATE_TABLES, INITIAL_DEBTS
+from database.models import CREATE_TABLES, INITIAL_DEBTS, MIGRATIONS
 
 
 def _now_iso() -> str:
@@ -12,10 +14,24 @@ def _now_iso() -> str:
     return datetime.now().isoformat(sep=" ")
 
 
+async def _migrate(db) -> None:
+    """Дописывает колонки, появившиеся после первых выпусков базы.
+
+    Проверяется именно наличие колонки, а не версия схемы: база у каждого своя и создавалась
+    в разное время, а ALTER TABLE по существующей колонке роняет запуск бота.
+    """
+    for table, column, definition in MIGRATIONS:
+        cursor = await db.execute(f"PRAGMA table_info({table})")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if column not in columns:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
 async def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(CREATE_TABLES)
+        await _migrate(db)
         # Инициализация долгов, если таблица пустая
         cursor = await db.execute("SELECT COUNT(*) FROM debts")
         count = (await cursor.fetchone())[0]
@@ -93,6 +109,26 @@ async def get_recent_transactions(user_id: int, limit: int = 8):
         return await cursor.fetchall()
 
 
+async def find_similar_transaction(user_id: int, amount: float, tx_type: str = "expense",
+                                   minutes: int = 10):
+    """Недавняя запись того же типа на ту же сумму — вероятный повторный ввод чека.
+
+    Telegram может прислать одно фото дважды, и человек тоже часто отправляет чек повторно.
+    Без этой проверки расход считается дважды и бюджет врёт. Ищем только свои записи и
+    только за последние минуты: ту же покупку через день — это уже другая покупка.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        since = (datetime.now() - timedelta(minutes=minutes)).isoformat(sep=" ")
+        cursor = await db.execute(
+            "SELECT * FROM transactions WHERE user_id = ? AND tx_type = ? "
+            "AND ABS(amount - ?) < 0.01 AND created_at > ? "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (user_id, tx_type, float(amount or 0), since),
+        )
+        return await cursor.fetchone()
+
+
 async def delete_transaction(transaction_id: int, user_id: int) -> bool:
     """Удаляет запись владельца и её позиции; платёж по долгу возвращает остаток."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -132,6 +168,90 @@ async def get_receipt_items(transaction_id: int):
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM receipt_items WHERE transaction_id = ? ORDER BY id", (transaction_id,))
+        return await cursor.fetchall()
+
+
+def _receipt_name_key(name) -> str:
+    """Ключ позиции чека для сопоставления: регистр и разметка строки на кассе не важны."""
+    return re.sub(r"\W+", "", str(name or "").lower().replace("ё", "е"))
+
+
+async def save_receipt_verdicts(transaction_id: int, rows: list[tuple]) -> int:
+    """Сохраняет вердикты разбора корзины в позиции чека.
+
+    Строки сопоставляются с позициями по названию: и позиции, и вердикты описывают один чек,
+    но списки могут разойтись по длине (разбор пропустил позицию) — порядковое сопоставление
+    тогда уезжает: совет чипсов достаётся соседнему молоку. Одинаковые названия потребляются
+    по очереди, поэтому две одинаковые строки чека получают свои вердикты. Названию позиции
+    место всё равно есть: без совпадения вердикт не пишется, а не уезжает к соседней строке.
+    Строка — `(название, вердикт, совет)` и, если разбор знает происхождение, ещё и источник:
+    без него позиция сохранится как «без пометки», а не как правило или оценка по догадке.
+    """
+    if not rows:
+        return 0
+    queue: dict[str, deque] = {}
+    for row in rows:
+        queue.setdefault(_receipt_name_key(row[0]), deque()).append(row)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT id, name FROM receipt_items WHERE transaction_id = ? ORDER BY id",
+            (transaction_id,))
+        items = [(row[0], row[1]) for row in await cursor.fetchall()]
+        updates = []
+        for item_id, name in items:
+            waiting = queue.get(_receipt_name_key(name))
+            if not waiting:
+                continue
+            row = waiting.popleft()
+            updates.append((row[1], row[2], row[3] if len(row) > 3 else None, item_id))
+        if not updates:
+            return 0
+        await db.executemany(
+            "UPDATE receipt_items SET verdict = ?, advice = ?, verdict_source = ? WHERE id = ?",
+            updates)
+        await db.commit()
+        return len(updates)
+
+
+async def update_receipt_verdict(item_id: int, verdict: str, advice: str,
+                                 source: str | None = None) -> None:
+    """Переписывает вердикт одной позиции — при пересчёте старых разборов по нынешним правилам.
+
+    Пишется то же, что и при разборе, и источник ставится рядом: после пересчёта это уже
+    не догадка модели, а проверка по названию, и отчёт должен видеть это так же.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE receipt_items SET verdict = ?, advice = ?, verdict_source = ? WHERE id = ?",
+            (verdict, advice, source, item_id))
+        await db.commit()
+
+
+async def get_receipt_verdicts(user_id: int | None = None, limit: int = 2000,
+                               exclude_transaction_id: int | None = None):
+    """Позиции с сохранённым вердиктом: что советовал разбор корзины и сколько это стоило.
+
+    `exclude_transaction_id` нужен в момент записи чека: без него новый чек находил бы
+    сам себя в истории советов.
+    """
+    query = ("SELECT i.id AS item_id, i.name, i.sum, i.verdict, i.advice, i.verdict_source, "
+             "t.created_at, t.description "
+             "FROM receipt_items i JOIN transactions t ON t.id = i.transaction_id "
+             "WHERE t.tx_type = 'expense' AND i.verdict IS NOT NULL")
+    params: list = []
+    if user_id:
+        query += " AND t.user_id = ?"
+        params.append(user_id)
+    if exclude_transaction_id:
+        query += " AND t.id != ?"
+        params.append(exclude_transaction_id)
+    # Чеки — от свежих к старым, а позиции внутри чека — в своём порядке, как на кассе:
+    # иначе отчёт читался бы снизу вверх.
+    query += " ORDER BY t.created_at DESC, i.id LIMIT ?"
+    params.append(limit)
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(query, tuple(params))
         return await cursor.fetchall()
 
 
@@ -252,6 +372,13 @@ async def set_setting(key: str, value: str):
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+        await db.commit()
+
+
+async def delete_setting(key: str) -> None:
+    """Удаляет настройку — так личный лимит возвращается к семейному значению."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM settings WHERE key = ?", (key,))
         await db.commit()
 
 

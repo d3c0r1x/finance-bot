@@ -127,6 +127,10 @@ TESSERACT_CMD = _find_tesseract()
 # Час ежедневной сводки (локальное время)
 DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", "21"))
 
+# Недельный дайджест: воскресенье вечером (день недели 0 — понедельник, 6 — воскресенье)
+WEEKLY_REPORT_WEEKDAY = int(os.getenv("WEEKLY_REPORT_WEEKDAY", "6"))
+WEEKLY_REPORT_HOUR = int(os.getenv("WEEKLY_REPORT_HOUR", "19"))
+
 # Пути
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")

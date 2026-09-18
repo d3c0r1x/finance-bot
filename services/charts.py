@@ -188,6 +188,118 @@ def _period_card_sync(by_category: dict, total: float, days: int, title: str,
     return _render(figure)
 
 
+def _price_card_sync(name: str, points: list[tuple], usual: float | None,
+                     cheapest: float | None, cheapest_store: str | None) -> bytes:
+    """История цены одного товара: точки покупок, линия обычной цены и подписи."""
+    figure = _figure(f"Цена: {name}"[:58])
+    axes = figure.add_axes((0.07, 0.30, 0.89, 0.55))
+    _panel(axes)
+    values = [price for _, price, _ in points]
+    labels = [moment.strftime("%d.%m") for moment, _, _ in points]
+    span = (max(values) - min(values)) or (max(values) * 0.12) or 1
+    axes.plot(range(len(values)), values, color=ACCENT, linewidth=2, marker="o", markersize=7,
+              markerfacecolor=BACKGROUND, markeredgewidth=2)
+    axes.set_ylim(min(values) - span * 0.45, max(values) + span * 0.45)
+    axes.set_xlim(-0.4, max(len(values) - 0.6, 0.6))
+    if usual:
+        axes.axhline(usual, color=MUTED, linestyle="--", linewidth=1.2)
+        axes.text(len(values) - 0.55, usual, f"обычно {_money(usual)}  ", color=MUTED,
+                  fontsize=9, va="bottom", ha="right")
+    for index, (_, price, store) in enumerate(points):
+        axes.text(index, price + span * 0.12, _money(price), color=TEXT, fontsize=8.5,
+                  ha="center")
+        if store and len(points) <= 10:
+            axes.text(index, min(values) - span * 0.30, store[:16], color=MUTED, fontsize=7.5,
+                      ha="center")
+    axes.set_xticks(range(len(labels)), labels, color=MUTED, fontsize=8.5)
+    axes.set_yticks([])
+    axes.tick_params(length=0)
+    axes.grid(axis="y", color=GRID, linewidth=0.6, alpha=0.6)
+    axes.set_axisbelow(True)
+    figure.text(0.07, 0.16, f"Покупок: {len(points)} · обычная цена {_money(usual or 0)}",
+                color=TEXT, fontsize=10)
+    if cheapest:
+        text = f"Дешевле всего: {_money(cheapest)}"
+        if cheapest_store:
+            text += f" · {cheapest_store}"
+        figure.text(0.07, 0.075, text, color=ACCENT, fontsize=10)
+    return _render(figure)
+
+
+def _waste_trend_sync(weeks: list[dict], delta: float, noise: float) -> bytes:
+    """Доля необязательного по неделям: полоса на неделю, средняя за окно и вывод словами.
+
+    Процент без рублей не отвечает на вопрос «сколько это», поэтому суммы недели идут
+    второй строкой подписи под своим же столбиком — связь полосы и денег видна без легенды.
+    """
+    figure = _figure("Необязательные покупки по неделям")
+    axes = figure.add_axes((0.075, 0.36, 0.89, 0.48))
+    _panel(axes)
+    shares = [week["share"] * 100 for week in weeks]
+    average = sum(shares) / len(shares)
+    color = ACCENT if delta < -noise else DANGER if delta > noise else WARN
+    axes.bar(range(len(shares)), shares, width=0.5, color=color)
+    axes.axhline(average, color=MUTED, linestyle="--", linewidth=1.2)
+    axes.text(len(shares) - 0.45, average, f"в среднем {average:.0f}% ", color=MUTED,
+              fontsize=8.5, va="bottom", ha="right")
+    for index, share in enumerate(shares):
+        axes.text(index, share + 3, f"{share:.0f}%", color=TEXT, fontsize=9.5, ha="center")
+    axes.set_ylim(0, 108)
+    axes.set_xticks(range(len(weeks)),
+                    [f"{week['label']}\n{_money(week['waste'])} из {_money(week['total'])}"
+                     for week in weeks], color=MUTED, fontsize=8.5)
+    axes.set_yticks([])
+    axes.tick_params(length=0)
+    axes.grid(axis="y", color=GRID, linewidth=0.6, alpha=0.6)
+    axes.set_axisbelow(True)
+
+    movement = ("стало меньше" if delta < -noise else "стало больше" if delta > noise
+                else "без изменений")
+    figure.text(0.075, 0.245,
+                f"Доля необязательного: {weeks[0]['share'] * 100:.0f}% → "
+                f"{weeks[-1]['share'] * 100:.0f}% — {movement}", color=color, fontsize=11)
+    figure.text(0.075, 0.155, f"В неделю попадает только разобранный чек: позиций за окно — "
+                               f"{sum(week['count'] for week in weeks)}.", color=MUTED, fontsize=9)
+    figure.text(0.075, 0.075, "Процент считается по разбору корзины, а не по всей трате: "
+                               "полезное и нейтральное в необязательное не попадает.",
+                color=MUTED, fontsize=8.5)
+    return _render(figure)
+
+
+async def waste_trend_card(trend: dict | None) -> bytes | None:
+    """Картинка динамики необязательных покупок по неделям.
+
+    Нужны как минимум две недели с разобранными чеками: по одной точке тренда не бывает.
+    Порог «это движение или шум» берётся у советника — своей копии здесь нет.
+    """
+    weeks = (trend or {}).get("weeks") or []
+    if not CHARTS_AVAILABLE or len(weeks) < 2:
+        return None
+    from services.advice import TREND_NOISE
+
+    try:
+        return await asyncio.to_thread(_waste_trend_sync, weeks, trend["delta"], TREND_NOISE)
+    except Exception:  # pragma: no cover — картинка не должна ломать отчёт
+        return None
+
+
+async def price_card(name: str, points: list[tuple], usual: float | None = None,
+                     cheapest: float | None = None,
+                     cheapest_store: str | None = None) -> bytes | None:
+    """Картинка истории цены товара: точки покупок и линия обычной цены.
+
+    Нужны хотя бы две покупки: по одной точке график ничего не показывает, и вместо
+    пустой картинки честнее оставить текстовую карточку.
+    """
+    if not CHARTS_AVAILABLE or len(points or []) < 2:
+        return None
+    try:
+        return await asyncio.to_thread(_price_card_sync, name, points[-12:], usual, cheapest,
+                                       cheapest_store)
+    except Exception:  # pragma: no cover — картинка не должна ломать карточку товара
+        return None
+
+
 async def month_card(spending: dict, income: float, spent: float, total_limit: float,
                      forecast: float | None = None, title: str | None = None,
                      limits: dict | None = None) -> bytes | None:

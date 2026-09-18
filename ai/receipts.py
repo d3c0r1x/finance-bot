@@ -18,10 +18,10 @@ from difflib import SequenceMatcher
 
 from ai.llm import is_advice_filler, structure_receipt
 from ai.ocr import (extract_receipt_data, guess_category_from_items, guess_category_from_store,
-                    table_rows_text)
-from ai.vision import encoded_variants, read_receipt, resolve_vision_model
+                    looks_like_item_line, table_rows_text)
+from ai.vision import encoded_variants, read_receipt, resolve_vision_model, unload
 from config import VISION_SECOND_PASS, VISION_UNLOAD_CHAT
-from utils.formatting import format_amount, md_safe
+from utils.formatting import format_amount, md_safe, plural_ru
 
 LOW_QUALITY_HINT = (
     "Не смог уверенно прочитать чек. Сфотографируй его целиком, ровно и при хорошем свете — "
@@ -311,9 +311,12 @@ def _gap_fill(items: list[dict], ocr_items: list[dict], total: float) -> list[di
     gap = round(total - sum(item["sum"] for item in filled), 2)
     if gap <= max(3.0, total * 0.01):
         return filled
+    # Товаром считается только неслужебная строка: обрывок названия («Пиво ЖИГУЛ.ФИРМ.»)
+    # это всё ещё товар, а «СДАЧА», «ИТОГ» и чистые цифры — нет. Иначе недостачу закрывает
+    # служебная строка и в чеке появляется позиция, которой покупатель не покупал.
     unmatched = [other for other in ocr_items
-                 if other.get("sum") and not any(_same_item(item["name"], other["name"])
-                                                for item in filled)]
+                 if other.get("sum") and looks_like_item_line(other.get("name", ""))
+                 and not any(_same_item(item["name"], other["name"]) for item in filled)]
     if not unmatched:
         return filled
 
@@ -373,6 +376,22 @@ def _cross_check(items: list[dict], ocr_items: list[dict], total: float) -> list
     return _gap_fill(items, ocr_items, total)
 
 
+async def _release_vision(vision_model: str | None) -> None:
+    """Выгружает модель зрения, когда чтение чека закончено.
+
+    Симметрично выгрузке текстовой модели перед чтением: `read_receipt` освобождает VRAM
+    под зрение, здесь — обратно под разбор. Держать модель зрения в памяти нельзя: текстовая
+    тогда уезжает на CPU, и следующий разбор растягивается на минуты (по умолчанию модель
+    висит в памяти две минуты — ровно то окно, в котором обычный разбор успевает начаться).
+    """
+    if not (vision_model and VISION_UNLOAD_CHAT):
+        return
+    try:
+        await unload(vision_model)
+    except Exception:
+        pass  # модель выгрузится сама по keep_alive, разбор блокировать не должно
+
+
 async def _reload_text_model() -> None:
     """Возвращает текстовую модель в память после чтения чека моделью зрения."""
     from ai.llm import resolve_model
@@ -384,6 +403,17 @@ async def _reload_text_model() -> None:
             await warmup(model, "30m")
     except Exception:
         pass  # модель поднимется сама при следующем разборе
+
+
+async def _swap_models_back(vision_model: str | None, vision_read: bool) -> None:
+    """После чтения чека: выгружает зрение и возвращает текстовую модель — по порядку.
+
+    Обе операции в одной фоновой задаче, чтобы warmup не стартовал раньше выгрузки:
+    они меняют одну и ту же память, и одновременный запуск ломает обе.
+    """
+    await _release_vision(vision_model)
+    if vision_read:
+        await _reload_text_model()
 
 
 async def _read_with_vision(image_path: str, prepared: dict[str, str] | None) -> tuple[dict | None, int]:
@@ -462,10 +492,11 @@ async def parse_receipt(image_path: str) -> dict:
         result["category"] = vision.get("category")
         result["is_grocery"] = bool(vision.get("is_grocery"))
         result["leisure"] = bool(vision.get("leisure"))
-        # текстовая модель нужна для ответа на следующее сообщение, а с моделью зрения
-        # они вместе не влезают в VRAM — поднимаем её обратно в фоне
-        if VISION_UNLOAD_CHAT:
-            asyncio.create_task(_reload_text_model())
+
+    # Чтение закончено: сначала освобождаем VRAM, и только после выгрузки возвращаем
+    # текстовую модель — наоборот warmup убил бы только что выгружаемую модель.
+    if VISION_UNLOAD_CHAT:
+        asyncio.create_task(_swap_models_back(vision_model, bool(vision)))
 
     if not raw_text and not vision:
         return result
@@ -498,8 +529,12 @@ async def parse_receipt(image_path: str) -> dict:
     if result["store"] and not _looks_like_store(result["store"]):
         result["store"] = None
 
+    # Итог на чеке прочитать не удалось: показываем сумму позиций, но помечаем её как
+    # посчитанную, а не напечатанную кассой — иначе такая сумма выглядит как факт с чека.
+    result["total_estimated"] = False
     if result["total"] is None and result["items"]:
         result["total"] = round(sum(item["sum"] for item in result["items"]), 2)
+        result["total_estimated"] = True
     if not result["category"]:
         # Магазин может быть не распознан (логотип на фото размыт), а товары видно:
         # без этого фолбэка технический чек уезжал в «прочее».
@@ -521,6 +556,12 @@ async def parse_receipt(image_path: str) -> dict:
         result["items"] and result["total"]
         and abs(items_total - result["total"]) > max(3.0, result["total"] * 0.03)
     )
+    # Позиции дороже чека — самая опасная ошибка чтения: строка посчитана дважды или
+    # пришла из соседней колонки. Итог печатает касса, поэтому верим ему, а не им.
+    result["over_total"] = bool(
+        result["items"] and result["total"]
+        and items_total - result["total"] > max(3.0, result["total"] * 0.03)
+    )
     return result
 
 
@@ -534,28 +575,70 @@ def items_summary(items: list[dict], limit: int = 6) -> str:
     """Короткий список позиций для карточки чека."""
     lines = []
     for item in items[:limit]:
-        quantity = f"{item['qty']:.0f} × " if item.get("qty", 1) and item["qty"] != 1 else ""
+        quantity = f"{item.get('qty', 1):.0f} × " if item.get("qty", 1) > 1 else ""
         lines.append(f"   • {quantity}{item['name']} — {item['sum']:.0f} ₽")
     if len(items) > limit:
         lines.append(f"   … и ещё {len(items) - limit}")
     return "\n".join(lines)
 
 
-def items_list_text(items: list[dict], store: str = "") -> str:
-    """Полный список позиций чека (в виде карточки, эмодзи, суммы по-человечески)."""
+def item_origin(item: dict) -> str:
+    """Откуда взялась цифра позиции — видно в карточке, и это не всегда «прочитано».
+
+    agreed — ту же сумму прочитал другой проход OCR (два независимых чтения),
+    recovered — название прочитано с чека, а цену дал остаток чека,
+    corrected — цену прочитали, но пересчитали по остатку чека,
+    verified — арифметика строки сошлась (цена × количество = сумма),
+    read — цифра взята как есть.
+    """
+    if item.get("recovered"):
+        return "recovered"
+    if item.get("corrected"):
+        return "corrected"
+    if item.get("corroborated"):
+        return "agreed"
+    if item.get("verified"):
+        return "verified"
+    return "read"
+
+
+ITEM_MARKS = {"agreed": " ✅", "recovered": " ➕", "corrected": " ✏️"}
+
+
+def item_mark(item: dict) -> str:
+    """Пометка позиции в списке: ✅ — два чтения, ➕ — цена добрана, ✏️ — цена поправлена."""
+    origin = item_origin(item)
+    if origin in ITEM_MARKS:
+        return ITEM_MARKS[origin]
+    return "" if item.get("verified", True) else " ⚠️"
+
+
+def items_list_text(items: list[dict], store: str = "", receipt: dict | None = None) -> str:
+    """Полный список позиций чека (в виде карточки, эмодзи, суммы по-человечески).
+
+    `receipt` — весь разбор: из него берутся пометки «итог посчитан по позициям» и
+    «позиции дороже итога». Без этих пометок список читается как полностью надёжный,
+    а это не всегда так.
+    """
     if not items:
         return "В этом чеке позиции не распознаны."
     lines = [f"📋 **Позиции чека{' — ' + md_safe(store) if store else ''}**", ""]
     total = 0.0
     for index, item in enumerate(items, start=1):
-        quantity = f"{item['qty']:.0f} × " if item.get("qty", 1) and item["qty"] != 1 else ""
+        quantity = f"{item.get('qty', 1):.0f} × " if item.get("qty", 1) > 1 else ""
         price = (f" ({format_amount(item['price'])}/шт)"
                  if item.get("price") and item.get("qty", 1) > 1 else "")
-        mark = "" if item.get("verified", True) else " ⚠️"
         lines.append(f"{index}. {quantity}{md_safe(item['name'])}{price} — "
-                     f"**{format_amount(item['sum'])}**{mark}")
+                     f"**{format_amount(item['sum'])}**{item_mark(item)}")
         total += item["sum"]
     lines += ["", f"**Итого по позициям: {format_amount(total)}**"]
+    receipt = receipt or {}
+    if receipt.get("total_estimated"):
+        lines.append("ℹ️ Итог на чеке прочитать не удалось — это сумма по позициям.")
+    if receipt.get("over_total"):
+        lines.append("⚠️ Сумма позиций больше итога чека — часть цен прочитана дважды или неверно.")
+    if any(item_origin(item) in ("recovered", "corrected") for item in items):
+        lines.append("➖ Цены со значками добраны или поправлены по арифметике чека.")
     return "\n".join(lines)
 
 
@@ -606,6 +689,16 @@ PRODUCT_PRIORITY_MARKERS = (
     "слойк", "слоен", "пирог", "булоч", "хлеб", "молок", "сметан", "сыр", "творог",
     "йогурт", "кефир", "пельмен", "макарон", "корм", "проклад", "вода",
 )
+# Техника: редкая осознанная покупка, а не расходник и уж точно не упаковка. Модель любит
+# отправлять её в «лишнее» и называть упаковкой («БП Deepcool — одноразовая упаковка» на чеке
+# из ДНС) — это оценка не по данным: такой выбор делают осознанно и не каждый день.
+TECH_MARKERS = ("бп ", "блок питан", "корпус", "монитор", "ноутбук", "клавиатур", "мышь", "мышк",
+                "наушник", "телевизор", "смартфон", "телефон", "планшет", "принтер", "роутер",
+                "ssd", "hdd", "видеокарт", "процессор", "материнск", "флешк", "зарядк", "кабел",
+                "переходник", "колонк", "гарнитур", "powerbank", "павербанк")
+# Слова про упаковку в совете модели. Совет про упаковку уместен только у настоящей упаковки —
+# ровно то правило, из-за которого «колб.» больше не читается как пакет.
+PACKAGING_WORDS = ("упаковк", "пакет", "мешок", "одноразов", "тара")
 # Мелочи не по еде (заколки, игрушки): тоже «лишнее», но повод другой
 ACCESSORY_MARKERS = ("закол", "игрушк", "сувенир", "брелок", "наклейк", "погремушк")
 # Гигиена и бытовая химия: нужное, но не «полезное» и не «лишнее»
@@ -700,6 +793,11 @@ def apply_review_rules(analysis: dict | None, items: list[dict]) -> dict | None:
     if not analysis or not analysis.get("items"):
         return analysis
     verdicts = analysis["items"]
+    # Кто поставил вердикт — видно человеку: правило одинаково для одного и того же названия,
+    # а вердикт модели — это её оценка, и спорить стоит именно с ней. Заодно видно позиции,
+    # по которым модель промолчала: им досталось наше «нейтрально», а не её мнение.
+    model_said = set(verdicts)
+    by_rule: set[int] = set()
     curated: dict[int, tuple[str, str]] = {}
 
     for index, item in enumerate(items, start=1):
@@ -714,32 +812,54 @@ def apply_review_rules(analysis: dict | None, items: list[dict]) -> dict | None:
         if _hits(name, PRODUCT_PRIORITY_MARKERS):
             # Название явно является продуктом/непродовольственным расходником, но не
             # упаковкой. Модель не может отправить его в «лишнее» по своей фантазии.
+            # Правилом вердикт считается только там, где правило его и поставило: если
+            # модель сказала «нейтрально» про сыр, это её вердикт, а не наш.
             if _hits(name, ("колбас", "сервелат", "серв кар", "серв.кар", "сосиск", "ветчин",
                             "слойк", "слоен", "пирог", "булоч")):
+                by_rule.add(index)
                 entry["verdict"] = "нейтрально"
                 entry["reason"] = entry["note"] = ""
             elif _hits(name, ("корм", "проклад")):
+                by_rule.add(index)
                 entry["verdict"] = "нейтрально"
             elif verdict == "лишнее":
+                by_rule.add(index)
                 entry["verdict"] = "нейтрально"
             if entry["verdict"] == "нейтрально" and _hits(name, ("колбас", "сервелат", "сосиск", "ветчин")):
                 entry["reason"] = entry["note"] = ""
         elif _hits(name, JUNK_MARKERS):
+            by_rule.add(index)
             if verdict != "лишнее":
                 entry["verdict"] = "вредно"
             curated[index] = _advice_for(name, item.get("sum", 0), index)
+        elif _hits(name, TECH_MARKERS):
+            by_rule.add(index)
+            # Техника не бывает «лишней» и не бывает упаковкой: вердикт — нейтрально,
+            # а выдуманное обоснование модели стирается вместе с ним.
+            entry["verdict"] = "нейтрально"
+            entry["reason"] = entry["note"] = ""
         elif _hits(name, PACKAGING_MARKERS):
+            by_rule.add(index)
             entry["verdict"] = "лишнее"
             curated[index] = PACKAGING_ADVICE
         elif _hits(name, ACCESSORY_MARKERS):
+            by_rule.add(index)
             entry["verdict"] = "лишнее"
             curated[index] = ACCESSORY_ADVICE
         elif _hits(name, CARE_MARKERS) and verdict in ("полезно", "лишнее"):
+            by_rule.add(index)
             entry["verdict"] = "нейтрально"
             entry["reason"] = entry["note"] = ""
         elif verdict == "лишнее" and _hits(name, FOOD_MARKERS):
+            by_rule.add(index)
             # макароны, крупы, консервы — обычная еда, а не «ненужные перья»
             entry["verdict"] = "нейтрально"
+            entry["reason"] = entry["note"] = ""
+
+        # Последняя проверка на упаковку: если совет говорит про упаковку, а товар упаковкой
+        # не является — совет не относится к делу и убирается. Вердикт при этом не меняется.
+        advice_text = f"{entry.get('reason') or ''} {entry.get('note') or ''}".lower()
+        if _hits(advice_text, PACKAGING_WORDS) and not _hits(name, PACKAGING_MARKERS):
             entry["reason"] = entry["note"] = ""
 
     # Совет модели вычищаем, если он повторяется у разных товаров (— он ни о чём).
@@ -756,8 +876,10 @@ def apply_review_rules(analysis: dict | None, items: list[dict]) -> dict | None:
             verdicts[index]["reason"], verdicts[index]["note"] = _advice_for(
                 item.get("name", ""), item.get("sum", 0), index)
     _ensure_distinct_advice(verdicts)
-    for entry in verdicts.values():
+    for index, entry in verdicts.items():
         entry.pop("_name", None)
+        entry["source"] = ("rule" if index in by_rule
+                           else "model" if index in model_said else "default")
 
     # План — тоже часть ответа модели. Показываем только шаги, которые можно связать
     # с этой корзиной; это отсекает галлюцинации вроде «купить сахар», которого нет в чеке.
@@ -839,6 +961,56 @@ def _ensure_distinct_advice(verdicts: dict) -> None:
         previous_names.append(name)
 
 
+def sources_text(verdicts: dict, items: list[dict]) -> str:
+    """Кто поставил вердикты: проверка по названию (правила) или оценка модели.
+
+    Правило одинаково для одного и того же товара в любом чеке, а вердикт модели — это её
+    чтение названия, и ошибается она именно на сокращённых кассовых строках («колб.» как
+    пакет). Человеку важно знать, с чем спорить: с оценкой можно, с правилом обычно не в чем.
+    """
+    counts = {"rule": 0, "model": 0, "default": 0}
+    waste = {"rule": 0, "model": 0, "default": 0}
+    for index in range(1, len(items) + 1):
+        entry = verdicts.get(index) or {}
+        source = entry.get("source") if entry.get("source") in counts else "model"
+        counts[source] += 1
+        if entry.get("verdict") in ("вредно", "лишнее"):
+            waste[source] += 1
+    parts = []
+    if counts["rule"]:
+        parts.append(f"правила — {counts['rule']}")
+    if counts["model"]:
+        parts.append(f"оценка модели — {counts['model']}")
+    if counts["default"]:
+        parts.append(f"без вердикта, нейтрально по умолчанию — {counts['default']}")
+    if not parts:
+        return ""
+    lines = ["🧩 **Откуда вердикты:** " + ", ".join(parts) + "."]
+    guessed = waste["model"] + waste["default"]
+    if guessed and waste["rule"]:
+        lines.append(f"Из необязательных — {waste['rule']} по правилу и {guessed} по оценке "
+                     "модели: спорить есть с чем именно у вторых.")
+    elif guessed:
+        if guessed == 1:
+            lines.append("Единственный необязательный вердикт — оценка модели, а не проверка "
+                         "по названию: это её чтение кассовой строки, и оно ошибается.")
+        else:
+            words = plural_ru(guessed, "вердикт", "вердикта", "вердиктов")
+            lines.append(f"Все {guessed} необязательных {words} — оценка модели, а не проверка "
+                         "по названию: это её чтение кассовых строк, и оно ошибается.")
+    elif waste["rule"]:
+        if waste["rule"] == 1:
+            lines.append("Единственный необязательный вердикт — от правила: проверка по "
+                         "названию, а не оценка, и одинаково для одного и того же товара "
+                         "в любом чеке.")
+        else:
+            words = plural_ru(waste["rule"], "вердикт", "вердикта", "вердиктов")
+            lines.append(f"Все {waste['rule']} необязательных {words} поставлены правилами: "
+                         "проверка по названию, а не оценка — одинаково для одного и того же "
+                         "товара в любом чеке.")
+    return "\n".join(lines)
+
+
 def basket_text(analysis: dict | None, items: list[dict], store: str = "",
                 receipt_total: float | None = None) -> str:
     """Разбор корзины: подробный разбор по позициям, суммы и доли по группам, план."""
@@ -899,6 +1071,10 @@ def basket_text(analysis: dict | None, items: list[dict], store: str = "",
     # Сводку формируем сами: текст модели может назвать другую сумму («сэкономить 635»),
     # хотя сумма по вердиктам уже посчитана выше. Так пользователь видит только проверяемые
     # факты и конкретные позиции, а не красивую, но противоречивую фразу.
+    sources = sources_text(verdicts, items)
+    if sources:
+        lines += ["", sources]
+
     focus = [(item["name"], item["sum"]) for verdict in ("вредно", "лишнее")
              for _, item in group_of(verdict)]
     if focus:
@@ -909,6 +1085,44 @@ def basket_text(analysis: dict | None, items: list[dict], store: str = "",
     else:
         lines += ["", "📍 Явных необязательных покупок по текущим правилам не нашёл."]
     return "\n".join(lines).strip()
+
+
+def verdict_rows(analysis: dict | None, items: list[dict]) -> list[tuple]:
+    """Вердикт и совет по каждой позиции чека — в том же порядке, что и сами позиции.
+
+    Совет берётся той же функцией, что печатает разбор корзины, поэтому в сохранённой истории
+    видно ровно то, что человек прочитал в сообщении, а не пересказ. Вместе с вердиктом
+    сохраняется его происхождение: без него отчёт о необязательных покупках не смог бы
+    отличить проверку по названию от догадки модели.
+    """
+    if not analysis or not analysis.get("items"):
+        return []
+    verdicts = analysis["items"]
+    rows = []
+    for index, item in enumerate(items, start=1):
+        entry = verdicts.get(index)
+        if not entry:
+            continue
+        rows.append((item.get("name") or "Позиция",
+                     entry.get("verdict") or "нейтрально", _advice_line(entry),
+                     entry.get("source") or ""))
+    return rows
+
+
+def recalc_verdict(name: str, verdict: str, advice: str) -> dict:
+    """Что нынешние правила говорят про сохранённую позицию старого чека.
+
+    Пересчёт идёт по одному названию: чека и позиции давно нет под рукой, а правила работают
+    именно с названием. Сохранённый вердикт играет роль вердикта модели, и правила его
+    поправляют там, где покрывают товар: результат и говорит, что осталось от старого разбора.
+    """
+    analysis = apply_review_rules(
+        {"items": {1: {"verdict": verdict, "reason": advice, "note": ""}}},
+        [{"name": name, "sum": 0.0}])
+    entry = ((analysis or {}).get("items") or {}).get(1) or {}
+    return {"verdict": (entry.get("verdict") or verdict),
+            "advice": _advice_line(entry),
+            "source": entry.get("source") or ""}
 
 
 def leisure_hint(result: dict) -> str:

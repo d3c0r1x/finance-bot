@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS receipt_items (
     qty REAL DEFAULT 1,
     price REAL DEFAULT 0,
     sum REAL DEFAULT 0,
+    verdict TEXT,     -- полезно / нейтрально / вредно / лишнее: вердикт разбора корзины
+    advice TEXT,      -- совет по позиции из того же разбора
     FOREIGN KEY (transaction_id) REFERENCES transactions(id)
 );
 
@@ -48,6 +50,17 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT
 );
 """
+
+# Колонки, добавленные после первых выпусков базы. `CREATE TABLE IF NOT EXISTS` уже
+# созданную таблицу не меняет, поэтому новые колонки дописываются отдельно — иначе у людей
+# с существующей базой чеки перестали бы сохраняться вердикты.
+MIGRATIONS = (
+    ("receipt_items", "verdict", "TEXT"),
+    ("receipt_items", "advice", "TEXT"),
+    # Кто поставил вердикт: правило (проверка по названию) или оценка модели. Старые
+    # позиции остаются без пометки — и это честнее, чем задним числом назвать их правилом.
+    ("receipt_items", "verdict_source", "TEXT"),
+)
 
 # Категории, которые понимает бот (используются в бюджете и отчётах)
 CATEGORIES = ("еда", "транспорт", "жилье", "досуг", "одежда", "здоровье", "работа",

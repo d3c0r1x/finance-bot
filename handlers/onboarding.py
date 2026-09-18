@@ -72,7 +72,7 @@ async def _step_text(step: int, user_id: int) -> tuple[str, bool]:
             "Доход не указан, поэтому бюджет предложить не могу — лимиты можно "
             "задать вручную в ⚙️ Настройки → 🎯 Бюджет (0 — без лимита).\n\n"
             "Жми «Продолжить» — и я покажу главный экран." + SKIP_HINT, True)
-    limits, total = budget.proposal_for_income(income, await budget.get_limits())
+    limits, total = budget.proposal_for_income(income, await budget.get_limits(user_id))
     lines = ["🎯 **Предлагаю такой бюджет** (70% дохода, остальное — накопления):", ""]
     for category, value in sorted(limits.items(), key=lambda pair: -pair[1]):
         lines.append(f"• {get_category_emoji(category)} {category}: {format_amount(value)}")
@@ -129,8 +129,8 @@ async def onboarding_nav(callback: CallbackQuery, state: FSMContext):
     if action == "budget_apply":
         income = await profile.planned_income(user_id)
         if income:
-            limits, total = budget.proposal_for_income(income, await budget.get_limits())
-            await budget.apply_limits(limits, total)
+            limits, total = budget.proposal_for_income(income, await budget.get_limits(user_id))
+            await budget.apply_limits(limits, total, user_id)
         await callback.answer("Бюджет применён")
         await finish(callback.message, user_id, state)
         return
@@ -202,7 +202,7 @@ async def finish(message: Message, user_id: int, state: FSMContext, skipped: boo
     await profile.mark_onboarded(user_id)
     await state.clear()
     name = await profile.display_name(user_id)
-    limits = await budget.get_limits()
+    limits = await budget.get_limits(user_id)
     lines = ["🏁 **Готово, всё настроено.**", ""]
     if skipped:
         lines.append("Настройку можно пройти позже: ⚙️ Настройки → 🚀 Пройти настройку заново.")

@@ -1,12 +1,19 @@
 """Бюджет на месяц: лимиты по категориям и общий лимит.
 
-Стартовые значения берутся из config, дальше живут в таблице settings БД
-и правятся прямо в боте: ⚙️ Настройки → 🎯 Бюджет.
+Лимит живёт в таблице settings БД и бывает двух уровней:
+
+* **семейный** (`limit:еда`) — значение по умолчанию для всех, кто не задал своё;
+* **личный** (`limit:1111:еда`) — перекрывает семейный для конкретного пользователя.
+
+Траты всегда считаются по каждому отдельно, поэтому лимит по умолчанию тоже один на всех:
+если лимит менять только в одном месте, правка бюджета одним человеком незаметно меняла бы
+картину у второго. Личный лимит можно снять — тогда снова работает семейный.
 """
 from datetime import datetime
 
 from config import BUDGET_MIN_DAYS, MONTHLY_LIMITS, TOTAL_MONTHLY_LIMIT
-from database.db import get_all_settings, get_debts, get_transactions, set_setting
+from database.db import (delete_setting, get_all_settings, get_debts, get_transactions,
+                         set_setting)
 from database.models import CATEGORIES
 from utils.formatting import month_name_ru
 
@@ -15,8 +22,9 @@ DEFAULT_LIMITS = dict(MONTHLY_LIMITS)
 DEFAULT_TOTAL = float(TOTAL_MONTHLY_LIMIT)
 
 
-def _key(category: str) -> str:
-    return f"limit:{category}"
+def _key(category: str, user_id: int | None = None) -> str:
+    """Ключ лимита: личный — с id пользователя, семейный — без него."""
+    return f"limit:{user_id}:{category}" if user_id else f"limit:{category}"
 
 
 def _to_number(value) -> float | None:
@@ -27,44 +35,65 @@ def _to_number(value) -> float | None:
     return number if 0 <= number < 100_000_000 else None
 
 
-async def get_limits() -> dict[str, float]:
-    """Лимиты по категориям: значения из БД, остальное — из config."""
+async def get_limits(user_id: int | None = None) -> dict[str, float]:
+    """Лимиты по категориям пользователя: его личные поверх семейных, остальное — из config."""
     stored = await get_all_settings()
     limits = dict(DEFAULT_LIMITS)
-    for category in CATEGORIES:
-        value = _to_number(stored.get(_key(category)))
+    sources = [_key(category) for category in CATEGORIES]
+    if user_id:
+        # личные значения читаем последними: они перекрывают семейные
+        sources += [_key(category, user_id) for category in CATEGORIES]
+    for source in sources:
+        value = _to_number(stored.get(source))
         if value is not None:
-            limits[category] = value
+            limits[source.rsplit(":", 1)[1]] = value
     return limits
 
 
-async def get_total_limit() -> float:
+async def get_total_limit(user_id: int | None = None) -> float:
     stored = await get_all_settings()
-    value = _to_number(stored.get(TOTAL_KEY))
-    return DEFAULT_TOTAL if value is None else value
+    for key in ([_key("total", user_id)] if user_id else []) + [TOTAL_KEY]:
+        value = _to_number(stored.get(key))
+        if value is not None:
+            return value
+    return DEFAULT_TOTAL
 
 
-async def set_limit(category: str, value: float) -> None:
+async def own_limits(user_id: int | None) -> bool:
+    """Задал ли пользователь свои лимиты — иначе интерфейс должен говорить «семейные»."""
+    if not user_id:
+        return False
+    stored = await get_all_settings()
+    return any(_to_number(stored.get(_key(category, user_id))) is not None
+               for category in list(CATEGORIES) + ["total"])
+
+
+async def set_limit(category: str, value: float, user_id: int | None = None) -> None:
     if category not in CATEGORIES:
         raise ValueError(f"Неизвестная категория: {category}")
-    await set_setting(_key(category), str(round(float(value), 2)))
+    await set_setting(_key(category, user_id), str(round(float(value), 2)))
 
 
-async def set_total_limit(value: float) -> None:
-    await set_setting(TOTAL_KEY, str(round(float(value), 2)))
+async def set_total_limit(value: float, user_id: int | None = None) -> None:
+    await set_setting(_key("total", user_id), str(round(float(value), 2)))
 
 
-async def apply_limits(limits: dict[str, float], total: float | None = None) -> None:
-    """Применяет набор лимитов (например, предложенных ИИ)."""
+async def apply_limits(limits: dict[str, float], total: float | None = None,
+                       user_id: int | None = None) -> None:
+    """Применяет набор лимитов (например, предложенных ИИ) конкретному пользователю."""
     for category, value in limits.items():
         if category in CATEGORIES:
-            await set_limit(category, value)
+            await set_limit(category, value, user_id)
     if total:
-        await set_total_limit(total)
+        await set_total_limit(total, user_id)
 
 
-async def reset_limits() -> None:
-    """Возвращает стартовые значения из config."""
+async def reset_limits(user_id: int | None = None) -> None:
+    """Сбрасывает лимиты: личные — к семейным, семейные — к значениям из config."""
+    if user_id:
+        for category in list(CATEGORIES) + ["total"]:
+            await delete_setting(_key(category, user_id))
+        return
     for category in CATEGORIES:
         await set_setting(_key(category), str(DEFAULT_LIMITS.get(category, 0)))
     await set_setting(TOTAL_KEY, str(DEFAULT_TOTAL))
@@ -87,10 +116,15 @@ def proposal_for_income(income: float, current: dict[str, float] | None = None,
     return limits, float(total)
 
 
-async def history_summary(months: int = 2) -> tuple[str, int]:
-    """(текст со статистикой для ИИ, сколько дней истории есть в базе)."""
+async def history_summary(user_id: int | None = None, months: int = 2) -> tuple[str, int]:
+    """(текст со статистикой для ИИ, сколько дней истории есть в базе).
+
+    История обязательно одного пользователя: предложение бюджета строится по его тратам,
+    а без `user_id` в контекст ИИ попадали траты всех — это и неверный бюджет, и утечка
+    чужих сумм в ответ.
+    """
     days = months * 30
-    transactions = await get_transactions(days=days)
+    transactions = await get_transactions(user_id=user_id, days=days)
     if not transactions:
         return "", 0
 
@@ -122,8 +156,8 @@ async def history_summary(months: int = 2) -> tuple[str, int]:
         income = income_by_month.get(month, 0)
         lines.append(f"- {month}: {categories}" + (f"; доход {income:.0f}" if income else ""))
 
-    limits = await get_limits()
-    total_limit = await get_total_limit()
+    limits = await get_limits(user_id)
+    total_limit = await get_total_limit(user_id)
     lines.append("")
     lines.append("Текущие лимиты: " + ", ".join(f"{category}: {value:.0f}" for category, value
                                                      in limits.items() if value) + f"; всего {total_limit:.0f}")

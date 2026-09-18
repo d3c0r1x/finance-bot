@@ -7,14 +7,15 @@ from aiogram.types import CallbackQuery, MenuButtonCommands, Message
 
 from config import HIDE_MENU_BUTTON
 from database.db import (delete_transaction, ensure_user, get_debts, get_month_income,
-                         get_monthly_spending, get_recent_transactions, get_total_spent_this_month,
-                         has_transactions)
+                         get_monthly_spending, get_recent_transactions,
+                         get_total_spent_this_month, has_transactions)
 from handlers.debts import build_debts_overview
 from handlers.expenses import TEXT_HINT, parse_free_text
 from keyboards.main_menu_kb import (get_debts_kb, get_history_kb, get_main_menu_inline_kb,
                                    get_main_menu_kb, get_report_kb)
 from services import budget, profile
 from services.analytics import budget_pace
+from services.forecast import food_week_line
 from utils.filters import AccessFilter
 from utils.formatting import format_amount, get_category_emoji, month_name_ru, progress_bar
 
@@ -27,16 +28,20 @@ HELP_TEXT = (
     "• ✍️ **Траты** — просто напиши: «Заправка 2000», «Пятёрочка 3450,50»\n"
     "• 📷 **Чек** — пришли фото: распознаю магазин, сумму и все позиции;\n"
     "   для продуктового чека ещё и разберу корзину\n"
-    "• 🎯 **Бюджет** — лимиты правятся в ⚙️ Настройки, ИИ предложит бюджет по истории\n"
+    "• 🎯 **Бюджет** — свои лимиты задаются в ⚙️ Настройки (у каждого они свои),\n"
+    "   ИИ предложит бюджет по твоей истории трат\n"
     "• 💰 **Доход** — «Зарплата 150000»\n"
     "• 💳 **Платёж по кредиту** — «Платёж Т-Банк 3000»\n"
     "• 📊 **Отчёты** — месяц, неделя, 90 дней, совместный\n"
+    "• 🔁 **Регулярные платежи** — подписки, найденные по твоей истории, и что списывается на днях\n"
     "• 📈 **Диаграмма** — куда ушёл месяц, картинкой\n"
     "• 💳 **Долги** — остатки, платежи, прогноз погашения\n"
     "• 🕘 **История** — последние записи и быстрый контроль расходов\n"
     "• ↩️ **Отменить последнюю** — удалить ошибочную последнюю запись и вернуть платёж по кредиту\n"
+    "• 🔍 **Цена товара** — «/price молоко»: обычная цена по твоим чекам, история покупок, где было дешевле и не пора ли брать снова\n"
+    "• 🛒 **Список покупок** — что пора взять, судя по ритму твоих чеков\n"
     "• 🖥 **Панель** — база, чеки, лимиты и выгрузка CSV в panel.py на компьютере\n\n"
-    "Команды: /start — меню, /menu — кнопки, /help — эта справка.\n"
+    "Команды: /start — меню, /menu — кнопки, /price — цена товара, /help — эта справка.\n"
     "Перед сохранением траты всегда показываю карточку — можно исправить сумму и категорию."
 )
 
@@ -47,7 +52,8 @@ async def build_dashboard(name: str, user_id: int | None = None) -> str:
     spending = await get_monthly_spending(user_id)
     income = await get_month_income(user_id)
     debts = await get_debts()
-    total_limit = await budget.get_total_limit()
+    # Лимит — личный: траты в сводке тоже личные, иначе проценты считались бы от чужого бюджета
+    total_limit = await budget.get_total_limit(user_id)
 
     percent = min(100, int((total / total_limit) * 100)) if total_limit else 0
     lines = [
@@ -66,6 +72,11 @@ async def build_dashboard(name: str, user_id: int | None = None) -> str:
         debt_total = sum(d["current_amount"] for d in debts)
         lines.append(f"💳 Долги: {format_amount(debt_total)}")
     if user_id is not None:
+        # Продукты — самая частая трата недели, и следить за ней удобно прямо на входе.
+        # Запрос узкий (только семь дней), чтобы главный экран не тормозил.
+        food = await food_week_line(user_id)
+        if food:
+            lines.append(food)
         # «безопасно тратить в день» — привычка из приложений-конкурентов
         safe = await profile.safe_to_spend(user_id, total, income)
         if safe:
@@ -197,7 +208,7 @@ async def repeat_transaction(callback: CallbackQuery, state: FSMContext):
     await state.update_data(parsed=parsed, source="repeat")
     from handlers.expenses import ExpenseStates, _card_keyboard, _card_text
     spending = await get_monthly_spending(callback.from_user.id)
-    limits = await budget.get_limits()
+    limits = await budget.get_limits(callback.from_user.id)
     await state.set_state(ExpenseStates.waiting_for_confirmation)
     await callback.message.answer(
         "🔁 **Повторяю прошлую трату**\n\n" +

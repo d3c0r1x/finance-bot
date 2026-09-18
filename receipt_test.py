@@ -37,18 +37,14 @@ GROCERY_LINES = [
 def make_grocery_receipt(path: str) -> bool:
     """Рисует простой продуктовый чек в PNG (моноширинный шрифт с кириллицей)."""
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
     except ImportError:
         return False
 
-    font = None
-    for candidate in (r"C:\Windows\Fonts\consola.ttf", r"C:\Windows\Fonts\lucon.ttf",
-                      r"C:\Windows\Fonts\arial.ttf"):
-        if os.path.isfile(candidate):
-            font = ImageFont.truetype(candidate, 30)
-            break
+    from utils.fonts import mono_font
+    font = mono_font(30, fallback=False)
     if font is None:
-        return False
+        return False  # без моноширинного шрифта чек рисовать нечем — тест пропускается
 
     width, line_height = 640, 42
     height = line_height * (len(GROCERY_LINES) + 4)
@@ -120,7 +116,7 @@ async def main():
         entry = dns if dns and sample_photos(dns)[0] == photo else {}
         print("\n— Чек электроники —")
         receipt = await parse_receipt(photo)
-        print(items_list_text(receipt["items"], receipt.get("store") or ""))
+        print(items_list_text(receipt["items"], receipt.get("store") or "", receipt))
         check_sample("сумма чека распознана", entry, "total",
                      lambda expected: bool(receipt["total"] and abs(receipt["total"] - expected) < 1),
                      f"total={receipt['total']}")
@@ -159,7 +155,7 @@ async def main():
     for photo in (sample_photos(grocery) if grocery else []):
         print("\n— Реальный продуктовый чек (колоночный разбор) —")
         receipt = await parse_receipt(photo)
-        print(items_list_text(receipt["items"], receipt.get("store") or ""))
+        print(items_list_text(receipt["items"], receipt.get("store") or "", receipt))
         check_sample("итог чека прочитан точно", grocery, "total",
                      lambda expected: bool(receipt["total"] and abs(receipt["total"] - expected) < 1),
                      f"total={receipt['total']}")
@@ -234,7 +230,7 @@ async def main():
         print("⏭  не удалось нарисовать тестовый чек (нет шрифта)")
     else:
         receipt = await parse_receipt(grocery_path)
-        print(items_list_text(receipt["items"], receipt.get("store") or ""))
+        print(items_list_text(receipt["items"], receipt.get("store") or "", receipt))
         check("магазин — продуктовый", receipt["is_grocery"], f"is_grocery={receipt['is_grocery']}")
         # пиво, чипсы и шоколад — это досуг: если их заметная часть чека, категория уходит в «досуг»
         check("категория «еда» или «досуг» (в чеке пиво и чипсы)",
@@ -285,7 +281,7 @@ async def main():
     for photo in (sample_photos(narrow) if narrow else []):
         print("\n— Узкая таблица «кол-во × цена = итого» —")
         receipt = await parse_receipt(photo)
-        print(items_list_text(receipt["items"], receipt.get("store") or ""))
+        print(items_list_text(receipt["items"], receipt.get("store") or "", receipt))
         names = " ".join(item["name"].lower() for item in receipt["items"])
         sums = sorted(round(item["sum"], 2) for item in receipt["items"])
         check_sample("итог чека прочитан", narrow, "total",
