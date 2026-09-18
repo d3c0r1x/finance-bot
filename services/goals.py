@@ -16,13 +16,14 @@
 второго расчёта порогов здесь нет.
 """
 import json
+import re
 from datetime import datetime, timedelta
 
 from database.db import get_setting, set_setting
 from services.purchase_history import grouped_entries, parse_date, product_key
 from utils.formatting import format_amount, md_safe, plural_ru
 
-from services.advice import banned, DAYS_IN_MONTH  # noqa: F401 — база кандидатов и окно
+from services.advice import banned, DAYS_IN_MONTH, waste_groups  # noqa: F401 — база кандидатов
 
 # Ключ настроек: одна цель на месяц — что и сколько раз брать вместо привычного.
 GOAL_KEY = "advice:goal:{user_id}"
@@ -43,6 +44,32 @@ GOAL_CLOSED_FIELD = "closed_at"
 # иначе на каждый товар было бы по две кнопки и по два одинаковых обещания.
 GOAL_COUNT, GOAL_SUM = "count", "sum"
 GOAL_UNITS = (GOAL_COUNT, GOAL_SUM)
+# Категорийная цель: «на сладкое уходит 4 200 ₽» складывается из мороженого, шоколада и
+# печенья — по отдельности ни один из них цели не заслуживает. Группа — не налог на
+# категорию чека: это узкие кластеры того, что разбор стабильно советует не брать.
+CATEGORY_GOAL_KEY = "advice:goal_category:{user_id}"
+CATEGORY_PREFIX = "cat:"
+GOAL_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    # (ключ, имя для человека, стемы названий позиций). Стем сравнивается с НАЧАЛОМ слова:
+    # подстрока ловила бы «шоколад» как «кола» и «колбаса» как «кола» тоже. Точное слово
+    # помечается «!» — «Кола» и «Колбаса» различаются только целиком.
+    ("сладкое", "Сладкое", ("шоколад", "конфет", "карамел", "ирис", "зефир", "халв",
+                            "печень", "пряник", "вафл", "рулет", "торт",
+                            "пирог", "пончик", "мармелад", "пастил", "суфле",
+                            "морожен", "эскимо", "джем", "варень", "сникерс",
+                            "баунти", "твикс")),
+    ("снеки", "Снеки и чипсы", ("чипс", "сухарик", "снек", "попкорн", "соломк",
+                                "кириешки", "начос", "арахис", "фисташ", "кукуруз",
+                                "взлет")),
+    ("сладкие напитки", "Сладкие напитки", ("кока", "пепси", "спрайт", "фанта",
+                                            "лимонад", "энергет", "адреналин",
+                                            "байкал", "таранто", "газирова", "juice",
+                                            "морс", "кола!", "сок!", "нектар!")),
+    ("фастфуд", "Фастфуд и перекусы", ("бургер", "шаурм", "пицца", "наггетс", "фри",
+                                       "хот-дог", "хотдог", "доширак", "роллтон",
+                                       "ролл", "лапша")),
+    ("пакеты", "Пакеты и упаковка", ("пакет", "упаковк", "фольг", "плен", "скотч")),
+)
 # Ключ настроек: в какой единице человек считает шаг цели.
 GOAL_UNIT_KEY = "advice:goal_unit:{user_id}"
 # Шаг меньше сотни рублей в месяц человек не заметит: цель стала бы формальностью.
@@ -201,8 +228,11 @@ def parse_goal(raw: str | None) -> dict | None:
     if started is None:
         return None
     # Единица счёта: у записей до её появления — раза, а не «неизвестно»: тогда шаг был по
-    # числу раз, и старая цель должна читаться так же, как читалась.
+    # числу раз, и старая цель должна читаться так же, как читалась. Категорийная цель всегда
+    # в разах: деньги между конкретными товарами группы делить нечестно.
     kind = goal.get("unit") if goal.get("unit") in GOAL_UNITS else GOAL_COUNT
+    if str(goal["key"]).startswith(CATEGORY_PREFIX):
+        kind = GOAL_COUNT
     # Конец цели выводится из начала, а не хранится: одна дата в базе — один хозяин окна.
     return {**goal, "unit": kind, "started": started, "ends": goal_ends(started)}
 
@@ -210,6 +240,133 @@ def parse_goal(raw: str | None) -> dict | None:
 async def stored_goal(user_id: int) -> dict | None:
     """Действующая цель пользователя, если она есть."""
     return parse_goal(await get_setting(GOAL_KEY.format(user_id=user_id), ""))
+
+
+# ─── Категорийные цели: «на сладкое уходит 4 200 ₽ в месяц» ──────────────
+
+def _name_matches_category(name: str, stems: tuple[str, ...]) -> bool:
+    """Позиция принадлежит категории: слово названия начинается со стема.
+
+    Стем сверяется с началом слова, а не с подстрокой: иначе «шоколад» попадает в
+    «Сладкие напитки» через «кола» внутри слова. Точное слово помечается «!»: «Кола»
+    и «Колбаса» различаются только целым словом, любой их общий префикс — это «кола».
+    """
+    lowered = (name or "").lower().replace("ё", "е")
+    words = re.findall(r"[a-zа-я0-9-]+", lowered)
+    if not words:
+        return False
+    for stem in stems:
+        if stem.endswith("!"):
+            wanted = stem[:-1]
+            if any(word == wanted for word in words):
+                return True
+        elif any(word.startswith(stem) for word in words):
+            return True
+    return False
+
+
+def _category_entries(history, stems: tuple[str, ...]) -> list[dict]:
+    """Покупки категории: каждая позиция чека, чьё название попало в группу."""
+    found = []
+    for group in grouped_entries(history):
+        for entry in group["entries"]:
+            if _name_matches_category(entry.get("name") or "", stems):
+                found.append(entry)
+    found.sort(key=lambda item: str(item.get("date") or ""))
+    return found
+
+
+def category_candidates(rows, history, allowed: set[str] | None = None,
+                        confirmed: set[str] | None = None) -> list[dict]:
+    """Категории, которым та же история честно позволяет предложить цель.
+
+    Требования те же, что у товарной цели, и проверяются по тем же данным: разбор называл
+    позиции этой категории необязательными минимум дважды (`banned`, без догадок модели),
+    берут их не реже двух раз в месяц, и цель — примерно вдвое реже привычки. Разница в том,
+    что обещание даётся всей группе: «на сладкое — вдвое реже», а не трём отдельным товарам.
+
+    Денежная единица у категории не предлагается: сумму шага пришлось бы резать между
+    конкретными товарами, которых в группе может и не быть в следующем месяце. Шаг в разах
+    честен: покупок в месяц он не переписывает.
+    """
+    # Товары, разрешённые человеком к напоминаниям, в цели не идут: разрешение — решение
+    # не трогать привычку, и обходить его категорией было бы обманом.
+    allowed = allowed or set()
+    confirmed = confirmed or set()
+    # Пометка «необязательно» требуется два раза НА ГРУППУ, а не на один товар: смысл
+    # категорийной цели в том, что сладкое каждый раз разное — мороженое, шоколад, печенье —
+    # и требовать повтора одного товара значило бы отменить саму идею группы. Догадки модели
+    # по-прежнему не участвуют: обещание строится только на правилах и подтверждённых товарах.
+    marked = [entry for entry in waste_groups(rows, allowed, min_bans=1)
+              if not entry["guess"] or entry["key"] in confirmed]
+    found = []
+    for cat_key, cat_name, stems in GOAL_CATEGORIES:
+        members = [entry for entry in marked
+                   if _name_matches_category(entry["name"], stems)
+                   and entry["key"] not in allowed]
+        if sum(entry["count"] for entry in members) < 2:
+            continue
+        entries = _category_entries(history, stems)
+        monthly = _monthly_rate(entries)
+        if monthly < GOAL_MIN_MONTHLY:
+            continue
+        target = goal_target(monthly)
+        if target >= round(monthly):
+            continue
+        usual = round(sum(float(item.get("sum") or 0) for item in entries[:6]) /
+                      max(1, len(entries[:6])), 2)
+        spend = round(monthly * usual, 2)
+        names = sorted({entry["name"] for entry in members}, key=len)
+        found.append({"key": CATEGORY_PREFIX + cat_key, "name": cat_name,
+                      "monthly": monthly, "unit": GOAL_COUNT, "target": target,
+                      "limit": 0, "baseline": round(monthly, 1), "usual": usual,
+                      "spend": spend, "saving": round(spend - usual * target, 2),
+                      "count": sum(entry["count"] for entry in members),
+                      "sum": round(sum(entry["sum"] for entry in members), 2),
+                      "title": members[0]["title"],
+                      "advice": ", ".join(sorted({entry["advice"] for entry in members
+                                                  if entry["advice"]})[:2]),
+                      # Полный состав: он нужен фильтру дублей, а на экране показываются
+                      # первые четыре названия.
+                      "members": names})
+    found.sort(key=lambda item: (-item["saving"], -item["count"]))
+    return found[:2]
+
+
+def category_members(goal: dict) -> tuple[str, ...]:
+    """Стемы категории по ключу цели: пусто для товарной цели — ей это не нужно."""
+    if not str(goal.get("key") or "").startswith(CATEGORY_PREFIX):
+        return ()
+    wanted = str(goal["key"])[len(CATEGORY_PREFIX):]
+    return next((stems for key, _name, stems in GOAL_CATEGORIES if key == wanted), ())
+
+
+def category_purchase_note(goal: dict, progress: dict | None,
+                           items: list[dict]) -> str:
+    """Строка в карточке покупки: только что купленное попало в категорийную цель.
+
+    Без неё категорийная цель молчала бы месяц: на экране она есть, а в момент, когда
+    человек кладёт в корзину мороженое, бот о ней не говорит — и обещание работает,
+    только пока его помнишь. Товарная цель напоминает через repeat_warnings; здесь тот
+    же момент, но матч по группе, а не по названию товара.
+    """
+    stems = category_members(goal)
+    if not stems or not items:
+        return ""
+    hits = sorted({str(item.get("name") or "").strip()
+                   for item in items if _name_matches_category(item.get("name") or "", stems)
+                   and str(item.get("name") or "").strip()})
+    if not hits:
+        return ""
+    names = ", ".join(md_safe(name) for name in hits[:3])
+    more = f" и ещё {len(hits) - 3}" if len(hits) > 3 else ""
+    base = f"🎯 В цели «{md_safe(goal['name'])}» засчитано: {names}{more}"
+    if progress:
+        done = _goal_done_phrase(progress)
+        base += f" — {done}"
+        if progress["over"]:
+            base += ", шаг уже превышен"
+    return base + "."
 
 
 async def set_goal(user_id: int, candidate: dict | None) -> None:
@@ -231,6 +388,10 @@ async def set_goal(user_id: int, candidate: dict | None) -> None:
               "usual": candidate.get("usual") or 0,
               "spend": candidate.get("spend") or 0,
               "started_at": datetime.now().isoformat(sep=" ", timespec="seconds")}
+    # Категорийная цель хранит названия товаров, на которых построена: экран честен, даже
+    # когда история выросла, а если цель убрана и поставлена заново — состав пересчитается.
+    if candidate.get("members"):
+        record["members"] = list(candidate["members"])
     # Хранятся оба числа: по одному цель считается, по другому показывается как то же самое
     # в других единицах. Считает `goal_progress` всегда по той, что выбрана при постановке.
     record["target"] = int(candidate.get("target") or goal_target(record["baseline"]))
@@ -248,10 +409,12 @@ def goal_progress(goal: dict | None, history, today: datetime | None = None) -> 
     # часы) не должен заранее съедать цель. Для закончившегося месяца сегодня уже позже конца,
     # поэтому граница совпадает с ним и исход месяца считается по всем его покупкам.
     until = min(goal["ends"], now)
-    entries = [entry for entry in _purchase_entries(history, goal["key"])
-               if (moment := parse_date(entry.get("date"))) and goal["started"] <= moment <= until]
-    bought = len(entries)
-    spent = round(sum(float(entry.get("sum") or 0) for entry in entries), 2)
+    stems = category_members(goal)
+    in_window = [entry for entry in (_category_entries(history, stems) if stems
+                                     else _purchase_entries(history, goal["key"]))
+                 if (moment := parse_date(entry.get("date"))) and goal["started"] <= moment <= until]
+    bought = len(in_window)
+    spent = round(sum(float(entry.get("sum") or 0) for entry in in_window), 2)
     unit = goal.get("unit") or GOAL_COUNT
     target = int(goal.get("target") or 0)
     limit = float(goal.get("limit") or 0)
@@ -501,6 +664,10 @@ def goal_text(goal: dict | None, progress: dict | None, today: datetime | None =
     lines = [line, "", f"Считаю по чекам: покупки «{md_safe(goal['name'])}» с "
                         f"{goal['started']:%d.%m} по {goal['ends']:%d.%m}, "
                         f"в этом окне потрачено {format_amount(progress['spent'])}."]
+    if goal.get("members"):
+        # Категория без состава читалась бы как запрет всей еды: человек должен видеть,
+        # какие именно товары наблюдаются — состав подсказывает и спор, если он не тот.
+        lines.append("В группу входят: " + ", ".join(md_safe(m) for m in goal["members"]) + ".")
     # Шаг один, но увидеть его можно в обеих единицах: кто-то считает разами, кто-то деньгами.
     equivalent = goal_equivalent(goal, progress)
     if equivalent:
@@ -548,6 +715,10 @@ def _candidate_lines(candidates: list[dict]) -> list[str]:
     lines: list[str] = []
     for item in candidates:
         lines += ["", f"▪️ **{md_safe(item['name'])}** — {goal_step_phrase(item)}."]
+        if item.get("members"):
+            # Категория без состава похожа на запрет всей еды: состав же показывает,
+            # что цель про конкретные привычки, и у товара в списке остаётся контекст.
+            lines.append(f"   Из разборов: {md_safe(', '.join(item['members']))}.")
         if item.get("saving"):
             lines.append(f"   Это до ~{format_amount(item['saving'])} в месяц.")
         if item.get("advice"):
@@ -593,6 +764,11 @@ def goal_proposals_text(candidates: list[dict], unit: str = GOAL_COUNT,
              "Одна цель и один измеримый шаг — вместо списка «ешь полезнее». "
              "Выбери, что сократить: считаю по чекам, через месяц скажу, вышло или нет. "
              "Шаг задаётся в той единице, которая тебе понятнее — в разах или в деньгах."]
+    if any(item.get("members") for item in candidates):
+        # Категорийная цель сама объясняет, зачем она в списке товарных: по одному
+        # мороженому цели могло не быть, а группа их собирает.
+        lines.append("Категории собраны из товаров, которые разбор помечал необязательными: "
+                     "по отдельности каждый из них цели не дотягивал.")
     lines += _candidate_lines(candidates)
     if skipped:
         lines.append("")

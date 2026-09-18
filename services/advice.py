@@ -918,15 +918,16 @@ def waste_text(summary: dict | None, days: int = DEFAULT_DAYS, trend: dict | Non
 # ─── Цели на месяц: реэкспорт из services/goals.py ───────────────────────
 # Каждое имя ниже раньше жило здесь; теперь владелец — `services/goals.py`.
 # Импорт в конце файла разрывает цикл: goals импортирует `banned` отсюда.
-from services.goals import (GOAL_COUNT, GOAL_HISTORY_KEY, GOAL_HISTORY_LIMIT,  # noqa: E402
-                            GOAL_HISTORY_SHOWN, GOAL_KEY, GOAL_MIN_MONEY_STEP,
-                            GOAL_MIN_MONTHLY, GOAL_NOTHING, GOAL_NOTHING_MONEY,
-                            GOAL_SUM, GOAL_UNITS, GOAL_UNIT_KEY,
-                            close_goal_if_finished, goal_candidates, goal_digest_line,
-                            goal_ends, goal_equivalent, goal_followup_text,
-                            goal_history, goal_history_entry, goal_history_line,
-                            goal_history_text, goal_line, goal_money_step,
-                            goal_progress, goal_proposals_text, goal_report_line,
-                            goal_step_phrase, goal_target, goal_text, goal_unit,
-                            goal_unit_text, mark_goal_outcome_sent, parse_goal,
+from services.goals import (CATEGORY_PREFIX, GOAL_COUNT, GOAL_HISTORY_KEY, # noqa: E402
+                            GOAL_HISTORY_LIMIT, GOAL_HISTORY_SHOWN, GOAL_KEY,
+                            GOAL_MIN_MONEY_STEP, GOAL_MIN_MONTHLY, GOAL_NOTHING,
+                            GOAL_NOTHING_MONEY, GOAL_SUM, GOAL_UNITS, GOAL_UNIT_KEY,
+                            category_candidates, category_members, category_purchase_note,
+                            close_goal_if_finished, goal_candidates,
+                            goal_digest_line, goal_ends, goal_equivalent,
+                            goal_followup_text, goal_history, goal_history_entry,
+                            goal_history_line, goal_history_text, goal_line,
+                            goal_money_step, goal_progress, goal_proposals_text,
+                            goal_report_line, goal_step_phrase, goal_target, goal_text,
+                            goal_unit, goal_unit_text, mark_goal_outcome_sent, parse_goal,
                             parse_goal_history, set_goal, set_goal_unit, stored_goal)

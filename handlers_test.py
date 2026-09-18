@@ -31,18 +31,20 @@ from aiogram.methods import (EditMessageReplyMarkup, EditMessageText, GetFile,  
 from aiogram.types import (CallbackQuery, Chat, File, Message, PhotoSize,  # noqa: E402
                            ReplyKeyboardMarkup, Update, User)
 
-def synthetic_receipt_bytes() -> bytes:
+def synthetic_receipt_bytes(lines: list[str] | None = None) -> bytes:
     """Синтетический продуктовый чек.
 
     Нужен там, где проверка говорит именно о продуктах: для техники правила намеренно
     не выдают «вредно» и «лишнее», и подсовывать такой чек в проверку советов было бы
-    выдачей желаемого за поведение бота.
+    выдачей желаемого за поведение бота. Свои строки можно передать: часть проверок
+    смотрит на состав чека, а не только на суммы.
     """
     from io import BytesIO
     from PIL import Image, ImageDraw
     from utils.fonts import mono_font
-    lines = ["ООО ПЯТЁРОЧКА", "КАССОВЫЙ ЧЕК", "МОЛОКО 1Л      89.90", "СЫР 200Г     350.00",
-             "ЧИПСЫ 120Г   149.90", "ИТОГ         589.80", "09.09.26 19:14"]
+    if lines is None:
+        lines = ["ООО ПЯТЁРОЧКА", "КАССОВЫЙ ЧЕК", "МОЛОКО 1Л      89.90", "СЫР 200Г     350.00",
+                 "ЧИПСЫ 120Г   149.90", "ИТОГ         589.80", "09.09.26 19:14"]
     font = mono_font(32)
     image = Image.new("L", (620, 60 * len(lines) + 60), color=255)
     draw = ImageDraw.Draw(image)
@@ -1498,8 +1500,84 @@ async def main():
     await run(callback="goal_drop", label="убрать цель после проверки отчёта")
     check("цель после проверки отчёта снята", await stored_goal(1111) is None)
 
+    # Категорийная цель: сладкое каждый раз разное — эскимо, шоколад, печенье — и по
+    # отдельности ни один из них товарной цели не заслуживает, а группа заслуживает.
+    # Разбор помечал три разных товара по одному разу: товарной цели тут не будет.
+    category_receipts = []
+    sweets = (("Мороженое эскимо", 3, 80.0), ("Шоколад Alpen Gold", 10, 110.0),
+              ("Печенье Юбилейное", 17, 90.0))
+    async with aiosqlite.connect(verdict_db) as db:
+        for name, days, price in sweets:
+            when = (datetime.now() - _delta(days=days)).isoformat(sep=" ")
+            cursor = await db.execute(
+                "INSERT INTO transactions"
+                " (user_id, amount, category, description, tx_type, source, created_at)"
+                " VALUES (?, ?, 'еда', 'Пятёрочка', 'expense', 'receipt', ?)",
+                (1111, price, when))
+            await db.execute("INSERT INTO receipt_items (transaction_id, name, qty, price, sum)"
+                             " VALUES (?, ?, 1, ?, ?)",
+                             (cursor.lastrowid, name, price, price))
+            category_receipts.append(cursor.lastrowid)
+        await db.commit()
+    for receipt_id, (name, _days, _price) in zip(category_receipts, sweets):
+        await save_receipt_verdicts(receipt_id, [(name, "вредно", "сладкое попусту", "rule")])
+
+    sent = await run(callback="report_goal", label="экран цели с категорией")
+    text = "\n".join(sent)
+    check("категория предложена, когда сладкое каждый раз разное",
+          "Сладкое" in text and "Из разборов" in text, text)
+    check("в категории названы товары и объяснение, зачем она",
+          "Из разборов" in text and "по отдельности" in text, text)
+    kb = session.markup()
+    buttons = {str(b.callback_data) for row in kb.inline_keyboard for b in row} if kb else set()
+    from services.goals import CATEGORY_PREFIX
+    category_button = f"goal_take:{mutelist_service.digest(CATEGORY_PREFIX + 'сладкое')}"
+    check("категорию можно взять кнопкой", category_button in buttons, str(buttons))
+
+    sent = await run(callback=category_button, label="взять категорийную цель")
+    text = "\n".join(sent)
+    goal_state = await stored_goal(1111)
+    check("категорийная цель сохранена с составом",
+          bool(goal_state) and goal_state["key"].startswith("cat:")
+          and goal_state.get("members"), str(goal_state))
+    check("экран показывает, что именно входит в группу",
+          "В группу входят" in text, text)
+
+    # Покупка сладкого сразу говорит о ходе категорийной цели: чек со зефиром — заметка
+    # с ходом, чек без сладкого — молчание. Текстовые траты в цель не попадают (в истории
+    # цен только позиции чеков), поэтому ход проверяется настоящим путём фото.
+    photo_ids_before = await receipt_ids()
+    session.photo_override = synthetic_receipt_bytes(
+        ["ООО ПЯТЁРОЧКА", "КАССОВЫЙ ЧЕК", "ЗЕФИР 100Г      90.00", "ИТОГ          90.00",
+         "09.09.26 19:14"])
+    await run(photo=True, label="чек со сладким при категорийной цели")
+    sent = await run(callback="confirm_expense", label="запись сладкого чека")
+    kb = session.markup()
+    buttons = {str(b.callback_data) for row in kb.inline_keyboard for b in row} if kb else set()
+    if "confirm_duplicate" in buttons:
+        sent = await run(callback="confirm_duplicate", label="«Записать ещё раз» сладкого чека")
+    check("сладкое названо в ходе цели в момент покупки",
+          any("засчитано" in t and "зефир" in t.lower() for t in sent), f"ответы: {sent}")
+
+    session.photo_override = synthetic_receipt_bytes()
+    await run(photo=True, label="чек без сладкого при категорийной цели")
+    sent = await run(callback="confirm_expense", label="запись чека без сладкого")
+    kb = session.markup()
+    buttons = {str(b.callback_data) for row in kb.inline_keyboard for b in row} if kb else set()
+    if "confirm_duplicate" in buttons:
+        await run(callback="confirm_duplicate", label="«Записать ещё раз» чека без сладкого")
+    check("чек без сладкого напоминания не получает",
+          not any("засчитано" in t for t in sent), f"ответы: {sent}")
+    session.photo_override = None
+
+    await run(callback="goal_drop", label="убрать категорийную цель")
+    check("категорийная цель убирается", await stored_goal(1111) is None,
+          str(await stored_goal(1111)))
+
     # За собой убираем: чеки и решения нужны были только этой проверке.
-    for receipt_id in habit_receipts:
+    for receipt_id in await receipt_ids() - photo_ids_before:
+        await delete_transaction(receipt_id, 1111)
+    for receipt_id in habit_receipts + category_receipts:
         await delete_transaction(receipt_id, 1111)
 
     print("— Прогноз продуктов —")

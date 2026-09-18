@@ -14,8 +14,8 @@ from ai.ocr import receipt_path
 from ai.receipts import (LOW_QUALITY_HINT, apply_review_rules, basket_text, items_list_text,
                          items_summary, leisure_hint, parse_receipt, verdict_rows)
 from database.db import (add_receipt_items, add_transaction, find_similar_transaction, get_debt,
-                         get_monthly_spending, get_receipt_items, get_receipt_verdicts,
-                         get_transaction, save_receipt_verdicts)
+                         get_monthly_spending, get_receipt_items, get_receipt_price_history,
+                         get_receipt_verdicts, get_transaction, save_receipt_verdicts)
 from keyboards.expense_kb import (EXPENSE_CATEGORIES, ITEMS_PER_PAGE, get_amount_kb,
                                   get_categories_kb, get_duplicate_kb, get_edit_kb, get_item_edit_kb,
                                   get_items_edit_kb, get_receipt_kb, get_review_fix_kb,
@@ -265,6 +265,18 @@ async def _save(message: Message, state: FSMContext, parsed: dict, source: str,
         except Exception:
             # Напоминание — дополнительная возможность: запись чека из-за неё падать не должна.
             reminder = ""
+        # Категорийная цель говорит о себе в момент покупки тем же голосом: покупки группы
+        # пошли в ход цели. Товарная цель напоминает сама через вердикты прошлых чеков.
+        try:
+            goal = await advice.stored_goal(user_id)
+            if goal and advice.category_members(goal):
+                price_history = await get_receipt_price_history(user_id)
+                progress = advice.goal_progress(goal, price_history)
+                note = advice.category_purchase_note(goal, progress, items)
+                reminder = f"{reminder}\n\n{note}" if reminder and note else (reminder or note)
+        except Exception:
+            # Ход цели в карточке — тоже возможность, а не обязанность записи.
+            pass
 
     icons = {"expense": "✅", "income": "💰", "debt_payment": "💳"}
     label = {"expense": "Записал", "income": "Доход записан", "debt_payment": "Платёж записан"}
@@ -309,7 +321,6 @@ async def _save(message: Message, state: FSMContext, parsed: dict, source: str,
         session = await message.answer("🤖 Смотрю, что можно было взять выгоднее...")
         analysis = apply_review_rules(await analyze_basket(items, parsed.get("store") or ""), items)
         try:
-            from database.db import get_receipt_price_history
             history = await get_receipt_price_history(message.from_user.id)
             if analysis is None:
                 analysis = {"items": {}}

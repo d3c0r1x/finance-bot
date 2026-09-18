@@ -1034,13 +1034,15 @@ async def main():
 
     # Цель на месяц: одна привычка, один измеримый шаг и проверка по чекам, а не по обещаниям.
     from services.advice import (GOAL_COUNT, GOAL_HISTORY_KEY, GOAL_HISTORY_LIMIT, GOAL_KEY,
-                                 GOAL_SUM, GOAL_UNIT_KEY, close_goal_if_finished, goal_candidates,
+                                 GOAL_SUM, GOAL_UNIT_KEY, category_candidates, category_members,
+                                 category_purchase_note, close_goal_if_finished, goal_candidates,
                                  goal_digest_line, goal_followup_text, goal_history,
                                  goal_history_line, goal_history_text, goal_line, goal_money_step,
                                  goal_progress, goal_proposals_text, goal_report_line,
                                  goal_step_phrase, goal_target, goal_text, goal_unit,
                                  mark_goal_outcome_sent, parse_goal, parse_goal_history,
                                  set_goal, set_goal_unit, stored_goal)
+    from services.goals import _name_matches_category
 
     assert (goal_target(1.0), goal_target(2.0), goal_target(4.0), goal_target(6.0)) == (1, 1, 2, 3), \
         "цель — примерно вдвое меньше, но не ноль"
@@ -1184,6 +1186,62 @@ async def main():
     assert "Можно взять следующую" in followup and habit_name in followup, followup
     assert "Новой пока нет" in goal_followup_text([]), goal_followup_text([])
     assert "Отправь новые чеки" in goal_followup_text([])
+
+    # — Категорийная цель: «на сладкое уходит 4 200 ₽» из мороженого, шоколада и печенья —
+    #   по отдельности ни один из них цели не дотягивает. Матч по началу слова: «шоколад»
+    #   не должен попадать в «Сладкие напитки» через «кола» внутри слова.
+    assert not _name_matches_category("Шоколад Alpen Gold", ("кола!", "кока")), "шоколад не напиток"
+    assert _name_matches_category("Кока-кола 2л", ("кола!", "кока"))
+    assert not _name_matches_category("Колбаса докторская", ("кола!",)), "колбаса не напиток"
+    assert _name_matches_category("МОЛОКО 3.2%", ("молок",)) and _name_matches_category(
+        "Сок апельсиновый", ("сок!",))
+    sweet_names = ("Мороженое эскимо", "Шоколад Alpen Gold", "Печенье Юбилейное")
+    sweet_rows = [stored_row(10 + index, name, "вредно", "rule", 90.0)
+                  for index, name in enumerate(sweet_names)]
+    sweet_history = [purchase(day, name, 90.0)
+                     for name, days in zip(sweet_names, ((2, 16), (9, 23), (5, 19)))
+                     for day in days]
+    cats = category_candidates(sweet_rows, sweet_history + [purchase(3, "Молоко 1л", 90.0)])
+    assert cats and cats[0]["name"] == "Сладкое", cats
+    sweet_cat = cats[0]
+    assert sweet_cat["key"].startswith("cat:") and sweet_cat["unit"] == GOAL_COUNT, sweet_cat
+    assert set(sweet_cat["members"]) == set(sweet_names), sweet_cat
+    assert sweet_cat["target"] < round(sweet_cat["monthly"]), "цель — вдвое реже привычки"
+    assert sweet_cat["saving"] > 0, sweet_cat
+    # Товары-участники уже предложены товарными кандидатами — категория дублем не становится.
+    solo_product, _ = goal_candidates(
+        [stored_row(20, "Шоколад Alpen Gold", "вредно", "rule", 110.0),
+         stored_row(21, "Шоколад Alpen Gold", "вредно", "rule", 110.0)],
+        [purchase(2, "Шоколад Alpen Gold", 110.0), purchase(16, "Шоколад Alpen Gold", 110.0),
+         purchase(30, "Шоколад Alpen Gold", 110.0)])
+    assert [item["name"] for item in solo_product] == ["Шоколад Alpen Gold"], solo_product
+    # Ход категорийной цели считается по всем товарам группы, а не по одному ключу.
+    cat_goal = parse_goal(_json.dumps({"key": sweet_cat["key"], "name": sweet_cat["name"],
+                                       "target": sweet_cat["target"],
+                                       "baseline": sweet_cat["baseline"],
+                                       "usual": sweet_cat["usual"],
+                                       "members": list(sweet_cat["members"]),
+                                       "started_at": (now - _days(days=6)).isoformat(sep=" ")}))
+    assert category_members(cat_goal), "стемы выводятся из ключа"
+    inside_cat = [{**purchase(0, name, 90.0),
+                   "created_at": ((now - _days(days=6)) + _days(days=offset)).isoformat(sep=" ")}
+                  for name, offsets in zip(sweet_names, ((1,), (2,), (3,))) for offset in offsets]
+    # В окне покупка цели есть и из старой истории (эскимо 2 дня и печенье 5 дней назад —
+    # окно началось 6 дней назад), плюс три покупки ниже — итого пять: цель видит группу,
+    # а не один товар.
+    cat_progress = goal_progress(cat_goal, inside_cat + sweet_history, today=now)
+    assert cat_progress["bought"] == 5, cat_progress
+    # Покупка, попавшая в группу, называется в момент записи — с ходом цели рядом.
+    note = category_purchase_note(cat_goal, cat_progress,
+                                  [{"name": "Шоколад Alpen Gold", "sum": 110.0}])
+    assert "засчитано" in note and "Шоколад Alpen Gold" in note and "из" in note, note
+    assert category_purchase_note(cat_goal, cat_progress, [{"name": "Молоко 1л", "sum": 90}]) == "", \
+        "молоко в группу сладкого не входит"
+    # Товарная цель категорийную заметку не получает: у неё свой путь напоминаний.
+    assert category_purchase_note(active_goal, None, [{"name": habit_name, "sum": 150}]) == ""
+    proposals_with_cat = goal_proposals_text([sweet_cat])
+    assert "Сладкое" in proposals_with_cat and "Из разборов" in proposals_with_cat, proposals_with_cat
+    assert "по отдельности" in proposals_with_cat, proposals_with_cat
 
     # Итог отмечается только после отправки и только у закончившейся цели — иначе отметка
     # съела бы либо будущий итог, либо сам итог у человека с сорванной отправкой.

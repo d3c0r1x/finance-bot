@@ -364,6 +364,15 @@ async def _goal_screen(user_id: int) -> dict:
     allowed, confirmed = await advice.allowed_keys(user_id), await advice.confirmed_keys(user_id)
     candidates, skipped = advice.goal_candidates(rows, history, allowed,
                                                  confirmed=confirmed, unit=unit)
+    # Категорийные кандидаты — рядом с товарными, по той же истории и тем же требованиям.
+    # Группа, целиком состоящая из уже предложенных товаров, нового выбора не даёт: у
+    # человека и так есть кнопка на каждый товар, и отдельная цель на всю группу была бы
+    # тем же обещанием, названным шире.
+    product_names = {item["name"] for item in candidates}
+    category = [item for item in advice.category_candidates(rows, history, allowed,
+                                                            confirmed=confirmed)
+                if item["key"] not in {c["key"] for c in candidates}
+                and not product_names.issuperset(item["members"])]
     # Переключать единицу есть смысл только если в другой единице тоже есть что предложить:
     # кнопка, ведущая к пустому экрану, — хуже её отсутствия.
     other = advice.GOAL_SUM if unit == advice.GOAL_COUNT else advice.GOAL_COUNT
@@ -374,12 +383,12 @@ async def _goal_screen(user_id: int) -> dict:
     # Словарь собирается здесь целиком, а не дописывается по ходу: по нему сразу видно,
     # что экран может вернуть три разных состояния — без цели, с активной, с закончившейся.
     screen = {"goal": goal, "unit": unit, "can_switch": can_switch,
-              "candidates": candidates, "skipped": skipped}
+              "candidates": candidates + category, "skipped": skipped}
     text = advice.goal_text(goal, progress, entries=entries)
     if not text:
         # История на экране без активной цели: «сколько сдержано» — ответ на вопрос, который
         # иначе негде задать: последнюю цель человек уже убрал, и от неё не осталось следа.
-        parts = [advice.goal_proposals_text(candidates, unit, skipped=skipped)]
+        parts = [advice.goal_proposals_text(screen["candidates"], unit, skipped=skipped)]
         if entries:
             parts.append(advice.goal_history_text(entries))
         screen["text"] = "\n\n".join(parts)
@@ -389,7 +398,7 @@ async def _goal_screen(user_id: int) -> dict:
     # показываются только там, где предложение видно в тексте, — иначе они ведут к тому,
     # чего на экране нет.
     if progress and progress["finished"]:
-        text = f"{text}\n\n{advice.goal_followup_text(candidates)}"
+        text = f"{text}\n\n{advice.goal_followup_text(screen['candidates'])}"
     else:
         # Активная цель: ни кандидатов, ни переключателя единицы — менять пока нечего, а кнопка
         # без видимого следствия хуже её отсутствия. Своя единица цели при этом сохраняется.
