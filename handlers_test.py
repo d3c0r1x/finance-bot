@@ -991,6 +991,12 @@ async def main():
     before_fix = await receipt_ids()
     await run(photo=True, label="продуктовый чек для спора с разбором")
     sent = await run(callback="confirm_expense", label="запись чека для спора")
+    # Синтетический чек на 589,80 уже записан выше и ещё в 10-минутном окне дублей: бот
+    # честно спрашивает «уже записан?» — подтверждаем кнопкой, запись продолжается.
+    kb = session.markup()
+    buttons = {str(b.callback_data) for row in kb.inline_keyboard for b in row} if kb else set()
+    if "confirm_duplicate" in buttons:
+        sent = await run(callback="confirm_duplicate", label="«Записать ещё раз» перед спором")
     expenses_module.analyze_basket = real_basket
     fix_tx = sorted(await receipt_ids())[-1]
     rows = [dict(row) for row in await get_receipt_items(fix_tx)]
