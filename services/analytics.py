@@ -8,6 +8,27 @@ from utils.formatting import (format_amount, get_category_emoji, month_name_ru, 
 PERIOD_TITLES = {7: "за неделю", 14: "за 2 недели", 30: "за месяц", 90: "за 90 дней"}
 
 
+def weekend_share(transactions) -> str:
+    """Доля трат выходных vs будней — честная (по датам записей, не по порядку)."""
+    weekend = weekday_sum = 0.0
+    for t in transactions:
+        if t["tx_type"] != "expense":
+            continue
+        try:
+            day = datetime.fromisoformat(t["created_at"])
+        except (TypeError, ValueError):
+            continue
+        if day.weekday() >= 5:
+            weekend += t["amount"]
+        else:
+            weekday_sum += t["amount"]
+    total = weekend + weekday_sum
+    if total <= 0 or weekday_sum <= 0:
+        return ""
+    pct = int(weekend / total * 100)
+    return f"🛍 Выходные — {pct}% всех трат периода"
+
+
 async def build_month_report(spending: dict, total_spent: float, limits: dict | None = None,
                             total_limit: float | None = None) -> str:
     """Текст месячного отчёта с прогресс-барами по лимитам (из бюджета)."""
@@ -86,6 +107,9 @@ async def build_period_report(transactions, days: int = 7, limits: dict | None =
     for category, amount in sorted(by_category_totals.items(), key=lambda x: -x[1]):
         share = int(amount / total * 100) if total else 0
         text += f"• {get_category_emoji(category)} {category}: {format_amount(amount)} ({share}%)\n"
+    weekend_line = weekend_share(transactions)
+    if weekend_line:
+        text += f"\n{weekend_line}\n"
     text += "\n**Последние траты:**\n"
     for t in sorted(expenses_list, key=lambda x: x["created_at"], reverse=True)[:5]:
         try:
