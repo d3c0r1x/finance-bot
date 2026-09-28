@@ -8,5 +8,17 @@ if not exist venv (
 ) else (
     call venv\Scripts\activate.bat
 )
-python bot.py
+
+rem Секреты приходят из Infisical, а не из файла .env на диске.
+where infisical >nul 2>nul
+if errorlevel 1 (
+    echo Не найден CLI Infisical -- без него секреты не подтянутся.
+    echo Установи: winget install infisical
+    echo Затем один раз: infisical login  и  infisical init
+    echo Подробности -- README, раздел "Секреты Infisical".
+    pause
+    exit /b 1
+)
+
+infisical run --env=dev -- python bot.py
 pause

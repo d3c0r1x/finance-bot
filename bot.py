@@ -110,11 +110,13 @@ async def log_ai_status() -> None:
 async def main():
     if not BOT_TOKEN:
         raise SystemExit(
-            "❌ BOT_TOKEN не задан. Скопируй .env.example в .env и впиши токен от @BotFather."
+            "❌ BOT_TOKEN не задан. Добавь его в Infisical (окружение Development) "
+            "или, для локального запуска, в .env — токен от @BotFather."
         )
     if not USERS:
         raise SystemExit(
-            "❌ Не задан ни один USER_ID в .env. Узнай свой ID через @userinfobot и впиши в .env."
+            "❌ Не задан ни один USER_ID. Добавь USER_ID_1/USER_ID_2 в Infisical "
+            "(или в .env). Узнать свой ID: @userinfobot."
         )
 
     # Создаём папки для данных
