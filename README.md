@@ -1,192 +1,64 @@
-# 💰 Finance Bot — приватный финансовый ассистент в Telegram
+# Finance Bot
 
-[![Тесты](https://github.com/d3c0r1x/finance-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/d3c0r1x/finance-bot/actions/workflows/tests.yml)
-[![Версия](https://img.shields.io/badge/версия-1.1.0-blue)](CHANGELOG.md)
-[![Лицензия](https://img.shields.io/badge/лицензия-MIT-green)](LICENSE)
+Local-first Telegram finance assistant for personal budgeting.
 
-**[🏗 Архитектура](docs/ARCHITECTURE.md)** ·
-**[🧠 Инженерные решения](docs/DECISIONS.md)** ·
-**[✅ Проверка качества](docs/EVALUATION.md)** ·
-**[🔐 Безопасность](docs/SECURITY.md)** ·
-**[⚙️ Установка](docs/DEVELOPMENT.md)**
+> Photos sent to Telegram are downloaded by the bot; after that, AI processing is local. The core receipt pipeline does not require a third-party AI API.
 
-> **EN:** A privacy-first personal finance bot for Telegram. Receipts are read by
-> a **local** vision model and independently verified by Tesseract against the
-> receipt's own arithmetic — everything runs on your machine, with no cloud
-> account and no data leaving the laptop. Local LLM via Ollama, SQLite storage,
-> Tkinter control panel, CI that runs without any model.
+## What it does
 
-## Problem
+- reads receipts with a local Vision model (Ollama);
+- independently checks receipts with Tesseract OCR and arithmetic rules;
+- tracks expenses, categories, budgets, debts and subscriptions;
+- generates reports and scheduled digests;
+- includes a desktop control panel using the same service layer.
 
-Финансовые приложения требуют отдать банковскую историю на чужой сервер.
-Быстрые заметки в мессенджере дают цифру, но не ответ на вопрос «сколько я
-реально могу тратить до зарплаты» и «почему продукты в этом месяце дороже».
+## Why it is interesting
 
-А ещё чеки. Ввод позиций вручную — это минута на чек и отказ от идеи через
-неделю; автоматическое распознавание через облако — это фотографии твоих
-покупок на чужом сервере. Оба варианта плохие.
+The receipt pipeline deliberately uses two independent readers. If the item total does not agree with the receipt total, the bot flags the discrepancy instead of inventing a value.
 
-## What I built
+The same principle is used elsewhere: deterministic calculations for numbers, explicit uncertainty in reports and one source of truth for shared metrics.
 
-Telegram-бот (aiogram 3) плюс панель на Tkinter, работающие целиком на локальной
-машине: **локальная LLM** разбирает траты, **локальная модель зрения** читает
-чеки, **Tesseract** их проверяет, всё лежит в SQLite.
-
-- **📷 Фото чека → запись с позициями.** Чек читают два независимых читателя
-  (VLM + Tesseract), результат сводится по арифметике кассы; в карточке видно,
-  кто читал и сколько было проходов. Позиции правятся руками, дубль чека бот
-  замечает и спрашивает кнопками.
-- **📝 Траты текстом** — «Заправка 2000» из любого экрана: модель определяет
-  сумму, категорию, подкатегорию, доход или платёж по кредиту.
-- **🟢 «Безопасно тратить в день»** — до зарплаты (её дату бот видит в истории
-  поступлений), с вычетом резерва и подписок, которые спишутся до этого дня.
-- **🔁 Регулярные платежи** — бот сам находит подписки по твоей истории (три
-  повтора, ровный интервал, близкая сумма) и предупреждает за пару дней до
-  списания; ложное срабатывание отключается одной кнопкой.
-- **🏷 Контроль цен и «Мои цены»** — сравнение с **медианой** прошлых покупок
-  того же товара, бренда и упаковки: видно и подорожание, и покупку дешевле
-  обычного с суммой экономии; `/price молоко` — карточка товара с графиком.
-- **🛒 Список покупок по ритму** — «молоко ты берёшь раз в 10 дней, последний
-  раз 8 дней назад»; заброшенные товары из подсказок уходят.
-- **🧾 Разбор корзины** — по каждой позиции вердикт и что делать; алкоголь и
-  чипсы никогда не называются полезной покупкой.
-- **🍎 Недельный лимит на продукты** и прогноз по обычному темпу — отдельно от
-  месячного бюджета, который правится прямо в боте (у каждого пользователя свой).
-- **📉 Необязательные покупки и список «не брать»** — бот помнит свои советы и
-  показывает, что стало после них: частоту «до/после», потолок экономии в месяц
-  и долю необязательного по неделям картинкой.
-- **🎯 Цель на месяц** — одна привычка в измеримом виде («не чаще 2 раз в месяц»
-  или «не больше 600 ₽»), итог приходит ровно один раз, счёт по прошлым целям
-  сохраняется.
-- **🏦 Импорт банковской выписки (PDF)** — сводится с итогами банка до записи,
-  операции категоризируются, а про непонятные бот спрашивает («Что за
-  TERMINAL 14?») и запоминает ответ для будущих выписок.
-- **🔖 Дайджест недели** — одно сообщение вместо пяти экранов, приходит само.
-- **🖥 Панель на Tkinter** — база, чеки с позициями, каталог цен и закупка,
-  аналитика, лимиты, долги, выгрузка CSV. Цифры в панели считают **те же
-  функции**, что и в боте, — сверка закреплена тестом.
-
-## Архитектура
+## Architecture
 
 ```
-Telegram (aiogram 3) ────► handlers/ ──► services/ ──► database/ (aiosqlite)
-   фото чека                            бюджет, цены,      SQLite: траты,
-      │                                 подписки, цели,    чеки, позиции,
-      ▼                                 инфляция,          цены, цели,
-   ai/vision.py  (Ollama VLM)           дайджест,          настройки
-      │  └─► ai/ocr.py (Tesseract)       прогнозы
-      └─► ai/receipts.py — сверка двух чтений по арифметике кассы
-   ai/llm.py — разбор трат, названий и корзины (локальная LLM)
-      └─ без Ollama: правила по ключевым словам, бот не падает
-   panel.py + panel_ui/ (Tkinter) — те же services/, поэтому цифры не расходятся
-   APScheduler — вечерняя сводка, воскресный дайджест, алерты по лимитам
+Telegram
+   ↓
+handlers
+   ↓
+services ───────────────→ SQLite
+   ↓
+receipt pipeline
+   ├─ local Vision model (Ollama)
+   └─ Tesseract OCR
+          ↓
+     arithmetic check
+          ↓
+     agreed receipt
 ```
 
-## Key engineering decisions
+The desktop panel uses the same service layer as the Telegram bot, so reports and UI do not implement separate financial rules.
 
-1. **У чека два независимых читателя.** VLM понимает структуру, Tesseract не
-   галлюцинирует символы; расхождение ловится **арифметикой кассы** — суммой
-   позиций против итога. Второй проход модели включается только при расхождении.
-2. **Итог кассы важнее красивого списка.** Если данные не сходятся, бот
-   предупреждает и даёт править, а не «дочиняет» чек; аналитика строится только
-   на согласованных чеках.
-3. **«Обычная цена» — медиана.** Иначе любая акция в прошлом превращалась бы в
-   будущее «подорожание».
-4. **Сравнивается частота, а не суммы** — периоды разной длины, и сумма за
-   короткий всегда меньше; там, где данных мало, бот пишет «рано судить».
-5. **Границы проговариваются прямо в интерфейсе.** Потолок экономии — не
-   обещание; «необязательные покупки» — не «сколько ты бы сэкономил»; если
-   цифра изменилась из-за правки разбора, это сказано отдельной строкой.
-6. **У каждой цифры один владелец.** Бот, дайджест, отчёты и панель берут
-   «неделю на продукты», подписки и формат CSV из одних функций — иначе одно и
-   то же число разошлось бы между экранами.
+## Stack
 
-Подробно, с отвергнутыми вариантами — [docs/DECISIONS.md](docs/DECISIONS.md).
-
-## Tech Stack
-
-Python 3.11 · aiogram 3 · SQLite (aiosqlite) · Ollama (qwen2.5 + qwen3-vl) ·
-Tesseract (pytesseract) · OpenCV · pandas · matplotlib · pypdf · APScheduler ·
-Tkinter · Infisical (доставка секретов) · GitHub Actions
+Python · aiogram 3 · SQLite/aiosqlite · Ollama · Vision LLM · Tesseract · OpenCV · pandas · matplotlib · APScheduler · Tkinter · GitHub Actions
 
 ## Tests
 
-```bash
-venv\Scripts\python.exe smoke_test.py      # модули, БД, аналитика, диаграммы, профиль
-venv\Scripts\python.exe handlers_test.py   # реальные апдейты через настоящий Dispatcher
-venv\Scripts\python.exe receipt_test.py    # разбор чека по фото + продуктовый чек
-```
-
-`handlers_test.py` подменяет только сетевую сессию Telegram и проверяет, что у
-каждой кнопки есть обработчик. `receipt_test.py` прогоняет чек электроники,
-продуктовый чек с таблицей и узкий «кол-во × цена = итого», сверяя результат с
-эталонными суммами. Те же три набора идут в CI **без Ollama и без личных фото
-чеков** — если тест начнёт зависеть от модели или от данных владельца, он
-упадёт там, а не в тишине на машине. Для оценки чтения на всём наборе чеков —
-`receipt_inventory.py` ([docs/EVALUATION.md](docs/EVALUATION.md)).
+The repository includes smoke tests, handler tests and receipt scenarios covering different receipt layouts and arithmetic checks. CI runs the deterministic test path without requiring Ollama or personal receipt images.
 
 ## Limitations
 
-- Первое чтение чеков моделью зрения грузит её в память (~10–40 с); на слабой
-  видеокарте стоит взять модель поменьше, а `VISION_ENABLED=0` оставляет только
-  Tesseract (~7–8 с на чек).
-- Фото должно быть резким: на мутном снимке не спасёт ни модель, ни OCR —
-  сумму можно ввести текстом.
-- «Позиции, добранные OCR-ом» помечены ⚠️: арифметика сходится, но название
-  могло прийти не той строкой чека.
-- «Необязательные покупки» и динамика долей — статистика по вердиктам разбора,
-  а не измерение сэкономленных денег; в отчёте это написано прямо.
-- Хранилище — SQLite, бот рассчитан на личное/семейное использование
-  (2–3 пользователя), а не на многопользовательский сервис.
-
-Полный список честных границ — [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+- intended for personal/family use, not a multi-tenant financial SaaS;
+- poor-quality receipt photos can still produce uncertain OCR;
+- local Vision inference can be slow on low-end hardware;
+- recommendations are based on recorded data and do not prove actual savings.
 
 ## Local setup
 
-```bash
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-infisical run --env=dev -- python bot.py     # start_bot.bat делает то же самое
-```
-
-Секреты (токен бота, Telegram ID, ключ Ollama) лежат в **Infisical** и
-подставляются в процесс при запуске — на диске `.env` не нужен. Пошаговая
-инструкция: Python, Ollama (текстовая модель + модель зрения), Tesseract с
-русским языком, `infisical login`/`init`, автозапуск 24/7 — в
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
-
-Онлайн-демо намеренно нет: бот читает чеки и банковские выписки с локальной
-машины, и публичный инстанс противоречил бы смыслу проекта. Скриншоты и
-поведение воспроизводятся одной командой из репозитория.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## AI-assisted development
 
-Проект собран в паре с AI-ассистентом — на вакансию, где это преимущество, а не
-секрет.
+AI was used for implementation drafts, routine handlers, test-case generation and unfamiliar input formats.
 
-- **AI использовался как ускоритель:** черновики сервисов и хендлеров,
-  разбор незнакомых форматов (PDF-выписки банков, колоночные чеки), генерация
-  кейсов для тестов.
-- **На мне:** декомпозиция задачи; архитектура (двухступенчатое чтение чека,
-  сверка по арифметике, локальность как требование); интеграции с Ollama,
-  Tesseract и Telegram; отладка расхождений на реальных чеках; проверка
-  сгенерированного кода; сценарии тестов и финальное поведение продукта.
-
-Проверка результата — часть метода, а не пожелание: у чека есть объективный
-критерий (сумма позиций против итога кассы), и именно на нём построены и
-реализация, и тесты.
-
-## Docs
-
-[ARCHITECTURE.md](docs/ARCHITECTURE.md) — интерфейс, чтение чеков, разбор
-корзины, дайджест, панель · [DECISIONS.md](docs/DECISIONS.md) — инженерные
-решения и границы · [EVALUATION.md](docs/EVALUATION.md) — тесты, свои чеки,
-инвентарь · [SECURITY.md](docs/SECURITY.md) — приватность, whitelist, секреты ·
-[LIMITATIONS.md](docs/LIMITATIONS.md) — полный список ограничений.
-
-## Лицензия
-
-MIT — см. [LICENSE](LICENSE). Токены, ID и личные данные в репозиторий не
-входят. История версий — [CHANGELOG.md](CHANGELOG.md), текущая версия —
-[VERSION](VERSION).
+I owned the decomposition, architecture, integration decisions, debugging, validation and final product behaviour.
