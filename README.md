@@ -1,64 +1,237 @@
 # Finance Bot
 
-Local-first Telegram finance assistant for personal budgeting.
+> **Интересный личный проект, над которым я работал длительное время.** Это local-first Telegram-ассистент для учёта личных финансов, в котором я отдельно прорабатывал чтение чеков, валидацию данных, бюджеты, долги, регулярные платежи и общий сервисный слой для Telegram и desktop UI.
+>
+> **Status:** active portfolio project.
 
-> Photos sent to Telegram are downloaded by the bot; after that, AI processing is local. The core receipt pipeline does not require a third-party AI API.
+## Идея
 
-## What it does
+Пользователь отправляет фотографию чека.
 
-- reads receipts with a local Vision model (Ollama);
-- independently checks receipts with Tesseract OCR and arithmetic rules;
-- tracks expenses, categories, budgets, debts and subscriptions;
-- generates reports and scheduled digests;
-- includes a desktop control panel using the same service layer.
-
-## Why it is interesting
-
-The receipt pipeline deliberately uses two independent readers. If the item total does not agree with the receipt total, the bot flags the discrepancy instead of inventing a value.
-
-The same principle is used elsewhere: deterministic calculations for numbers, explicit uncertainty in reports and one source of truth for shared metrics.
-
-## Architecture
+Вместо одного вызова модели проект использует независимую цепочку:
 
 ```
-Telegram
-   ↓
-handlers
-   ↓
-services ───────────────→ SQLite
-   ↓
-receipt pipeline
-   ├─ local Vision model (Ollama)
-   └─ Tesseract OCR
-          ↓
-     arithmetic check
-          ↓
-     agreed receipt
+Telegram photo
+     ↓
+local Vision model
+     ↓
+Tesseract OCR
+     ↓
+arithmetic validation
+     ↓
+agreed receipt
+     ↓
+expense / category / reports
 ```
 
-The desktop panel uses the same service layer as the Telegram bot, so reports and UI do not implement separate financial rules.
+Если два независимых чтения расходятся по суммам, результат помечается как сомнительный, а не молча исправляется.
 
-## Stack
+## Возможности
 
-Python · aiogram 3 · SQLite/aiosqlite · Ollama · Vision LLM · Tesseract · OpenCV · pandas · matplotlib · APScheduler · Tkinter · GitHub Actions
+- добавление трат;
+- чтение чеков;
+- категории;
+- бюджеты;
+- долги;
+- подписки / регулярные платежи;
+- отчёты;
+- графики;
+- импорт банковских выписок;
+- плановые уведомления;
+- desktop panel на Tkinter;
+- локальная AI-обработка.
 
-## Tests
+## Local-first
 
-The repository includes smoke tests, handler tests and receipt scenarios covering different receipt layouts and arithmetic checks. CI runs the deterministic test path without requiring Ollama or personal receipt images.
+После того как Telegram передал фотографию боту, core receipt pipeline не требует стороннего AI API.
 
-## Limitations
+Используются:
 
-- intended for personal/family use, not a multi-tenant financial SaaS;
-- poor-quality receipt photos can still produce uncertain OCR;
-- local Vision inference can be slow on low-end hardware;
-- recommendations are based on recorded data and do not prove actual savings.
+- Ollama Vision;
+- Tesseract;
+- OpenCV/Pillow;
+- детерминированная арифметическая проверка.
 
-## Local setup
+Облачная Ollama также возможна, но это отдельный режим.
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+## Структура
+
+```
+bot.py                  # Telegram entrypoint
+panel.py                # Tkinter control panel
+config.py               # configuration
+
+ai/
+  llm.py                # parsing / advice
+  vision.py             # Vision model
+  ocr.py                # Tesseract
+  receipts.py           # reconciliation of two readings
+
+database/
+  models.py             # SQLite schema
+  db.py                 # bot CRUD
+  panel_data.py         # panel queries
+
+handlers/
+  ...                   # Telegram scenarios
+
+services/
+  ...                   # budgets, recurring payments,
+                         # price history, shopping list, etc.
+
+samples.py              # local sample receipt data
+
+docs/
+  DEVELOPMENT.md        # full installation / secrets / autostart
+
+tests/
+  ...                   # receipt and business-logic tests
+```
+
+## Быстрый запуск
+
+### Требования
+
+- Python 3.11/3.12;
+- Telegram Bot Token;
+- Ollama — для local Vision/LLM;
+- Tesseract OCR — для независимой проверки.
+
+### Установка
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Windows:
+
+```bat
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### Ollama
+
+Основная модель:
+
+```bash
+ollama pull qwen2.5:7b-instruct
+```
+
+Vision:
+
+```bash
+ollama pull qwen3-vl:8b-instruct
+```
+
+Для слабой машины можно использовать меньшие варианты, например `qwen2.5:3b-instruct` и `qwen3-vl:4b-instruct`.
+
+### Tesseract
+
+На Windows нужен Tesseract OCR и русский language data.
+
+Проверка:
+
+```bash
+tesseract --list-langs
+```
+
+В выводе должен присутствовать:
+
+```
+rus
+```
+
+## Секреты
+
+Рекомендуемый способ из документации проекта — Infisical.
+
+Основной Telegram token и другие чувствительные переменные не должны коммититься в Git.
+
+Базовые переменные:
+
+```
+BOT_TOKEN=...
+USER_ID_1=...
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=...
+VISION_ENABLED=1
+VISION_MODEL=...
+```
+
+Полная инструкция по Infisical, Windows, CI/CD и автозапуску находится в [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## Запуск бота
+
+Прямой запуск:
+
+```bash
+python bot.py
+```
+
+Если используется Infisical:
+
+```bash
+infisical run --env=dev -- python bot.py
+```
+
+Desktop panel:
+
+```bash
+infisical run --env=dev -- python panel.py
+```
+
+В репозитории также есть Windows start scripts.
+
+## Примеры использования
+
+Типичный сценарий:
+
+1. отправить боту фото чека;
+2. дождаться распознавания;
+3. проверить итоговую сумму / позиции;
+4. сохранить расход;
+5. открыть отчёт.
+
+Текстовые сценарии зависят от текущего меню бота; основная обработка находится в `handlers/`.
+
+## Бизнес-логика
+
+Проект не ограничивается OCR.
+
+Например:
+
+- бюджет хранится отдельно от списка расходов;
+- регулярные платежи имеют собственную service logic;
+- суммы и агрегаты рассчитываются детерминированно;
+- рекомендации строятся на уже записанных данных.
+
+Это делает проект ближе к прикладному сервису, чем к простой демонстрации LLM.
+
+## Тесты
+
+```bash
+pytest -q
+```
+
+CI специально отделяет детерминированную часть от зависимости на Ollama и реальные пользовательские фото.
+
+## Ограничения
+
+- плохое фото чека может привести к неопределённому OCR;
+- локальная Vision inference может быть медленной;
+- проект рассчитан на личное / семейное использование, а не на multi-tenant SaaS;
+- рекомендации не гарантируют фактической экономии.
 
 ## AI-assisted development
 
-AI was used for implementation drafts, routine handlers, test-case generation and unfamiliar input formats.
+AI использовался для черновой реализации, рутинных handlers, тестовых сценариев и работы с незнакомыми форматами входных данных.
 
-I owned the decomposition, architecture, integration decisions, debugging, validation and final product behaviour.
+Архитектура, decomposition, интеграции, debugging, validation и итоговое поведение оставались моей задачей.
+
+## Лицензия
+
+MIT.
