@@ -308,6 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [
       PulsePage(api: widget.api),
+      FinancePage(api: widget.api),
       ImportPage(api: widget.api),
       WorkspacePage(api: widget.api),
       ProfilePage(api: widget.api, onLogout: widget.onLogout),
@@ -319,6 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onDestinationSelected: (value) => setState(() => tab = value),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.monitor_heart), label: 'Пульс'),
+          NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Деньги'),
           NavigationDestination(icon: Icon(Icons.add_circle_outline), label: 'Импорт'),
           NavigationDestination(icon: Icon(Icons.favorite_border), label: 'Пара'),
           NavigationDestination(icon: Icon(Icons.person_outline), label: 'Профиль'),
@@ -352,6 +354,174 @@ class PulsePage extends StatelessWidget {
         ]);
       },
     );
+  }
+}
+
+
+class FinancePage extends StatefulWidget {
+  const FinancePage({super.key, required this.api});
+  final ApiClient api;
+
+  @override
+  State<FinancePage> createState() => _FinancePageState();
+}
+
+class _FinancePageState extends State<FinancePage> {
+  final amount = TextEditingController();
+  final description = TextEditingController();
+  final budget = TextEditingController();
+  final debtName = TextEditingController();
+  final debtAmount = TextEditingController();
+  String category = 'прочее';
+  String txType = 'expense';
+  int refreshKey = 0;
+  bool busy = false;
+  String? message;
+
+  Future<Map<String, dynamic>> load() async {
+    final values = await Future.wait([
+      widget.api.call('categories'),
+      widget.api.call('dashboard'),
+      widget.api.call('budgets'),
+      widget.api.call('debts'),
+    ]);
+    return {
+      'categories': values[0],
+      'dashboard': values[1],
+      'budgets': values[2],
+      'debts': values[3],
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, dynamic>>(
+      key: ValueKey(refreshKey),
+      future: load(),
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        final categories = (data?['categories'] as List<dynamic>? ?? ['прочее']).cast<String>();
+        if (!categories.contains(category)) category = categories.first;
+        final dashboard = data?['dashboard'] as Map<String, dynamic>?;
+        final budgets = data?['budgets'] as Map<String, dynamic>?;
+        final debts = data?['debts'] as List<dynamic>? ?? [];
+        final recent = dashboard?['recent'] as List<dynamic>? ?? [];
+        if (budget.text.isEmpty && budgets != null) budget.text = budgets['total'].toString();
+        return Page(title: 'Деньги', children: [
+          if (!snapshot.hasData) const LinearProgressIndicator(),
+          if (dashboard != null) Row(children: [
+            Expanded(child: MetricCard(title: 'Остаток', value: '${dashboard['remaining']} ₽', accent: true)),
+            const SizedBox(width: 8),
+            Expanded(child: MetricCard(title: 'Долги', value: '${dashboard['total_debt']} ₽')),
+          ]),
+          Card(child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Новая операция', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              TextField(controller: amount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Сумма')),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(initialValue: txType, decoration: const InputDecoration(labelText: 'Тип'), items: const [
+                DropdownMenuItem(value: 'expense', child: Text('Расход')),
+                DropdownMenuItem(value: 'income', child: Text('Доход')),
+              ], onChanged: (value) => setState(() => txType = value!)),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(initialValue: category, decoration: const InputDecoration(labelText: 'Категория'), items: [
+                for (final item in categories) DropdownMenuItem(value: item, child: Text(item)),
+              ], onChanged: (value) => setState(() => category = value!)),
+              const SizedBox(height: 12),
+              TextField(controller: description, decoration: const InputDecoration(labelText: 'Описание')),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: busy ? null : addTransaction, child: const Text('Сохранить')),
+            ]),
+          )),
+          Card(child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Бюджет месяца', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              TextField(controller: budget, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Лимит')),
+              const SizedBox(height: 12),
+              OutlinedButton(onPressed: busy ? null : saveBudget, child: const Text('Сохранить бюджет')),
+            ]),
+          )),
+          Card(child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Долги', style: Theme.of(context).textTheme.titleLarge),
+              for (final debt in debts) ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(debt['name'].toString()),
+                subtitle: Text('Осталось ${debt['current_amount']} ₽ · платёж ${debt['min_payment']} ₽'),
+              ),
+              const SizedBox(height: 8),
+              TextField(controller: debtName, decoration: const InputDecoration(labelText: 'Название долга')),
+              const SizedBox(height: 8),
+              TextField(controller: debtAmount, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Сумма долга')),
+              const SizedBox(height: 8),
+              FilledButton(onPressed: busy ? null : addDebt, child: const Text('Добавить долг')),
+            ]),
+          )),
+          const Text('Последние операции', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          for (final tx in recent) Card(child: ListTile(
+            title: Text(tx['description']?.toString().isEmpty == false ? tx['description'].toString() : tx['category'].toString()),
+            subtitle: Text('${tx['created_at']} · ${tx['category']}'),
+            trailing: Text('${tx['amount']} ₽'),
+          )),
+          if (busy) const LinearProgressIndicator(),
+          if (message != null) Text(message!),
+        ]);
+      },
+    );
+  }
+
+  double parsed(TextEditingController controller) => double.parse(controller.text.replaceAll(',', '.'));
+
+  Future<void> addTransaction() async {
+    await runAction(() async {
+      await widget.api.call('transactions', method: 'POST', body: {
+        'amount': parsed(amount),
+        'category': category,
+        'description': description.text,
+        'tx_type': txType,
+      });
+      amount.clear();
+      description.clear();
+      message = 'Операция сохранена.';
+    });
+  }
+
+  Future<void> saveBudget() async {
+    await runAction(() async {
+      await widget.api.call('budgets', method: 'PUT', body: {'total': parsed(budget), 'limits': {}, 'weekly_food': 0});
+      message = 'Бюджет сохранён.';
+    });
+  }
+
+  Future<void> addDebt() async {
+    await runAction(() async {
+      await widget.api.call('debts', method: 'POST', body: {
+        'name': debtName.text,
+        'current_amount': parsed(debtAmount),
+        'interest_rate': 0,
+        'min_payment': 0,
+      });
+      debtName.clear();
+      debtAmount.clear();
+      message = 'Долг добавлен.';
+    });
+  }
+
+  Future<void> runAction(Future<void> Function() action) async {
+    setState(() { busy = true; message = null; });
+    try {
+      await action();
+      setState(() => refreshKey++);
+    } catch (_) {
+      setState(() => message = 'Не удалось сохранить. Проверь сумму и сервер.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 }
 
