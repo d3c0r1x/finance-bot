@@ -321,6 +321,37 @@ flutter build web
 - `GET/PUT /workspace`;
 - `POST /import/tbank-notification`.
 
+## Local AI worker: llama.cpp + Bonsai 2
+
+Для разработки добавлен локальный worker поверх llama.cpp OpenAI-compatible API.
+Он использует Bonsai 2 как дешёвого помощника для сводок, ревью, планов патча и
+поиска рисков. Worker не меняет файлы сам; финальные правки и тесты остаются под
+контролем основного агента.
+
+Спецификация: [docs/LOCAL_LLM_ORCHESTRATOR_SPEC.md](docs/LOCAL_LLM_ORCHESTRATOR_SPEC.md).
+
+Настройки по умолчанию:
+
+```powershell
+$env:FINPULSE_LOCAL_LLM_BASE_URL="http://127.0.0.1:8080/v1"
+$env:FINPULSE_LOCAL_LLM_MODEL="bonsai-2"
+```
+
+Проверка связи:
+
+```powershell
+.\.venv\Scripts\python.exe -m agentic.local_worker --check
+```
+
+Пример ревью:
+
+```powershell
+.\.venv\Scripts\python.exe -m agentic.local_worker `
+  --mode review `
+  --task "Проверить API-слой на ошибки интеграции" `
+  --files backend/app.py backend/auth.py backend/test_api.py
+```
+
 ## Примеры использования
 
 Типичный сценарий:
