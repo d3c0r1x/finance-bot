@@ -6,6 +6,7 @@ import aiosqlite
 from datetime import datetime, timedelta
 from config import DB_PATH, USERS
 from database.models import CREATE_TABLES, INITIAL_DEBTS, MIGRATIONS
+from database.context import database_path
 
 
 def _now_iso() -> str:
@@ -28,8 +29,8 @@ async def _migrate(db) -> None:
 
 
 async def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    async with aiosqlite.connect(DB_PATH) as db:
+    os.makedirs(os.path.dirname(database_path(DB_PATH)), exist_ok=True)
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         await db.executescript(CREATE_TABLES)
         await _migrate(db)
         # Инициализация долгов, если таблица пустая
@@ -50,7 +51,7 @@ async def ensure_user(telegram_id: int, display_name: str | None = None):
     if not info:
         return
     name = (display_name or info.get("name") or "Пользователь").strip()
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         await db.execute(
             "INSERT OR IGNORE INTO users (telegram_id, name, role) VALUES (?, ?, ?)",
             (telegram_id, name, info["role"]),
@@ -79,7 +80,7 @@ async def add_transactions_bulk(user_id, rows: list[tuple]) -> list[int]:
     debt_target, source, created_at). Возвращает id в порядке вставки.
     """
     ids: list[int] = []
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         for (amount, category, subcategory, description,
              tx_type, debt_target, source, created_at) in rows:
             cursor = await db.execute(
@@ -105,7 +106,7 @@ async def add_transactions_bulk(user_id, rows: list[tuple]) -> list[int]:
 
 async def get_transaction(transaction_id: int, user_id: int | None = None):
     """Возвращает запись только владельцу — используется для повторения и отмены."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         query = "SELECT * FROM transactions WHERE id = ?"
         params = [transaction_id]
@@ -118,7 +119,7 @@ async def get_transaction(transaction_id: int, user_id: int | None = None):
 
 async def get_recent_transactions(user_id: int, limit: int = 8):
     """Последние записи пользователя для быстрого контроля расходов."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM transactions WHERE user_id = ? "
@@ -134,7 +135,7 @@ async def find_similar_transaction(user_id: int, amount: float, tx_type: str = "
     Без этой проверки расход считается дважды и бюджет врёт. Ищем только свои записи и
     только за последние минуты: ту же покупку через день — это уже другая покупка.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         since = (datetime.now() - timedelta(minutes=minutes)).isoformat(sep=" ")
         cursor = await db.execute(
@@ -154,7 +155,7 @@ async def update_bank_merchant(user_id: int, merchant: str, category: str,
     а всю историю этого магазина — иначе завтра та же покупка снова стала бы «прочее».
     Возвращает число обновлённых записей.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         cursor = await db.execute(
             """UPDATE transactions SET category = ?, subcategory = COALESCE(?, subcategory)
                WHERE user_id = ? AND source = 'bank' AND subcategory IS NULL AND description LIKE ?""",
@@ -174,7 +175,7 @@ async def delete_transactions_by_ids(user_id: int, ids: list[int],
     if not clean:
         return 0
     removed = 0
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         placeholders = ",".join("?" for _ in clean)
         query = f"DELETE FROM transactions WHERE id IN ({placeholders}) AND user_id = ?"
         params: list = list(clean) + [user_id]
@@ -192,7 +193,7 @@ async def delete_transactions_by_ids(user_id: int, ids: list[int],
 
 async def delete_transaction(transaction_id: int, user_id: int) -> bool:
     """Удаляет запись владельца и её позиции; платёж по долгу возвращает остаток."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM transactions WHERE id = ? AND user_id = ?",
@@ -215,7 +216,7 @@ async def add_receipt_items(transaction_id: int, items: list[dict]) -> None:
     """Сохраняет позиции чека, чтобы потом можно было смотреть и анализировать покупки."""
     if not items:
         return
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         await db.executemany(
             "INSERT INTO receipt_items (transaction_id, name, qty, price, sum) VALUES (?, ?, ?, ?, ?)",
             [(transaction_id, item.get("name") or "Позиция", item.get("qty") or 1,
@@ -225,7 +226,7 @@ async def add_receipt_items(transaction_id: int, items: list[dict]) -> None:
 
 
 async def get_receipt_items(transaction_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT * FROM receipt_items WHERE transaction_id = ? ORDER BY id", (transaction_id,))
@@ -253,7 +254,7 @@ async def save_receipt_verdicts(transaction_id: int, rows: list[tuple]) -> int:
     queue: dict[str, deque] = {}
     for row in rows:
         queue.setdefault(_receipt_name_key(row[0]), deque()).append(row)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         cursor = await db.execute(
             "SELECT id, name FROM receipt_items WHERE transaction_id = ? ORDER BY id",
             (transaction_id,))
@@ -281,7 +282,7 @@ async def update_receipt_verdict(item_id: int, verdict: str, advice: str,
     Пишется то же, что и при разборе, и источник ставится рядом: после пересчёта это уже
     не догадка модели, а проверка по названию, и отчёт должен видеть это так же.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         await db.execute(
             "UPDATE receipt_items SET verdict = ?, advice = ?, verdict_source = ? WHERE id = ?",
             (verdict, advice, source, item_id))
@@ -310,7 +311,7 @@ async def get_receipt_verdicts(user_id: int | None = None, limit: int = 2000,
     # иначе отчёт читался бы снизу вверх.
     query += " ORDER BY t.created_at DESC, i.id LIMIT ?"
     params.append(limit)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(query, tuple(params))
         return await cursor.fetchall()
@@ -323,7 +324,7 @@ async def get_receipt_price_history(user_id: int, limit: int = 500):
     может сам повлиять на свою рекомендацию. Сопоставление названий живёт в сервисе,
     а база отвечает только за полную и изолированную выборку пользователя.
     """
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             "SELECT i.name, i.qty, i.price, i.sum, t.created_at, t.description "
@@ -336,7 +337,7 @@ async def get_receipt_price_history(user_id: int, limit: int = 500):
 
 
 async def get_transactions(user_id=None, days=30, tx_type=None):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         since = (datetime.now() - timedelta(days=days)).isoformat(sep=" ")
         query = "SELECT * FROM transactions WHERE created_at > ?"
@@ -354,7 +355,7 @@ async def get_transactions(user_id=None, days=30, tx_type=None):
 
 async def has_transactions(user_id=None) -> bool:
     """Есть ли у пользователя хоть одна запись — по этому определяем, новый он или нет."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         query = "SELECT 1 FROM transactions"
         params: list = []
         if user_id:
@@ -366,7 +367,7 @@ async def has_transactions(user_id=None) -> bool:
 
 async def get_monthly_spending(user_id=None):
     """Возвращает траты по категориям за текущий месяц."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         first_day = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(sep=" ")
         query = """
             SELECT category, SUM(amount) as total
@@ -383,7 +384,7 @@ async def get_monthly_spending(user_id=None):
 
 
 async def get_debts(include_closed=False):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         query = "SELECT * FROM debts"
         if not include_closed:
@@ -394,14 +395,14 @@ async def get_debts(include_closed=False):
 
 
 async def get_debt(debt_id: str):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM debts WHERE id = ?", (debt_id,))
         return await cursor.fetchone()
 
 
 async def get_total_spent_this_month(user_id=None):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         first_day = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(sep=" ")
         query = "SELECT SUM(amount) FROM transactions WHERE created_at > ? AND tx_type = 'expense'"
         params = [first_day]
@@ -414,7 +415,7 @@ async def get_total_spent_this_month(user_id=None):
 
 
 async def get_month_income(user_id=None):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         first_day = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(sep=" ")
         query = "SELECT SUM(amount) FROM transactions WHERE created_at > ? AND tx_type = 'income'"
         params = [first_day]
@@ -427,7 +428,7 @@ async def get_month_income(user_id=None):
 
 
 async def set_setting(key: str, value: str):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         await db.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -438,13 +439,13 @@ async def set_setting(key: str, value: str):
 
 async def delete_setting(key: str) -> None:
     """Удаляет настройку — так личный лимит возвращается к семейному значению."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         await db.execute("DELETE FROM settings WHERE key = ?", (key,))
         await db.commit()
 
 
 async def get_setting(key: str, default=None):
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         cursor = await db.execute("SELECT value FROM settings WHERE key = ?", (key,))
         row = await cursor.fetchone()
         return row[0] if row else default
@@ -452,6 +453,6 @@ async def get_setting(key: str, default=None):
 
 async def get_all_settings() -> dict:
     """Все настройки одной выборкой (бюджет читается на каждое сообщение)."""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with aiosqlite.connect(database_path(DB_PATH)) as db:
         cursor = await db.execute("SELECT key, value FROM settings")
         return {key: value for key, value in await cursor.fetchall()}

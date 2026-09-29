@@ -39,6 +39,8 @@ expense / category / reports
 - импорт банковских выписок;
 - плановые уведомления;
 - desktop panel на Tkinter;
+- Android-приложение на Kotlin + Jetpack Compose;
+- FastAPI backend с username/password и JWT;
 - локальная AI-обработка.
 
 ## Local-first
@@ -79,10 +81,21 @@ services/
   ...                   # budgets, recurring payments,
                          # price history, shopping list, etc.
 
+backend/
+  app.py                # FastAPI API для Android
+  auth.py               # username/password, JWT access/refresh
+  finance.py            # bridge к существующему Python core
+  schemas.py            # API validation
+
+android/
+  app/                  # Kotlin + Jetpack Compose client
+  gradlew               # Android build wrapper
+
 samples.py              # local sample receipt data
 
 docs/
   DEVELOPMENT.md        # full installation / secrets / autostart
+  MOBILE_SPEC.md        # mobile/API specification
 
 tests/
   ...                   # receipt and business-logic tests
@@ -185,6 +198,66 @@ infisical run --env=dev -- python panel.py
 ```
 
 В репозитории также есть Windows start scripts.
+
+## Android + FastAPI
+
+Mobile-слой живет рядом с существующим Telegram-ботом и не ломает его entrypoint.
+Android-клиент работает через FastAPI, а backend переиспользует текущий Python core:
+транзакции, чеки/OCR/AI, бюджеты, долги, аналитику, recurring, историю цен,
+список покупок и импорт банковских PDF.
+
+Для mobile-аккаунтов используется username/password. Backend выдает short-lived
+JWT access token и refresh token с ротацией. Данные каждого mobile-пользователя
+пишутся в отдельный SQLite-файл под `FINANCE_API_DATA`; legacy Telegram-база
+остается отдельной.
+
+Запуск backend:
+
+```bash
+pip install -r backend/requirements.txt
+uvicorn backend.app:app --host 127.0.0.1 --port 8000
+```
+
+Переменные:
+
+```bash
+FINANCE_API_DATA=data/mobile
+FINANCE_JWT_SECRET=change-me-to-a-long-random-secret
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5:7b-instruct
+VISION_ENABLED=1
+VISION_MODEL=qwen3-vl:8b-instruct
+```
+
+Android debug build:
+
+```bash
+cd android
+gradlew.bat :app:assembleDebug
+```
+
+APK для эмулятора появляется здесь:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+В debug-сборке приложение по умолчанию смотрит на `http://10.0.2.2:8000`,
+то есть на backend, запущенный на host-машине рядом с Android emulator.
+В профиле приложения можно поменять URL API.
+
+Проверки mobile-слоя:
+
+```bash
+python -m pytest backend/test_api.py -q
+cd android
+gradlew.bat :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+gradlew.bat :app:connectedDebugAndroidTest
+```
+
+Instrumentation-тест регистрирует пользователя в эмуляторе, проходит onboarding,
+добавляет расход, повторяет его, переключает RU/EN и dark/light, пересоздает
+Activity и проверяет сохранение сессии.
 
 ## Примеры использования
 

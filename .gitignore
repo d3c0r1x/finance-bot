@@ -20,3 +20,12 @@ receipt_samples.json
 
 # Логи
 *.log
+
+# Mobile build output and machine-local configuration
+android/.gradle/
+android/local.properties
+android/**/build/
+android/.kotlin/
+artifacts/
+.pytest_cache/
+build-tools/
