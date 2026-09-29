@@ -395,12 +395,12 @@ class _WorkspacePageState extends State<WorkspacePage> {
         onSelectionChanged: (value) => setState(() => mode = value.first),
       ),
       TextField(controller: partner, decoration: const InputDecoration(labelText: 'Имя партнёра')),
-      DropdownButtonFormField<String>(value: visibility, decoration: const InputDecoration(labelText: 'Видимость по умолчанию'), items: const [
+      DropdownButtonFormField<String>(initialValue: visibility, decoration: const InputDecoration(labelText: 'Видимость по умолчанию'), items: const [
         DropdownMenuItem(value: 'private', child: Text('Личное')),
         DropdownMenuItem(value: 'shared', child: Text('Общее')),
         DropdownMenuItem(value: 'amount_only', child: Text('Только сумма')),
       ], onChanged: (value) => setState(() => visibility = value!)),
-      DropdownButtonFormField<String>(value: split, decoration: const InputDecoration(labelText: 'Разделение по умолчанию'), items: const [
+      DropdownButtonFormField<String>(initialValue: split, decoration: const InputDecoration(labelText: 'Разделение по умолчанию'), items: const [
         DropdownMenuItem(value: 'none', child: Text('Не делить')),
         DropdownMenuItem(value: 'equal', child: Text('50/50')),
         DropdownMenuItem(value: 'percent', child: Text('Процентами')),
@@ -479,3 +479,4 @@ class MetricCard extends StatelessWidget {
     );
   }
 }
+
