@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -63,6 +64,33 @@ class ApiClient {
       throw Exception(response.body);
     }
     return response.body.isEmpty ? null : jsonDecode(response.body);
+  }
+
+  Map<String, String> authHeaders() {
+    final headers = {'Content-Type': 'application/json'};
+    final access = token;
+    if (access != null) headers['Authorization'] = 'Bearer $access';
+    return headers;
+  }
+
+  Future<Map<String, dynamic>> uploadBankStatement({required String filename, required List<int> bytes, bool retried = false}) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/v1/import/bank-statement'));
+    final access = token;
+    if (access != null) request.headers['Authorization'] = 'Bearer $access';
+    request.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final response = await http.Response.fromStream(await request.send());
+    if (response.statusCode == 401 && refreshToken != null && !retried) {
+      await refresh();
+      return uploadBankStatement(filename: filename, bytes: bytes, retried: true);
+    }
+    if (response.statusCode >= 400) {
+      throw Exception(response.body);
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> confirmImport(String previewId) async {
+    return await call('import/confirm', method: 'POST', body: {'preview_id': previewId}) as Map<String, dynamic>;
   }
 
   Future<void> authenticate({
@@ -338,20 +366,105 @@ class ImportPage extends StatefulWidget {
 class _ImportPageState extends State<ImportPage> {
   final text = TextEditingController();
   String? result;
+  Map<String, dynamic>? bankPreview;
+  bool busy = false;
 
   @override
   Widget build(BuildContext context) {
-    return Page(title: 'Т-Банк', children: [
-      const Text('Вставь текст SMS/push от Т-Банка. Android notification listener будет следующим этапом.'),
+    final preview = bankPreview;
+    return Page(title: 'Импорт', children: [
+      const Text('SMS/push от Т-Банка'),
       TextField(controller: text, minLines: 4, maxLines: 8, decoration: const InputDecoration(labelText: 'Текст уведомления')),
-      FilledButton(onPressed: importText, child: const Text('Импортировать')),
+      FilledButton(onPressed: busy ? null : importText, child: const Text('Импортировать уведомление')),
+      const Divider(height: 32),
+      const Text('PDF-выписка Т-Банка', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+      const Text('Выбери справку о движении средств. Сервер покажет операции и дубли перед импортом.'),
+      OutlinedButton.icon(onPressed: busy ? null : pickBankPdf, icon: const Icon(Icons.picture_as_pdf), label: const Text('Выбрать PDF')),
+      if (preview != null) BankPreviewCard(preview: preview, onConfirm: busy ? null : confirmBankImport),
+      if (busy) const LinearProgressIndicator(),
       if (result != null) Text(result!),
     ]);
   }
 
   Future<void> importText() async {
-    final response = await widget.api.call('import/tbank-notification', method: 'POST', body: {'text': text.text});
-    setState(() => result = 'Создана операция #${response['id']}');
+    setState(() { busy = true; result = null; });
+    try {
+      final response = await widget.api.call('import/tbank-notification', method: 'POST', body: {'text': text.text});
+      setState(() => result = 'Создана операция #${response['id']}');
+    } catch (_) {
+      setState(() => result = 'Не удалось импортировать уведомление. Проверь текст и сервер.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> pickBankPdf() async {
+    setState(() { busy = true; result = null; bankPreview = null; });
+    try {
+      final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['pdf'], withData: true);
+      final file = picked?.files.single;
+      final bytes = file?.bytes;
+      if (file == null || bytes == null) {
+        setState(() => result = 'PDF не выбран.');
+        return;
+      }
+      final preview = await widget.api.uploadBankStatement(filename: file.name, bytes: bytes);
+      setState(() {
+        bankPreview = preview;
+        result = 'Найдено операций: ${preview['operations'].length}. Проверь и подтверди импорт.';
+      });
+    } catch (_) {
+      setState(() => result = 'Не удалось прочитать PDF. Нужна справка Т-Банка о движении средств.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> confirmBankImport() async {
+    final previewId = bankPreview?['preview_id']?.toString();
+    if (previewId == null) return;
+    setState(() { busy = true; result = null; });
+    try {
+      final imported = await widget.api.confirmImport(previewId);
+      setState(() {
+        bankPreview = null;
+        result = 'Импортировано: ${imported['imported']}. Пропущено дублей: ${imported['skipped']}.';
+      });
+    } catch (_) {
+      setState(() => result = 'Импорт не подтверждён. Возможно, итоги PDF не сошлись.');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+}
+
+class BankPreviewCard extends StatelessWidget {
+  const BankPreviewCard({super.key, required this.preview, required this.onConfirm});
+  final Map<String, dynamic> preview;
+  final VoidCallback? onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final operations = preview['operations'] as List<dynamic>;
+    final checkOk = preview['check_ok'] == true;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Предпросмотр PDF', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Text('Расходы: ${preview['expenses']} ₽'),
+          Text('Доходы: ${preview['income']} ₽'),
+          Text('Дубли: ${preview['duplicates']}'),
+          Text(checkOk ? 'Итоги банка сошлись' : 'Итоги банка не сошлись', style: TextStyle(color: checkOk ? Colors.green : Colors.red)),
+          const SizedBox(height: 8),
+          for (final op in operations.take(5)) Text('${op['date']} · ${op['merchant'] ?? op['description']} · ${op['amount']} ₽'),
+          if (operations.length > 5) Text('И ещё ${operations.length - 5} операций'),
+          const SizedBox(height: 12),
+          FilledButton(onPressed: checkOk ? onConfirm : null, child: const Text('Подтвердить импорт')),
+        ]),
+      ),
+    );
   }
 }
 
@@ -479,4 +592,5 @@ class MetricCard extends StatelessWidget {
     );
   }
 }
+
 
