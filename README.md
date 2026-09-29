@@ -39,6 +39,8 @@ expense / category / reports
 - импорт банковских выписок;
 - плановые уведомления;
 - desktop panel на Tkinter;
+- Android-приложение на Kotlin + Jetpack Compose;
+- FastAPI backend с username/password и JWT;
 - локальная AI-обработка.
 
 ## Local-first
@@ -79,10 +81,21 @@ services/
   ...                   # budgets, recurring payments,
                          # price history, shopping list, etc.
 
+backend/
+  app.py                # FastAPI API для Android
+  auth.py               # username/password, JWT access/refresh
+  finance.py            # bridge к существующему Python core
+  schemas.py            # API validation
+
+android/
+  app/                  # Kotlin + Jetpack Compose client
+  gradlew               # Android build wrapper
+
 samples.py              # local sample receipt data
 
 docs/
   DEVELOPMENT.md        # full installation / secrets / autostart
+  MOBILE_SPEC.md        # mobile/API specification
 
 tests/
   ...                   # receipt and business-logic tests
@@ -185,6 +198,159 @@ infisical run --env=dev -- python panel.py
 ```
 
 В репозитории также есть Windows start scripts.
+
+## FinPulse Android + FastAPI
+
+Mobile-слой называется **FinPulse** (`ФинПульс`) и живет рядом с существующим Telegram-ботом, не ломая его entrypoint.
+Android-клиент работает через FastAPI, а backend переиспользует текущий Python core:
+транзакции, чеки/OCR/AI, бюджеты, долги, аналитику, recurring, историю цен,
+список покупок и импорт банковских PDF.
+
+Новая целевая ветка продукта описана в [docs/HOME_SERVER_FLUTTER_SPEC.md](docs/HOME_SERVER_FLUTTER_SPEC.md):
+текущий ПК работает как 24/7 home server, Android получает Flutter APK, iPhone
+получает Flutter Web/PWA до появления Mac/Xcode или cloud iOS builder.
+
+Для mobile-аккаунтов используется username/password. Backend выдает short-lived
+JWT access token и refresh token с ротацией. Данные каждого mobile-пользователя
+пишутся в отдельный SQLite-файл под `FINANCE_API_DATA`; legacy Telegram-база
+остается отдельной.
+
+Запуск backend для телефона в той же Wi-Fi/LAN сети:
+
+```bat
+start_mobile_server.bat
+```
+
+По умолчанию сервер слушает `0.0.0.0:8000` и печатает URL для телефона.
+Для текущей машины это:
+
+```text
+http://192.168.3.48:8000
+```
+
+Если Windows Firewall блокирует входящие подключения, открой PowerShell от администратора:
+
+```powershell
+.\open_mobile_port_8000_admin.ps1
+```
+
+Автозапуск сервера при входе в Windows:
+
+```powershell
+.\install_mobile_server_autostart.ps1
+```
+
+Проверка домашней сети и публичного IP:
+
+```powershell
+.\check_home_network.ps1
+```
+
+Для доступа с улицы без внешнего сервера нужен проброс порта с роутера на этот ПК.
+HTTPS/reverse proxy пример лежит в `deploy/home-server/Caddyfile.example`.
+
+Ручной запуск backend:
+
+```bash
+pip install -r backend/requirements.txt
+uvicorn backend.app:app --host 0.0.0.0 --port 8000
+```
+
+Переменные:
+
+```bash
+FINANCE_API_DATA=data/mobile
+FINANCE_JWT_SECRET=change-me-to-a-long-random-secret
+OLLAMA_HOST=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen2.5:7b-instruct
+VISION_ENABLED=1
+VISION_MODEL=qwen3-vl:8b-instruct
+```
+
+Android debug build:
+
+```bash
+cd android
+gradlew.bat :app:assembleDebug
+```
+
+APK для эмулятора появляется здесь:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+В этой debug-сборке приложение по умолчанию смотрит на `http://192.168.3.48:8000`.
+Для Android emulator поменяй адрес на экране входа или в профиле на `http://10.0.2.2:8000`.
+В профиле приложения URL API можно поменять в любой момент.
+
+Проверки mobile-слоя:
+
+```bash
+python -m pytest backend/test_api.py -q
+cd android
+gradlew.bat :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+gradlew.bat :app:connectedDebugAndroidTest
+```
+
+Instrumentation-тест регистрирует пользователя в эмуляторе, проходит onboarding,
+добавляет расход, повторяет его, переключает RU/EN и dark/light, пересоздает
+Activity и проверяет сохранение сессии.
+
+## Flutter Android/Web client
+
+Flutter-клиент лежит в `mobile_flutter/`. Он станет общей базой для Android APK
+и iPhone Web/PWA. Текущий Kotlin-клиент пока оставлен рабочим, чтобы APK не
+сломался во время миграции.
+
+После установки Flutter SDK:
+
+```bash
+cd mobile_flutter
+flutter pub get
+flutter run -d chrome
+flutter build apk --debug
+flutter build web
+```
+
+Первый Flutter slice уже использует backend:
+
+- login/register;
+- `GET /server/config`;
+- `GET /pulse/today`;
+- `GET/PUT /workspace`;
+- `POST /import/tbank-notification`.
+
+## Local AI worker: llama.cpp + Bonsai 2
+
+Для разработки добавлен локальный worker поверх llama.cpp OpenAI-compatible API.
+Он использует Bonsai 2 как дешёвого помощника для сводок, ревью, планов патча и
+поиска рисков. Worker не меняет файлы сам; финальные правки и тесты остаются под
+контролем основного агента.
+
+Спецификация: [docs/LOCAL_LLM_ORCHESTRATOR_SPEC.md](docs/LOCAL_LLM_ORCHESTRATOR_SPEC.md).
+
+Настройки по умолчанию:
+
+```powershell
+$env:FINPULSE_LOCAL_LLM_BASE_URL="http://127.0.0.1:8080/v1"
+$env:FINPULSE_LOCAL_LLM_MODEL="bonsai-2"
+```
+
+Проверка связи:
+
+```powershell
+.\.venv\Scripts\python.exe -m agentic.local_worker --check
+```
+
+Пример ревью:
+
+```powershell
+.\.venv\Scripts\python.exe -m agentic.local_worker `
+  --mode review `
+  --task "Проверить API-слой на ошибки интеграции" `
+  --files backend/app.py backend/auth.py backend/test_api.py
+```
 
 ## Примеры использования
 
