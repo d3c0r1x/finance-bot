@@ -68,6 +68,11 @@ Make a usable home-server app for two people.
    - HTTPS.
    - Windows autostart.
    - Firewall setup guide.
+   - Network reality check:
+     - run `check_home_network.ps1`;
+     - compare public IPv4 with router WAN IPv4;
+     - if values differ, provider uses CG-NAT and direct inbound internet access
+       cannot work without changing provider/router plan or using some gateway.
 
 3. Daily use polish
    - Offline queue.
@@ -81,4 +86,5 @@ Make a usable home-server app for two people.
 - Backend exposes server config, pulse, workspace and T-Bank notification endpoints.
 - Backend tests cover new endpoints.
 - Flutter project skeleton exists and targets Android/Web.
+- Home-server helper scripts exist for autostart and network diagnosis.
 - Existing Android/Kotlin build remains intact until Flutter replaces it.

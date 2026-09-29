@@ -1,0 +1,8 @@
+# FinPulse home-server HTTPS reverse proxy.
+#
+# Replace finpulse.example.com with your DDNS/domain.
+# Router must forward TCP 443 to this PC.
+
+finpulse.example.com {
+    reverse_proxy 127.0.0.1:8000
+}

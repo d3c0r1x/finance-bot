@@ -234,6 +234,21 @@ http://192.168.3.48:8000
 .\open_mobile_port_8000_admin.ps1
 ```
 
+Автозапуск сервера при входе в Windows:
+
+```powershell
+.\install_mobile_server_autostart.ps1
+```
+
+Проверка домашней сети и публичного IP:
+
+```powershell
+.\check_home_network.ps1
+```
+
+Для доступа с улицы без внешнего сервера нужен проброс порта с роутера на этот ПК.
+HTTPS/reverse proxy пример лежит в `deploy/home-server/Caddyfile.example`.
+
 Ручной запуск backend:
 
 ```bash
