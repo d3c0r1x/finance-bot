@@ -66,6 +66,8 @@ def test_crud_debt_budget_and_isolation(client):
 
 def test_validation_and_feature_reads(client):
     headers, _ = register(client)
+    assert client.options("/api/v1/server/config", headers={"Origin": "http://localhost:8080",
+                                                            "Access-Control-Request-Method": "GET"}).status_code == 200
     for amount in [-1, 0, "nan", "inf", 100000001]:
         assert client.post("/api/v1/transactions", headers=headers, json={"amount": amount}).status_code == 422
     for endpoint in ["dashboard", "pulse/today", "budgets", "products", "shopping-list", "recurring", "settings", "workspace", "categories", "reports/summary"]:

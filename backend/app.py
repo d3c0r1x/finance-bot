@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.auth import AuthStore
@@ -47,6 +48,9 @@ def create_app(data_dir=None, secret=None):
         raise ValueError("FINANCE_JWT_SECRET must contain at least 32 characters")
     auth = AuthStore(root, secret)
     app = FastAPI(title="Finance Mobile API", version="0.1.0")
+    cors_origins = [item.strip() for item in os.getenv("FINANCE_CORS_ORIGINS", "*").split(",") if item.strip()]
+    app.add_middleware(CORSMiddleware, allow_origins=cors_origins, allow_credentials=False,
+                       allow_methods=["*"], allow_headers=["*"])
     app.state.auth = auth
     bearer = HTTPBearer(auto_error=False)
     attempts = defaultdict(deque)
