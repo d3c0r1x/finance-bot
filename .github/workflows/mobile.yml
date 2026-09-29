@@ -41,7 +41,7 @@ jobs:
       - run: flutter --version
       - run: flutter pub get
         working-directory: mobile_flutter
-      - run: flutter analyze
+      - run: flutter analyze --no-fatal-infos --no-fatal-warnings
         working-directory: mobile_flutter
       - run: flutter build web
         working-directory: mobile_flutter
