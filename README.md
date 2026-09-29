@@ -206,6 +206,10 @@ Android-клиент работает через FastAPI, а backend переи�
 транзакции, чеки/OCR/AI, бюджеты, долги, аналитику, recurring, историю цен,
 список покупок и импорт банковских PDF.
 
+Новая целевая ветка продукта описана в [docs/HOME_SERVER_FLUTTER_SPEC.md](docs/HOME_SERVER_FLUTTER_SPEC.md):
+текущий ПК работает как 24/7 home server, Android получает Flutter APK, iPhone
+получает Flutter Web/PWA до появления Mac/Xcode или cloud iOS builder.
+
 Для mobile-аккаунтов используется username/password. Backend выдает short-lived
 JWT access token и refresh token с ротацией. Данные каждого mobile-пользователя
 пишутся в отдельный SQLite-файл под `FINANCE_API_DATA`; legacy Telegram-база
@@ -277,6 +281,30 @@ gradlew.bat :app:connectedDebugAndroidTest
 Instrumentation-тест регистрирует пользователя в эмуляторе, проходит onboarding,
 добавляет расход, повторяет его, переключает RU/EN и dark/light, пересоздает
 Activity и проверяет сохранение сессии.
+
+## Flutter Android/Web client
+
+Flutter-клиент лежит в `mobile_flutter/`. Он станет общей базой для Android APK
+и iPhone Web/PWA. Текущий Kotlin-клиент пока оставлен рабочим, чтобы APK не
+сломался во время миграции.
+
+После установки Flutter SDK:
+
+```bash
+cd mobile_flutter
+flutter pub get
+flutter run -d chrome
+flutter build apk --debug
+flutter build web
+```
+
+Первый Flutter slice уже использует backend:
+
+- login/register;
+- `GET /server/config`;
+- `GET /pulse/today`;
+- `GET/PUT /workspace`;
+- `POST /import/tbank-notification`.
 
 ## Примеры использования
 

@@ -68,13 +68,37 @@ def test_validation_and_feature_reads(client):
     headers, _ = register(client)
     for amount in [-1, 0, "nan", "inf", 100000001]:
         assert client.post("/api/v1/transactions", headers=headers, json={"amount": amount}).status_code == 422
-    for endpoint in ["dashboard", "budgets", "products", "shopping-list", "recurring", "settings", "categories", "reports/summary"]:
+    for endpoint in ["dashboard", "pulse/today", "budgets", "products", "shopping-list", "recurring", "settings", "workspace", "categories", "reports/summary"]:
         response = client.get("/api/v1/" + endpoint, headers=headers)
         assert response.status_code == 200, response.text
+    config = client.get("/api/v1/server/config").json()
+    assert config["name"] == "FinPulse Home Server"
+    workspace = {"mode": "couple", "default_visibility": "shared", "default_split": "equal",
+                 "partner_name": "Partner", "owner_share": 50}
+    assert client.put("/api/v1/workspace", headers=headers, json=workspace).json()["mode"] == "couple"
+    assert client.get("/api/v1/workspace", headers=headers).json()["partner_name"] == "Partner"
     assert client.post("/api/v1/receipts/analyze", headers=headers, files={"file": ("bad.jpg", b"bad", "image/jpeg")}).status_code == 422
     assert client.post("/api/v1/import/bank-statement", headers=headers, files={"file": ("bad.pdf", b"bad", "application/pdf")}).status_code == 422
     assert client.post("/api/v1/demo", headers=headers).status_code == 200
     assert client.post("/api/v1/demo", headers=headers).status_code == 409
+
+
+def test_tbank_notification_import(client):
+    headers, _ = register(client)
+    response = client.post("/api/v1/import/tbank-notification", headers=headers,
+                           json={"text": "Т-Банк Покупка 1 234,50 ₽ Пятерочка Баланс 5000 ₽"})
+    assert response.status_code == 201, response.text
+    parsed = response.json()["parsed"]
+    assert parsed["amount"] == 1234.5
+    assert parsed["tx_type"] == "expense"
+    assert parsed["category"] == "еда"
+    rows = client.get("/api/v1/transactions", headers=headers).json()
+    assert rows[0]["source"] == "tbank_notification"
+
+    income = client.post("/api/v1/import/tbank-notification", headers=headers,
+                         json={"text": "Т-Банк Пополнение 500 ₽"})
+    assert income.status_code == 201
+    assert client.get("/api/v1/reports/summary", headers=headers).json()["income"] == 500
 
 
 def test_parallel_accounts(client):

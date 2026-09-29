@@ -92,6 +92,14 @@ class TextInput(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+class WorkspaceSettings(BaseModel):
+    mode: Literal["solo", "couple"] = "solo"
+    default_visibility: Literal["private", "shared", "amount_only"] = "private"
+    default_split: Literal["none", "equal", "percent", "manual"] = "none"
+    partner_name: str = Field(default="", max_length=80)
+    owner_share: Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)] = 50
+
+
 class Preferences(BaseModel):
     language: Literal["ru", "en"] = "ru"
     theme: Literal["system", "light", "dark"] = "system"

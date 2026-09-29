@@ -21,7 +21,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from backend.auth import AuthStore
 from backend import finance
 from backend.schemas import (Budget, Credentials, Debt, ImportConfirm, Mark, Payment,
-                             Preferences, ReceiptConfirm, Refresh, Registration, TextInput, Transaction)
+                             Preferences, ReceiptConfirm, Refresh, Registration, TextInput, Transaction,
+                             WorkspaceSettings)
 from database import db as core
 from database.context import request_database
 from database.models import CATEGORIES
@@ -78,6 +79,15 @@ def create_app(data_dir=None, secret=None):
     async def health():
         return {"status": "ok", "version": "0.1.0"}
 
+    @app.get(prefix + "/server/config")
+    async def server_config(request: Request):
+        host = request.headers.get("host", "127.0.0.1:8000")
+        scheme = "https" if request.url.scheme == "https" else "http"
+        return {"name": "FinPulse Home Server", "version": "0.3.0-dev",
+                "base_url": f"{scheme}://{host}", "ai_location": "home_pc",
+                "mobile_compute": ["cache", "drafts", "simple_reports", "debt_simulation"],
+                "server_compute": ["ocr", "ai", "bank_import", "sync", "shared_workspace"]}
+
     @app.post(prefix + "/auth/register", status_code=201, dependencies=[Depends(rate_limit)])
     async def register(body: Registration):
         uid = await asyncio.to_thread(auth.register, body.username, body.password, body.display_name, body.language)
@@ -110,6 +120,16 @@ def create_app(data_dir=None, secret=None):
     @app.put(prefix + "/settings")
     async def update_settings(body: Preferences, account=Depends(user)):
         await core.set_setting("mobile:preferences", body.model_dump_json())
+        return body
+
+    @app.get(prefix + "/workspace")
+    async def workspace(account=Depends(user)):
+        stored = await core.get_setting("mobile:workspace")
+        return json.loads(stored) if stored else WorkspaceSettings().model_dump()
+
+    @app.put(prefix + "/workspace")
+    async def update_workspace(body: WorkspaceSettings, account=Depends(user)):
+        await core.set_setting("mobile:workspace", body.model_dump_json())
         return body
 
     @app.get(prefix + "/categories")
@@ -205,6 +225,36 @@ def create_app(data_dir=None, secret=None):
                 "recent": [dict(row) for row in await core.get_recent_transactions(1, 8)],
                 "food_week": await forecast.food_week_status(1),
                 "total_debt": sum(row["current_amount"] for row in await core.get_debts())}
+
+    @app.get(prefix + "/pulse/today")
+    async def pulse_today(account=Depends(user)):
+        now = datetime.now()
+        expenses = await core.get_total_spent_this_month(1)
+        income = await core.get_month_income(1)
+        limit = await budget.get_total_limit(1)
+        remaining_days = calendar.monthrange(now.year, now.month)[1] - now.day + 1
+        daily_safe = max(0, round((limit - expenses) / remaining_days, 2))
+        rows = [dict(row) for row in await core.get_recent_transactions(1, 90)]
+        recurring_items = recurring.find_recurring(rows)
+        risks = []
+        if limit and expenses > limit:
+            risks.append({"kind": "budget_overrun", "title": "budget_overrun",
+                          "amount": round(expenses - limit, 2)})
+        elif limit and expenses > limit * 0.85:
+            risks.append({"kind": "budget_pressure", "title": "budget_pressure",
+                          "amount": round(limit - expenses, 2)})
+        debts_total = sum(row["current_amount"] for row in await core.get_debts())
+        if debts_total:
+            risks.append({"kind": "debt", "title": "active_debt", "amount": round(debts_total, 2)})
+        actions = [{"kind": "add_receipt", "title": "scan_today_receipt"}]
+        if recurring_items:
+            actions.append({"kind": "recurring", "title": "review_recurring",
+                            "count": len(recurring_items)})
+        return {"date": now.date().isoformat(), "daily_safe": daily_safe,
+                "month": {"expenses": expenses, "income": income, "limit": limit,
+                          "forecast": analytics.forecast_end_of_month(expenses)},
+                "risks": risks, "actions": actions,
+                "recent": [dict(row) for row in await core.get_recent_transactions(1, 5)]}
 
     @app.get(prefix + "/debts")
     async def debts(account=Depends(user)):
@@ -387,6 +437,17 @@ def create_app(data_dir=None, secret=None):
             await db.execute("UPDATE previews SET result=? WHERE id=?", (json.dumps(result), body.preview_id))
             await db.commit()
         return result
+
+    @app.post(prefix + "/import/tbank-notification", status_code=201)
+    async def tbank_notification(body: TextInput, account=Depends(user)):
+        from backend.tbank import parse_notification
+        parsed = parse_notification(body.text)
+        tx = Transaction(amount=parsed["amount"], category=parsed["category"],
+                         description=parsed["description"], tx_type=parsed["tx_type"],
+                         created_at=parsed["created_at"])
+        created = await finance.create(tx, parsed["source"])
+        return {**created, "parsed": {key: value for key, value in parsed.items()
+                                      if key not in ("created_at", "raw")}}
 
     @app.get(prefix + "/services/status")
     async def service_status(account=Depends(user)):
