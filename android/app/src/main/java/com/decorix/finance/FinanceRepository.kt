@@ -65,7 +65,7 @@ class FinanceRepository(context: Context) {
         execSQL("CREATE TABLE IF NOT EXISTS responses(path TEXT PRIMARY KEY, body TEXT NOT NULL)")
     }
     var baseUrl: String
-        get() = preferences.getString("server", "http://10.0.2.2:8000")!!
+        get() = preferences.getString("server", "http://192.168.3.48:8000")!!
         set(value) {
             val url = value.trim().trimEnd('/')
             require(url.startsWith("https://") || (BuildConfig.DEBUG && url.startsWith("http://")))

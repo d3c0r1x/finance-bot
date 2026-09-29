@@ -1,7 +1,8 @@
 <resources>
-    <string name="app_name">Finance</string>
-    <string name="welcome">Деньги в твоём ритме.</string>
-    <string name="welcome_sub">Расходы, чеки и планы — в одном месте.</string>
+    <string name="app_name">ФинПульс</string>
+    <string name="brand">ФИНПУЛЬС</string>
+    <string name="welcome">Деньги в ритме.</string>
+    <string name="welcome_sub">Чеки, бюджеты и пульс долгов — в одном месте.</string>
     <string name="login">Войти</string>
     <string name="register">Создать аккаунт</string>
     <string name="username">Логин</string>
@@ -9,6 +10,8 @@
     <string name="repeat_password">Повтор пароля</string>
     <string name="name">Имя</string>
     <string name="server">Адрес backend</string>
+    <string name="server_hint">Эта сборка настроена на этот компьютер: http://192.168.3.48:8000</string>
+    <string name="server_emulator_hint">Для Android-эмулятора используйте http://10.0.2.2:8000.</string>
     <string name="save">Сохранить</string>
     <string name="cancel">Отмена</string>
     <string name="home">Главная</string>
@@ -109,4 +112,5 @@
     <string name="tech">Техника</string>
     <string name="other">Прочее</string>
     <string name="done">Готово</string>
+    <string name="secure_local">Локальный сервер. Данные остаются на этой машине.</string>
 </resources>

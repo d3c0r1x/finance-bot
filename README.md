@@ -199,9 +199,9 @@ infisical run --env=dev -- python panel.py
 
 В репозитории также есть Windows start scripts.
 
-## Android + FastAPI
+## FinPulse Android + FastAPI
 
-Mobile-слой живет рядом с существующим Telegram-ботом и не ломает его entrypoint.
+Mobile-слой называется **FinPulse** (`ФинПульс`) и живет рядом с существующим Telegram-ботом, не ломая его entrypoint.
 Android-клиент работает через FastAPI, а backend переиспользует текущий Python core:
 транзакции, чеки/OCR/AI, бюджеты, долги, аналитику, recurring, историю цен,
 список покупок и импорт банковских PDF.
@@ -211,11 +211,30 @@ JWT access token и refresh token с ротацией. Данные каждог
 пишутся в отдельный SQLite-файл под `FINANCE_API_DATA`; legacy Telegram-база
 остается отдельной.
 
-Запуск backend:
+Запуск backend для телефона в той же Wi-Fi/LAN сети:
+
+```bat
+start_mobile_server.bat
+```
+
+По умолчанию сервер слушает `0.0.0.0:8000` и печатает URL для телефона.
+Для текущей машины это:
+
+```text
+http://192.168.3.48:8000
+```
+
+Если Windows Firewall блокирует входящие подключения, открой PowerShell от администратора:
+
+```powershell
+.\open_mobile_port_8000_admin.ps1
+```
+
+Ручной запуск backend:
 
 ```bash
 pip install -r backend/requirements.txt
-uvicorn backend.app:app --host 127.0.0.1 --port 8000
+uvicorn backend.app:app --host 0.0.0.0 --port 8000
 ```
 
 Переменные:
@@ -242,9 +261,9 @@ APK для эмулятора появляется здесь:
 android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-В debug-сборке приложение по умолчанию смотрит на `http://10.0.2.2:8000`,
-то есть на backend, запущенный на host-машине рядом с Android emulator.
-В профиле приложения можно поменять URL API.
+В этой debug-сборке приложение по умолчанию смотрит на `http://192.168.3.48:8000`.
+Для Android emulator поменяй адрес на экране входа или в профиле на `http://10.0.2.2:8000`.
+В профиле приложения URL API можно поменять в любой момент.
 
 Проверки mobile-слоя:
 

@@ -1,7 +1,8 @@
 <resources>
-    <string name="app_name">Finance</string>
-    <string name="welcome">Your money. Your rhythm.</string>
-    <string name="welcome_sub">Expenses, receipts and plans — together.</string>
+    <string name="app_name">FinPulse</string>
+    <string name="brand">FINPULSE</string>
+    <string name="welcome">Money in rhythm.</string>
+    <string name="welcome_sub">Receipts, budgets and debt pulse in one place.</string>
     <string name="login">Sign in</string>
     <string name="register">Create account</string>
     <string name="username">Username</string>
@@ -9,6 +10,8 @@
     <string name="repeat_password">Repeat password</string>
     <string name="name">Name</string>
     <string name="server">Backend address</string>
+    <string name="server_hint">This build is configured for this computer: http://192.168.3.48:8000</string>
+    <string name="server_emulator_hint">For Android emulator use http://10.0.2.2:8000.</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
     <string name="home">Home</string>
@@ -109,4 +112,5 @@
     <string name="tech">Technology</string>
     <string name="other">Other</string>
     <string name="done">Done</string>
+    <string name="secure_local">Local server. Your data stays on this machine.</string>
 </resources>

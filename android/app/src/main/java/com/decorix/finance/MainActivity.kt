@@ -107,6 +107,14 @@ fun json(vararg values: Pair<String, Any?>) = JSONObject().apply { values.forEac
 }
 @Composable fun Empty() { Tile { Text(stringResource(R.string.empty), fontWeight = FontWeight.Bold); Text(stringResource(R.string.empty_sub), color = MaterialTheme.colorScheme.onSurfaceVariant) } }
 
+@Composable fun BrandMark() {
+    Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(8.dp), modifier = Modifier.size(58.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.MonitorHeart, stringResource(R.string.app_name), tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(32.dp))
+        }
+    }
+}
+
 @Composable fun loaded(vm: FinanceViewModel, path: String): String? {
     var result by remember(path, vm.revision) { mutableStateOf(vm.repository.cached(path)) }
     var loading by remember(path, vm.revision) { mutableStateOf(true) }
@@ -129,10 +137,19 @@ fun json(vararg values: Pair<String, Any?>) = JSONObject().apply { values.forEac
     var server by rememberSaveable { mutableStateOf(vm.repository.baseUrl) }
     Page {
         Spacer(Modifier.height(36.dp))
-        Text("FINANCE", fontSize = 14.sp, fontWeight = FontWeight.Black, letterSpacing = 5.sp)
-        Text(stringResource(R.string.welcome), fontSize = 42.sp, lineHeight = 46.sp, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            BrandMark()
+            Column {
+                Text(stringResource(R.string.brand), fontSize = 14.sp, fontWeight = FontWeight.Black, letterSpacing = 4.sp)
+                Text(stringResource(R.string.secure_local), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(stringResource(R.string.welcome), fontSize = 46.sp, lineHeight = 48.sp, fontWeight = FontWeight.Black)
         Text(stringResource(R.string.welcome_sub), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row { TextButton(onClick = { vm.appearance(lang = "ru") }) { Text("RU") }; TextButton(onClick = { vm.appearance(lang = "en") }) { Text("EN") } }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(vm.language == "ru", { vm.appearance(lang = "ru") }, label = { Text("RU") })
+            FilterChip(vm.language == "en", { vm.appearance(lang = "en") }, label = { Text("EN") })
+        }
         Tile {
             if (registering) Field(R.string.name, name, { name = it })
             Field(R.string.username, username, { username = it })
@@ -146,7 +163,12 @@ fun json(vararg values: Pair<String, Any?>) = JSONObject().apply { values.forEac
             TextButton(onClick = { registering = !registering }) { Text(stringResource(if (registering) R.string.login else R.string.register)) }
             if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        Field(R.string.server, server, { server = it })
+        Tile {
+            Text(stringResource(R.string.server), fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.server_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.server_emulator_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Field(R.string.server, server, { server = it })
+        }
     }
 }
 
