@@ -1,0 +1,483 @@
+version: 1
+legacy_commit: cfaa013e1c977db24d7ab81944d0113ca79daea9
+features:
+  - id: F01
+    feature: "Запуск, меню, `/start`, `/menu`, `/help`; `bot.py`, `handlers/main_menu.py`"
+    target: "P Telegram gateway; J dashboard; W главная"
+    acceptance: "Все команды отвечают; нижнее меню возвращается после операций; старую menu button можно заменить"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F02
+    feature: "Whitelist и роли из `config.py`, `utils/filters.py`"
+    target: "J identity/membership; P проверяет привязку перед каждым сценарием"
+    acceptance: "Незнакомый пользователь не читает финансовые данные; legacy owner/partner перенесены"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F03
+    feature: "Onboarding: имя, доход, пропуск, назад, бюджет, повторная настройка; `handlers/onboarding.py`"
+    target: "J profile/onboarding; P/W пошаговая форма"
+    acceptance: "Повторная настройка не удаляет транзакции; пользователь с историей не считается новым"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F04
+    feature: "Имя из Telegram, своё имя, план дохода, статус onboarding; `services/profile.py`"
+    target: "J user profile + tenant member profile"
+    acceptance: "Собственное имя не затёрто синхронизацией Telegram"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F05
+    feature: "Свободный текст расхода/дохода/платежа; `ai/llm.py`, `handlers/expenses.py`"
+    target: "P extraction/AI, J validation и подтверждение draft"
+    acceptance: "«Такси 2 тыс», «1,5к», «2 000», запятая, неверный JSON, отключённая модель"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F06
+    feature: "Карточка подтверждения, сумма, категория, подкатегория, быстрые суммы, отмена"
+    target: "J drafts; P keyboards; W transaction form"
+    acceptance: "До подтверждения нет финансовой записи; устаревшая кнопка безопасна"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F07
+    feature: "Добавление дохода и источника операции"
+    target: "J transactions; P/W ввод"
+    acceptance: "Доход не попадает в расходы/лимиты; сохраняются description/source/date"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F08
+    feature: "История последних операций, повтор траты, отмена последней; `main_menu.py`"
+    target: "J repeat/reverse; P/W history"
+    acceptance: "Повтор создаёт новую запись один раз; отмена ограничена доступной пользователю операцией"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F09
+    feature: "Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"
+    target: "J transactions API; W таблица"
+    acceptance: "Все доступные поля и фильтры перенесены; правка долга выполняет корректную компенсацию"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F10
+    feature: "Фото чека, прогресс, draft; `expenses.py`"
+    target: "J receipt job; P OCR worker; W upload/review"
+    acceptance: "Длительный job показывает статус; повтор update не создаёт второй job"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F11
+    feature: "Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
+    target: "P Vision adapter и resource scheduler"
+    acceptance: "Локальная/удалённая модель, fallback, timeout, недоступная VRAM; видна фактическая модель"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F12
+    feature: "Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
+    target: "P OCR pipeline"
+    acceptance: "Синтетические обычные/узкие/наклонные чеки; стабильный порядок параллельных результатов"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F13
+    feature: "Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
+    target: "P extraction reconciliation; J финальная денежная валидация"
+    acceptance: "Одна OCR-строка не подтверждает два товара; расхождения и происхождение видны"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F14
+    feature: "Защита магазина/даты от выдумывания, fallback категории"
+    target: "P evidence extraction; J category policy"
+    acceptance: "Отсутствующее значение остаётся unknown; исходное чтение доступно для проверки"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F15
+    feature: "Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
+    target: "J receipt draft/items; P/W review editor"
+    acceptance: "Любая позиция доступна; кассовый итог не меняется незаметно; явное действие sync total"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F16
+    feature: "Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
+    target: "J duplicate candidates + идемпотентность"
+    acceptance: "Два независимых чека на одинаковую сумму можно подтвердить; повтор запроса не дублирует запись"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F17
+    feature: "Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"
+    target: "J versioned category policy; P извлекает признаки"
+    acceptance: "Границы 10% алкоголя / 25% досуговых позиций зафиксированы fixtures; ручной выбор сохраняется"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F18
+    feature: "Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"
+    target: "P генерирует предложение; J применяет каталог правил и сохраняет версию"
+    acceptance: "Нет выдуманных денежных итогов; `rule/model/default/unknown` различаются"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F19
+    feature: "Сохранение verdict/advice/verdict_source по позициям"
+    target: "J receipt reviews с item ID"
+    acceptance: "Советы не съезжают при одинаковых названиях; неизвестное старое происхождение не объявляется rule"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F20
+    feature: "«Не согласен» с вердиктом, пагинация спорных строк"
+    target: "J user decisions; P/W controls"
+    acceptance: "Товар исключён из необязательного; решение отменяемо и действует везде одинаково"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F21
+    feature: "Повторные предупреждения о необязательном товаре; `services/advice.py`"
+    target: "G history features; J policy/presentation DTO"
+    acceptance: "Новый чек не находит сам себя в прошлой истории; разрешённый товар не предупреждается"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F22
+    feature: "Семейные и личные месячные лимиты, общий лимит, reset"
+    target: "J budgets с наследованием"
+    acceptance: "Личный override только своей категории; reset возвращает семейный, family report использует family limit"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F23
+    feature: "Бюджет по доходу: 70%, округление; AI-предложение при ≥30 днях"
+    target: "J proposal policy; P AI proposal"
+    acceptance: "Предложение не применяется без действия человека; контекст содержит только разрешённые данные"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F24
+    feature: "Алерты 90%/100%, остаток, прогноз месяца, темп"
+    target: "J точные текущие суммы и budget policy"
+    acceptance: "0 означает отключённый лимит; долг не считается обычным расходом; корректны декабрь/февраль"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F25
+    feature: "Недельный food limit и скользящие 7 дней; `services/forecast.py`"
+    target: "J food budget; G исторический темп"
+    acceptance: "Лимит работает без длинной истории; одинаковые значения в dashboard, digest и report"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F26
+    feature: "«Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"
+    target: "J cash planning; G recurring projection"
+    acceptance: "Просроченная зарплата не горизонт; без данных нет выдуманного числа; подписки учитываются до горизонта включительно"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F27
+    feature: "Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
+    target: "J debts; P/W screens"
+    acceptance: "Платёж и изменение долга атомарны; повторное сообщение не уменьшает долг дважды"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F28
+    feature: "Правка остатка долга через панель, возврат при отмене платежа"
+    target: "J debt adjustment/reversal"
+    acceptance: "Сохраняется audit; отменяется фактическое изменение, включая погашение сверх остатка"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F29
+    feature: "Прогноз погашения с процентами; `services/analytics.py`"
+    target: "J debt calculator"
+    acceptance: "0 при закрытом долге; null при недостаточном платеже/горизонте >600 месяцев; оценка подписана"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F30
+    feature: "Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"
+    target: "J reporting API; G длинные выборки"
+    acceptance: "Фильтры/границы дат идентичны для web/Telegram; доходы и debt payments отделены"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F31
+    feature: "Графики категорий, лимитов, дней, цен, необязательного"
+    target: "W charts; P PNG renderer из готового DTO"
+    acceptance: "Данные одни; при недоступном renderer остаётся текст; экспорт PNG читаем"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F32
+    feature: "Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
+    target: "J durable schedules/outbox; P доставка"
+    acceptance: "Настраиваемое местное время; retries; один логический выпуск; нет сводки с фиктивными нулями"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F33
+    feature: "Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
+    target: "G price projection; J query API"
+    acceptance: "Новый чек не входит в собственную baseline; разные упаковки/бренды не сливаются автоматически"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F34
+    feature: "Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
+    target: "G product projection; P/W catalog"
+    acceptance: "Поиск доступен и для одной покупки; график при ≥2; каталог и поиск имеют разные пороги"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F35
+    feature: "Покупки по ритму, медиана интервалов, стоимость списка"
+    target: "G shopping candidates; J personal policies"
+    acceptance: "≥3 покупки; устаревшие товары исчезают после двух обычных интервалов; это не учёт запасов"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F36
+    feature: "«Уже купил», mute/unmute, блокировки, копирование закупки"
+    target: "J shopping decisions; W clipboard; P buttons"
+    acceptance: "Отметка не создаёт расход; устаревает; скрытое перечислено с причиной"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F37
+    feature: "Личная инфляция по корзине, окно 90 дней, top rise/fall"
+    target: "G inflation worker; J/P/W выдача"
+    acceptance: "≥3 товара; ≥2 покупки до окна и ≥1 внутри; вес — прежние траты, не официальная инфляция"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F38
+    feature: "Регулярные расходы/доходы, недельные/месячные серии"
+    target: "G recurring worker; J read model"
+    acceptance: "≥3 повторов, диапазон сумм/интервалов, предупреждение за 3 дня, просроченные не upcoming"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F39
+    feature: "Отключение/возврат серии; `services/mutelist.py`"
+    target: "J preferences по user+tenant+section"
+    acceptance: "Отключение не удаляет расход и не затрагивает другого пользователя"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F40
+    feature: "Сумма/доля необязательного, источники verdict, исправленные позиции"
+    target: "G advice analytics; J decisions overlay"
+    acceptance: "Знаменатель — разобранные позиции; неизвестные verdict не превращаются в neutral evidence"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F41
+    feature: "«Не брать», отдельные догадки модели, подтверждение/разрешение"
+    target: "J decisions и policy; G evidence groups"
+    acceptance: "Model-only догадка не скрывает покупку и не становится целью без решения человека"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F42
+    feature: "Пересчёт старых verdict по текущим правилам и отчёт изменений"
+    target: "J explicit recalculation job; G пакетная подготовка"
+    acceptance: "Только явный запуск; старый/новый verdict и причина сохранены; суммы чеков неизменны"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F43
+    feature: "Потолок экономии, недельный trend, эффект советов по частоте"
+    target: "G advice worker; J query"
+    acceptance: "Не выдавать оценку за факт экономии/причинность; учитывать пересчёты отдельно"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F44
+    feature: "Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
+    target: "J goals; G candidate features"
+    acceptance: "30 дней от принятия; одна активная legacy-цель; новая единица не переписывает обещание"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F45
+    feature: "Ход цели, заметка при покупке, завершение, история, следующий кандидат"
+    target: "J lifecycle; G progress inputs"
+    acceptance: "Закрытие один раз; архив переживает снятие цели; legacy история до 24 записей переносится вся"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F46
+    feature: "Однократное сообщение исхода цели после успешной отправки"
+    target: "J notification intent + delivery result; P send"
+    acceptance: "При сбое итог не теряется; граница неопределённой внешней доставки документирована"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F47
+    feature: "PDF Т-Банка: операции, даты, merchant/card, сверка итогов"
+    target: "P document import; J staging/validation"
+    acceptance: "Valid/mismatch/unverifiable различаются; неверный формат и PDF без текста объяснены"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F48
+    feature: "Preview импорта, подтверждение, покупки/доходы/refund, skipped"
+    target: "J import policy; W/P preview"
+    acceptance: "Видны включённые/пропущенные типы и суммы; комиссии не исчезают под неверной подписью"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F49
+    feature: "Дедупликация импорта, bulk insert, undo именно партии"
+    target: "J import batches/idempotency"
+    acceptance: "Повтор файла/перекрывающаяся выписка/повтор refund; undo не затрагивает чужие/поздние записи"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F50
+    feature: "Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"
+    target: "J merchant mappings; P classification; W/P clarification"
+    acceptance: "Личные соответствия переживают рестарт; уточнения по умолчанию до 6, порог 300 RUB"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F51
+    feature: "Уточнение магазина меняет ранее импортированные подходящие записи"
+    target: "J preview/apply reclassification"
+    acceptance: "Список затрагиваемых ID проверяется по tenant/user; не менять ручные правки молча"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F52
+    feature: "CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
+    target: "J export contract; G large export; W download"
+    acceptance: "Совместимый legacy формат и безопасные строки; текущая точка входа — панель, не Telegram"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F53
+    feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
+    target: "W routes/components; J единое API"
+    acceptance: "Восемь вкладок имеют эквиваленты; refresh/F5, переход к тратам пользователя, правка профиля"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F54
+    feature: "Статус Ollama/Vision/Tesseract; `services/health.py`"
+    target: "P health; J sanitized status; W/P settings"
+    acceptance: "Пользователь видит доступность функций, оператор — диагностику без секретов"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F55
+    feature: "Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"
+    target: "P provider adapters; deployment config"
+    acceptance: "Self-hosted локально без стороннего AI API; внешний inference только настроенный режим"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F56
+    feature: "Проверки receipt inventory, synthetic/private samples, CI"
+    target: "P evaluation tools; polyglot CI"
+    acceptance: "`--vision`, `--strict`, `--json` сохранены в новом CLI; private samples не входят в CI artifacts"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F57
+    feature: "Русское форматирование, escaping Telegram, шрифты, текстовый fallback"
+    target: "P/W presentation libraries; J semantic DTO"
+    acceptance: "Кириллица, Markdown-символы, суммы/склонения, длинные строки, разные ОС"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F58
+    feature: "Конфигурация/секреты/Windows launch scripts/документация/MIT"
+    target: "Infra + docs + dev scripts"
+    acceptance: "Запуск Windows/Linux документирован; лицензионные уведомления сохранены; секреты не в образах"
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F59
+    feature: Android Kotlin Compose client parity F01-F58 RU/EN
+    target: apps/android + Java Core API
+    acceptance: Every F01-F58 flow has Android behavior or approved N/A; emulator install and E2E pass
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []
+  - id: F60
+    feature: Python AI Gateway capability routing and Vertex AI adapter seam
+    target: services/python/intelligence
+    acceptance: local-only fail-closed; provider/prompt provenance; shared evals; adapter switch without business-code changes
+    status: planned
+    tests: []
+    evidence: []
+    intentional_differences: []

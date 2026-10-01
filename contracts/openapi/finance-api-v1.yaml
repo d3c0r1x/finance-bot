@@ -1,0 +1,191 @@
+openapi: 3.1.0
+info:
+  title: Finance Core API
+  version: 1.0.0
+  description: Public API shared by React and Android. Java Core owns all financial mutations.
+servers:
+  - url: http://localhost:8080
+    description: Local development only
+security:
+  - keycloakOidc: []
+paths:
+  /api/v1/tenants/{tenantId}/transactions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listTransactions
+      summary: List transactions visible to the current tenant member
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Stable page ordered by occurredAt and ID descending
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createTransaction
+      summary: Create one confirmed financial transaction
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTransaction' }
+      responses:
+        '201':
+          description: Created once and committed with its outbox event
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/tenants/{tenantId}/transactions/{transactionId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: transactionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getTransaction
+      responses:
+        '200':
+          description: Transaction visible to current member
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/transactions/{transactionId}/void:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: transactionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: voidTransaction
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: Transaction version previously returned by the API.
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Transaction voided and audit/outbox records committed atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+components:
+  securitySchemes:
+    keycloakOidc:
+      type: openIdConnect
+      openIdConnectUrl: https://auth.example.invalid/realms/finance/.well-known/openid-configuration
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Same tenant, actor, route and key with a different body returns 409.
+      schema: { type: string, minLength: 16, maxLength: 128 }
+  responses:
+    BadRequest:
+      description: Invalid amount, type, category or timestamp
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Unauthorized:
+      description: Missing or invalid OIDC identity
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Tenant or transaction does not exist or is not visible
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: Idempotency payload mismatch or stale transaction version
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    CreateTransaction:
+      type: object
+      additionalProperties: false
+      required: [type, amount, currency, categoryCode, description, occurredAt]
+      properties:
+        type:
+          type: string
+          enum: [expense, income, refund, debt_payment, transfer]
+        amount:
+          type: string
+          pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$'
+          description: Positive decimal amount. JSON numbers and floating point are rejected.
+        currency: { type: string, const: RUB }
+        categoryCode: { type: string, minLength: 1, maxLength: 64 }
+        subcategoryCode: { type: [string, 'null'], maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        occurredAt: { type: string, format: date-time }
+        accountId: { type: [string, 'null'], format: uuid }
+    Transaction:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, type, amount, currency, categoryCode, description, occurredAt, status, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        type: { type: string, enum: [expense, income, refund, debt_payment, transfer] }
+        amount: { type: string, pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$' }
+        currency: { type: string, const: RUB }
+        categoryCode: { type: string, minLength: 1, maxLength: 64 }
+        subcategoryCode: { type: [string, 'null'], maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        occurredAt: { type: string, format: date-time }
+        accountId: { type: [string, 'null'], format: uuid }
+        status: { type: string, enum: [posted, voided] }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+    TransactionPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Transaction' }
+        nextCursor: { type: [string, 'null'] }
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code, traceId]
+      properties:
+        type: { type: string, format: uri-reference }
+        title: { type: string }
+        status: { type: integer }
+        code: { type: string }
+        traceId: { type: string }
+        fieldErrors:
+          type: object
+          additionalProperties: { type: string }

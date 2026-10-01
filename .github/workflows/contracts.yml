@@ -1,0 +1,31 @@
+name: Finance v2 contract checks
+
+on:
+  push:
+    paths:
+      - 'contracts/**'
+      - 'tools/contracts/**'
+      - 'PLAN.md'
+      - 'docs/specs/CONTINUATION.md'
+      - '.github/workflows/contracts.yml'
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'tools/contracts/**'
+      - 'PLAN.md'
+      - 'docs/specs/CONTINUATION.md'
+      - '.github/workflows/contracts.yml'
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/contracts/requirements.txt
+      - run: python -m pip install -r tools/contracts/requirements.txt
+      - run: python -m pytest tools/contracts/test_contracts.py -q
