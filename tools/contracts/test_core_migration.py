@@ -24,6 +24,7 @@ def test_migration_creates_tenant_scoped_transactional_core():
     assert "primary key (consumer_name, event_id)" in normalized
     assert "create policy tenant_isolation" in normalized
     assert "using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)" in normalized
+    assert "using (id = nullif(current_setting('app.tenant_id', true), '')::uuid)" in normalized
     assert "force row level security" in normalized
     assert "set local app.tenant_id" not in normalized, "tenant context belongs to request transaction, not migration"
 
@@ -67,7 +68,11 @@ def test_postgres_migration_and_tenant_isolation():
                 WHERE m.subject = 'legacy-subject'
                 """).fetchone()[0]
             assert backfilled == 1
-            assert conn.execute("SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid = 'memberships'::regclass").fetchone()[0]
+            for tenant_table in ("tenants", "memberships", "accounts", "transactions", "idempotency_records", "audit_log", "outbox_events"):
+                assert conn.execute(
+                    "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid = to_regclass(%s)",
+                    (tenant_table,),
+                ).fetchone()[0], f"RLS must be enabled and forced on {tenant_table}"
             conn.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(sql.Identifier(schema), sql.Identifier(role)))
             conn.execute(sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} TO {}").format(sql.Identifier(schema), sql.Identifier(role)))
             conn.execute(sql.SQL("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}").format(sql.Identifier(schema), sql.Identifier(role)))
@@ -82,6 +87,7 @@ def test_postgres_migration_and_tenant_isolation():
             with conn.transaction():
                 conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
                 conn.execute("SELECT set_config('app.tenant_id', %s, true)", (str(tenant_a),))
+                assert conn.execute("SELECT count(*) FROM tenants WHERE id = %s", (tenant_b,)).fetchone()[0] == 0
                 conn.execute("INSERT INTO transactions (tenant_id, owner_subject, owner_user_id, type, amount, category_code, occurred_at) VALUES (%s, 'user-a', %s, 'expense', 12.34, 'food', now())", (tenant_a, user_a))
                 conn.execute("INSERT INTO idempotency_records (tenant_id, actor_subject, route, idempotency_key, request_hash) VALUES (%s, 'user-a', '/transactions', 'request-key-0001', repeat('a', 64))", (tenant_a,))
                 with pytest.raises(psycopg.errors.UniqueViolation):

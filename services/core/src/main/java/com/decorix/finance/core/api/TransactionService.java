@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
@@ -27,6 +28,12 @@ import org.springframework.web.server.ResponseStatusException;
 @Service
 public class TransactionService {
     private static final List<String> TYPES = List.of("expense", "income", "refund", "debt_payment", "transfer");
+    private static final RowMapper<TransactionResponse> TRANSACTION_MAPPER = (rs, row) -> new TransactionResponse(
+            rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getString("type"),
+            rs.getString("amount"), rs.getString("currency"), rs.getString("category_code"),
+            rs.getString("subcategory_code"), rs.getString("description"), rs.getTimestamp("occurred_at").toInstant(),
+            rs.getObject("account_id", UUID.class), rs.getString("status"), rs.getLong("version"),
+            rs.getTimestamp("created_at").toInstant());
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
@@ -58,7 +65,7 @@ public class TransactionService {
                             + "VALUES (?, ?, '/transactions', ?, ?) ON CONFLICT DO NOTHING RETURNING id",
                     (rs, row) -> rs.getObject(1, UUID.class), tenantId, subject, key, requestHash);
             if (inserted.isEmpty()) {
-                return replay(tenantId, subject, key, requestHash);
+                return replay(tenantId, subject, "/transactions", key, requestHash);
             }
 
             UUID id = UUID.randomUUID();
@@ -117,6 +124,97 @@ public class TransactionService {
         });
     }
 
+    public TransactionResponse get(UUID tenantId, String subject, UUID id) {
+        return transaction.execute(status -> {
+            setTenantContext(tenantId);
+            UUID userId = resolveUser(subject);
+            if (userId == null || !isMember(tenantId, userId)) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Transaction not found");
+            }
+            List<TransactionResponse> rows = jdbc.query("""
+                    SELECT id, tenant_id, type, amount::text, currency, category_code, subcategory_code,
+                           description, occurred_at, account_id, status, version, created_at
+                    FROM transactions WHERE tenant_id = ? AND owner_user_id = ? AND id = ?
+                    """, TRANSACTION_MAPPER, tenantId, userId, id);
+            if (rows.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Transaction not found");
+            }
+            return rows.get(0);
+        });
+    }
+
+    public TransactionResponse voidTransaction(UUID tenantId, String subject, UUID id, String key, long expectedVersion) {
+        if (expectedVersion < 1 || key == null || key.length() < 16 || key.length() > 128) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid version or idempotency key");
+        }
+        String route = "/transactions/" + id + "/void";
+        String requestHash = sha256(id + "|" + expectedVersion);
+        return transaction.execute(status -> {
+            setTenantContext(tenantId);
+            UUID userId = resolveUser(subject);
+            if (userId == null || !isMember(tenantId, userId)) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Transaction not found");
+            }
+            List<UUID> inserted = jdbc.query(
+                    "INSERT INTO idempotency_records (tenant_id, actor_subject, route, idempotency_key, request_hash) "
+                            + "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id",
+                    (rs, row) -> rs.getObject(1, UUID.class), tenantId, subject, route, key, requestHash);
+            if (inserted.isEmpty()) {
+                return replay(tenantId, subject, route, key, requestHash);
+            }
+            List<TransactionResponse> rows = jdbc.query("""
+                    SELECT id, tenant_id, type, amount::text, currency, category_code, subcategory_code,
+                           description, occurred_at, account_id, status, version, created_at
+                    FROM transactions WHERE tenant_id = ? AND owner_user_id = ? AND id = ? FOR UPDATE
+                    """, TRANSACTION_MAPPER, tenantId, userId, id);
+            if (rows.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Transaction not found");
+            }
+            TransactionResponse before = rows.get(0);
+            if (before.version() != expectedVersion || !"posted".equals(before.status())) {
+                throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "Transaction version is stale");
+            }
+            Instant now = Instant.now();
+            List<TransactionResponse> updated = jdbc.query("""
+                    UPDATE transactions SET status = 'voided', version = version + 1, updated_at = ?
+                    WHERE tenant_id = ? AND id = ? AND version = ? AND status = 'posted'
+                    RETURNING id, tenant_id, type, amount::text, currency, category_code, subcategory_code,
+                              description, occurred_at, account_id, status, version, created_at
+                    """, TRANSACTION_MAPPER, Timestamp.from(now), tenantId, id, expectedVersion);
+            if (updated.isEmpty()) {
+                throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED, "Transaction version is stale");
+            }
+            TransactionResponse after = updated.get(0);
+            String beforeJson = serialize(before);
+            String afterJson = serialize(after);
+            UUID eventId = UUID.randomUUID();
+            String traceId = UUID.randomUUID().toString();
+            String payload = serialize(Map.ofEntries(
+                    Map.entry("event_id", eventId), Map.entry("event_type", "transaction.voided"),
+                    Map.entry("schema_version", 1), Map.entry("tenant_id", tenantId),
+                    Map.entry("aggregate_type", "transaction"), Map.entry("aggregate_id", id),
+                    Map.entry("aggregate_version", after.version()), Map.entry("occurred_at", now),
+                    Map.entry("recorded_at", now), Map.entry("producer", "core"),
+                    Map.entry("correlation_id", traceId), Map.entry("payload", Map.of(
+                            "owner_user_id", userId, "type", after.type(), "amount", after.amount(),
+                            "currency", after.currency(), "category_code", after.categoryCode(),
+                            "description", after.description(), "status", after.status(),
+                            "financial_occurred_at", after.occurredAt()))));
+            jdbc.update("""
+                    INSERT INTO audit_log (tenant_id, actor_subject, action, entity_type, entity_id, before_state, after_state, trace_id)
+                    VALUES (?, ?, 'transaction.voided', 'transaction', ?, CAST(? AS jsonb), CAST(? AS jsonb), ?)
+                    """, tenantId, subject, id, beforeJson, afterJson, traceId);
+            jdbc.update("""
+                    INSERT INTO outbox_events
+                      (event_id, tenant_id, aggregate_type, aggregate_id, aggregate_version, event_type, payload)
+                    VALUES (?, ?, 'transaction', ?, ?, 'transaction.voided', CAST(? AS jsonb))
+                    """, eventId, tenantId, id, after.version(), payload);
+            jdbc.update("UPDATE idempotency_records SET response_status = 200, response_body = CAST(? AS jsonb) WHERE tenant_id = ? AND actor_subject = ? AND route = ? AND idempotency_key = ?",
+                    afterJson, tenantId, subject, route, key);
+            return after;
+        });
+    }
+
     public Page list(UUID tenantId, String subject, int pageSize, String cursor) {
         if (pageSize < 1 || pageSize > 200) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "pageSize must be from 1 to 200");
@@ -141,12 +239,7 @@ public class TransactionService {
             }
             query += " ORDER BY occurred_at DESC, id DESC LIMIT ?";
             args.add(pageSize + 1);
-            List<TransactionResponse> items = jdbc.query(query, (rs, row) -> new TransactionResponse(
-                    rs.getObject("id", UUID.class), rs.getObject("tenant_id", UUID.class), rs.getString("type"),
-                    rs.getString("amount"), rs.getString("currency"), rs.getString("category_code"),
-                    rs.getString("subcategory_code"), rs.getString("description"), rs.getTimestamp("occurred_at").toInstant(),
-                    rs.getObject("account_id", UUID.class), rs.getString("status"), rs.getLong("version"),
-                    rs.getTimestamp("created_at").toInstant()), args.toArray());
+            List<TransactionResponse> items = jdbc.query(query, TRANSACTION_MAPPER, args.toArray());
             String nextCursor = null;
             if (items.size() > pageSize) {
                 items = new ArrayList<>(items.subList(0, pageSize));
@@ -156,9 +249,9 @@ public class TransactionService {
         });
     }
 
-    private TransactionResponse replay(UUID tenantId, String subject, String key, String requestHash) {
-        var existing = jdbc.queryForMap("SELECT request_hash, response_body::text FROM idempotency_records WHERE tenant_id = ? AND actor_subject = ? AND route = '/transactions' AND idempotency_key = ?",
-                tenantId, subject, key);
+    private TransactionResponse replay(UUID tenantId, String subject, String route, String key, String requestHash) {
+        var existing = jdbc.queryForMap("SELECT request_hash, response_body::text FROM idempotency_records WHERE tenant_id = ? AND actor_subject = ? AND route = ? AND idempotency_key = ?",
+                tenantId, subject, route, key);
         if (!requestHash.equals(existing.get("request_hash"))) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency key was used with another request");
         }

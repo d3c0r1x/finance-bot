@@ -26,8 +26,8 @@ Updated: 2026-10-01, Europe/Moscow.
 | E1.1 | Java build foundation and positive decimal money value | COMPLETE | E0 | pending |
 | E1.2 | PostgreSQL schema/migration, RLS tenant isolation, idempotency/audit/outbox persistence | COMPLETE | E1.1 + PostgreSQL runtime | 4f0c5e5 |
 | E1.3 | JWT transaction create/list API, membership authorization, atomic outbox and cursor paging | COMPLETE | E1.2 | pending |
-| E1.4 | Get/void, strict Keycloak JWT validation and least-privilege DB role | PLANNED | E1.3 | none |
-| E1 | Complete core vertical slice (E1.1–E1.4) | PLANNED | E0 | none |
+| E1.4 | Get/void, strict Keycloak JWT validation and least-privilege DB role | COMPLETE | E1.3 | pending |
+| E1 | Complete core vertical slice (E1.1–E1.4) | COMPLETE | E0 | pending |
 | E2–E10 | Remaining stages of global plan, including Android supplement | PLANNED | Prior stage gates | none |
 
 ## Verification evidence
@@ -132,8 +132,27 @@ Updated: 2026-10-01, Europe/Moscow.
 - Standard Docker Desktop executable path absent. Search for installed/portable
   runtimes before deciding whether PostgreSQL integration work is blocked.
 
+## E1.4 evidence
+
+- TDD red: added API cases for transaction detail and void before implementation;
+  the endpoint returned 404 as expected.
+- Implemented tenant-scoped GET detail and POST void with required Idempotency-Key,
+  optimistic version via If-Match, replay-safe response, version increment, atomic
+  audit before/after snapshots and `transaction.voided` outbox event.
+- Stale If-Match returns 412 and does not add audit/outbox rows. Duplicate key
+  returns the original successful response.
+- Core API checks pass with real PostgreSQL, including signed RSA JWT checks for
+  valid issuer/audience and rejection of wrong issuer, audience and expired token.
+- Database migration and app execute under separate non-superuser, NOBYPASSRLS,
+  non-owner roles. Production grants omit DELETE and deny Flyway history access.
+- V3 enables and forces tenant-root RLS; Python contract tests verify all
+  tenant-scoped tables enforce RLS and another tenant's rows are invisible.
+- PASS `:services:core:check --rerun-tasks`; PASS `pytest tools/contracts -p
+  no:cacheprovider -q` (12 passed). `git diff --check` passes.
+- Root `PROGRESS.md` mirrors this record. User-owned `.freebuff/` and
+  `CODEX_AUTONOMOUS.md` remain untracked and untouched.
+
 ## Next action
 
-Begin E1.4 with red tests for tenant-scoped get/void, If-Match version conflicts,
-  audit/outbox reversal and denial under a non-owner NOBYPASSRLS application role.
-Then test issuer/audience/expiry validation for Keycloak JWTs before proceeding to E2.
+Begin E2 from `PLAN.md`: finish the transaction API contract and identity/tenant
+boundaries, then continue the next independently testable core domain slice.
