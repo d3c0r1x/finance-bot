@@ -20,6 +20,10 @@ def test_openapi_document_and_operation_contracts_are_valid():
 
     assert spec["openapi"] == "3.1.0"
     assert spec["components"]["securitySchemes"]["keycloakOidc"]["type"] == "openIdConnect"
+    assert "post" in spec["paths"]["/api/v1/tenants"]
+    assert "get" in spec["paths"]["/api/v1/me/tenants"]
+    void = spec["paths"]["/api/v1/tenants/{tenantId}/transactions/{transactionId}/void"]["post"]
+    assert "412" in void["responses"], "stale transaction versions return HTTP 412"
     create = spec["paths"]["/api/v1/tenants/{tenantId}/transactions"]["post"]
     assert any(ref["$ref"].endswith("IdempotencyKey") for ref in create["parameters"])
     amount = spec["components"]["schemas"]["CreateTransaction"]["properties"]["amount"]

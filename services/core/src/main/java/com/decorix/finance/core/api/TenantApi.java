@@ -1,0 +1,11 @@
+package com.decorix.finance.core.api;
+
+import java.util.UUID;
+
+public final class TenantApi {
+    private TenantApi() {}
+
+    public record CreateTenantRequest(String displayName, String timezone) {}
+
+    public record TenantResponse(UUID tenantId, String displayName, String role, String timezone) {}
+}

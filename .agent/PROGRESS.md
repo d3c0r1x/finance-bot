@@ -23,12 +23,16 @@ Updated: 2026-10-01, Europe/Moscow.
 | E0.1 | Restore approved plan, supplement Android/AI and record Keycloak choice | COMPLETE | GitHub clone | d19269f |
 | E0.2 | Legacy baseline, F/D registry, mobile delta inventory | COMPLETE | E0.1 | d19269f |
 | E0.3 | Version matrix, foundational ADRs and initial contracts | COMPLETE | E0.2 | d19269f |
-| E1.1 | Java build foundation and positive decimal money value | COMPLETE | E0 | pending |
+| E1.1 | Java build foundation and positive decimal money value | COMPLETE | E0 | 68b8295 |
 | E1.2 | PostgreSQL schema/migration, RLS tenant isolation, idempotency/audit/outbox persistence | COMPLETE | E1.1 + PostgreSQL runtime | 4f0c5e5 |
-| E1.3 | JWT transaction create/list API, membership authorization, atomic outbox and cursor paging | COMPLETE | E1.2 | pending |
-| E1.4 | Get/void, strict Keycloak JWT validation and least-privilege DB role | COMPLETE | E1.3 | pending |
-| E1 | Complete core vertical slice (E1.1–E1.4) | COMPLETE | E0 | pending |
-| E2–E10 | Remaining stages of global plan, including Android supplement | PLANNED | Prior stage gates | none |
+| E1.3 | JWT transaction create/list API, membership authorization, atomic outbox and cursor paging | COMPLETE | E1.2 | f7fcdd9 |
+| E1.4 | Get/void, strict Keycloak JWT validation and least-privilege DB role | COMPLETE | E1.3 | f92500d |
+| E1 | Complete core vertical slice (E1.1–E1.4) | COMPLETE | E0 | f92500d |
+| E2.1 | Personal tenant onboarding, member profile, tenant list and contract | COMPLETE | E1 | pending |
+| E2.2 | React OIDC login, dashboard, transaction form/history and profile | PLANNED | E2.1 | none |
+| E2.3 | Android OIDC login and create/list against the Java API | PLANNED | E2.1 | none |
+| E2 | Web/profile plus Android first API flow | IN PROGRESS | E1 | none |
+| E3–E10 | Budgets/debts through production delivery, migration, parity and release | PLANNED | Prior stage gates | none |
 
 ## Verification evidence
 
@@ -152,7 +156,25 @@ Updated: 2026-10-01, Europe/Moscow.
 - Root `PROGRESS.md` mirrors this record. User-owned `.freebuff/` and
   `CODEX_AUTONOMOUS.md` remain untracked and untouched.
 
+## E2.1 evidence
+
+- Added Flyway V4 member_profiles with tenant RLS, composite membership FK,
+  timezone, onboarding state and planned income fields.
+- Added authenticated `POST /api/v1/tenants` to create identity if needed, tenant,
+  owner membership and initial profile in one transaction. IANA timezone is
+  validated before identity creation; invalid input leaves no identity behind.
+- Added `GET /api/v1/me/tenants`; membership RLS allows subject-scoped discovery,
+  then tenant RLS limits returned tenant details.
+- OpenAPI now describes onboarding, tenant listing, and stale-version HTTP 412.
+- TDD red: onboarding initially returned 404; invalid timezone initially passed.
+  Both behavior tests pass after implementation.
+- PASS `:services:core:check --rerun-tasks` on PostgreSQL 18.6.
+- PASS PostgreSQL-backed contracts: 12 passed, including V1–V4 migrations,
+  profile RLS, tenant isolation, OpenAPI validation and event schema.
+- First E2 test launch used malformed admin JDBC host; corrected to separate host
+  and credentials. No code or database state was changed by that failed launch.
+
 ## Next action
 
-Begin E2 from `PLAN.md`: finish the transaction API contract and identity/tenant
-boundaries, then continue the next independently testable core domain slice.
+Continue E2.2: build React OIDC/session path, dashboard and transaction
+create/history using the Java API; then E2.3 Android login and create/list.

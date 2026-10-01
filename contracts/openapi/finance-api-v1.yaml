@@ -9,6 +9,36 @@ servers:
 security:
   - keycloakOidc: []
 paths:
+  /api/v1/tenants:
+    post:
+      operationId: createTenant
+      summary: Create personal tenant and complete initial profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTenant' }
+      responses:
+        '201':
+          description: Tenant and owner membership created atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantMembership' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/me/tenants:
+    get:
+      operationId: listMyTenants
+      summary: List active tenants for the authenticated identity
+      responses:
+        '200':
+          description: Active memberships only
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TenantMembership' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/tenants/{tenantId}/transactions:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -92,6 +122,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
 components:
   securitySchemes:
     keycloakOidc:
@@ -130,7 +161,28 @@ components:
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
+    PreconditionFailed:
+      description: Transaction version is stale
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    CreateTenant:
+      type: object
+      additionalProperties: false
+      required: [displayName, timezone]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        timezone: { type: string, minLength: 1, maxLength: 64 }
+    TenantMembership:
+      type: object
+      additionalProperties: false
+      required: [tenantId, displayName, role, timezone]
+      properties:
+        tenantId: { type: string, format: uuid }
+        displayName: { type: string }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+        timezone: { type: string }
     CreateTransaction:
       type: object
       additionalProperties: false

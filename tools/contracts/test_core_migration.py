@@ -14,7 +14,7 @@ def test_migration_creates_tenant_scoped_transactional_core():
     sql = "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS).lower()
     normalized = re.sub(r"--[^\n]*", "", sql)
 
-    for table in ("tenants", "users", "external_identities", "memberships", "accounts", "transactions", "idempotency_records", "audit_log", "outbox_events"):
+    for table in ("tenants", "users", "external_identities", "memberships", "member_profiles", "accounts", "transactions", "idempotency_records", "audit_log", "outbox_events"):
         assert re.search(rf"create table\s+{table}\b", normalized), f"missing {table}"
     assert "numeric(20,2)" in normalized
     assert "amount > 0" in normalized
@@ -68,7 +68,7 @@ def test_postgres_migration_and_tenant_isolation():
                 WHERE m.subject = 'legacy-subject'
                 """).fetchone()[0]
             assert backfilled == 1
-            for tenant_table in ("tenants", "memberships", "accounts", "transactions", "idempotency_records", "audit_log", "outbox_events"):
+            for tenant_table in ("tenants", "memberships", "member_profiles", "accounts", "transactions", "idempotency_records", "audit_log", "outbox_events"):
                 assert conn.execute(
                     "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class WHERE oid = to_regclass(%s)",
                     (tenant_table,),
@@ -87,7 +87,9 @@ def test_postgres_migration_and_tenant_isolation():
             with conn.transaction():
                 conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
                 conn.execute("SELECT set_config('app.tenant_id', %s, true)", (str(tenant_a),))
+                conn.execute("SELECT set_config('app.subject', %s, true)", ("user-a",))
                 assert conn.execute("SELECT count(*) FROM tenants WHERE id = %s", (tenant_b,)).fetchone()[0] == 0
+                assert conn.execute("SELECT count(*) FROM memberships WHERE subject = 'user-b'").fetchone()[0] == 0
                 conn.execute("INSERT INTO transactions (tenant_id, owner_subject, owner_user_id, type, amount, category_code, occurred_at) VALUES (%s, 'user-a', %s, 'expense', 12.34, 'food', now())", (tenant_a, user_a))
                 conn.execute("INSERT INTO idempotency_records (tenant_id, actor_subject, route, idempotency_key, request_hash) VALUES (%s, 'user-a', '/transactions', 'request-key-0001', repeat('a', 64))", (tenant_a,))
                 with pytest.raises(psycopg.errors.UniqueViolation):

@@ -101,6 +101,48 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void firstLoginCanCreatePersonalTenantAndReadProfile() throws Exception {
+        String firstLoginSubject = "keycloak|first-login-" + UUID.randomUUID();
+        var auth = jwt().jwt(token -> token.subject(firstLoginSubject));
+
+        var response = mvc.perform(post("/api/v1/tenants").with(auth)
+                        .contentType("application/json")
+                        .content("{\"displayName\":\"Home\",\"timezone\":\"Europe/Moscow\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.displayName").value("Home"))
+                .andExpect(jsonPath("$.role").value("owner"))
+                .andReturn();
+        String createdTenantId = com.jayway.jsonpath.JsonPath.read(
+                response.getResponse().getContentAsString(), "$.tenantId");
+
+        mvc.perform(get("/api/v1/me/tenants").with(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].tenantId").value(createdTenantId))
+                .andExpect(jsonPath("$[0].displayName").value("Home"))
+                .andExpect(jsonPath("$[0].role").value("owner"));
+
+        Integer profileCount = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, createdTenantId);
+            return jdbc.queryForObject("SELECT count(*) FROM member_profiles WHERE tenant_id = ?", Integer.class,
+                    UUID.fromString(createdTenantId));
+        });
+        org.junit.jupiter.api.Assertions.assertEquals(1, profileCount);
+    }
+
+    @Test
+    void onboardingRejectsUnknownTimezoneBeforeCreatingTenant() throws Exception {
+        String firstLoginSubject = "keycloak|invalid-timezone-" + UUID.randomUUID();
+        mvc.perform(post("/api/v1/tenants").with(jwt().jwt(token -> token.subject(firstLoginSubject)))
+                        .contentType("application/json")
+                        .content("{\"displayName\":\"Home\",\"timezone\":\"Mars/Olympus\"}"))
+                .andExpect(status().isBadRequest());
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, jdbc.queryForObject(
+                "SELECT count(*) FROM external_identities WHERE provider = 'keycloak' AND subject = ?",
+                Integer.class, firstLoginSubject));
+    }
+
+    @Test
     void createIsAtomicAndIdempotentAndRequiresTenantMembership() throws Exception {
         String body = """
                 {"type":"expense","amount":"12.34","currency":"RUB","categoryCode":"food","description":"Lunch","occurredAt":"2026-10-01T10:00:00Z"}
