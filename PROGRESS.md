@@ -4,23 +4,26 @@ Updated: 2026-10-01, Europe/Moscow.
 
 ## Global plan
 
-- Plan: `docs/PLAN.md`, original specification from the planning chat.
+- Plan: `PLAN.md`, original specification from the planning chat.
 - Mandatory supplement: `docs/specs/CONTINUATION.md`, version 1.1.
 - Approval: user requested continuation of the approved rewrite, Android and
   future provider abstraction in the referenced chats; current user explicitly
   chose Keycloak + OIDC and requested GitHub clone before further work.
 - Repository: https://github.com/d3c0r1x/finance-bot.git.
 - Branch: `feat/saas-rewrite`; baseline HEAD: `cfaa013e1c977db24d7ab81944d0113ca79daea9`.
+- E0 commit: `d19269f5c4015170a905c784f558e2e04f809849`.
 - Original main and separate existing checkout are preserved.
 
 ## Goals
 
 | ID | Requirement | State | Dependencies | Commit |
 |---|---|---|---|---|
-| E0.1 | Restore approved plan, supplement Android/AI and record Keycloak choice | COMMIT_PENDING | GitHub clone | pending |
-| E0.2 | Legacy baseline, F/D registry, mobile delta inventory | COMMIT_PENDING | E0.1 | pending |
-| E0.3 | Version matrix, foundational ADRs and initial contracts | COMMIT_PENDING | E0.2 | pending |
-| E1 | Java/PostgreSQL transaction vertical slice | PLANNED | E0 | none |
+| E0.1 | Restore approved plan, supplement Android/AI and record Keycloak choice | COMPLETE | GitHub clone | d19269f |
+| E0.2 | Legacy baseline, F/D registry, mobile delta inventory | COMPLETE | E0.1 | d19269f |
+| E0.3 | Version matrix, foundational ADRs and initial contracts | COMPLETE | E0.2 | d19269f |
+| E1.1 | Java build foundation and positive decimal money value | COMPLETE | E0 | pending |
+| E1.2 | PostgreSQL migrations, tenant isolation, idempotent transaction API/outbox | PLANNED | E1.1 + PostgreSQL runtime | none |
+| E1 | Complete core vertical slice (E1.1–E1.2) | PLANNED | E0 | none |
 | E2–E10 | Remaining stages of global plan, including Android supplement | PLANNED | Prior stage gates | none |
 
 ## Verification evidence
@@ -48,6 +51,13 @@ Updated: 2026-10-01, Europe/Moscow.
   decimal strings and rejects numeric, negative, zero, over-precision values.
 - Matrix records verified June/September 2026 runtime/service releases, installed
   Java/Python/Node observations, and explicit absent runtimes.
+- E1.1: official Gradle 9.8.0 wrapper installed with SHA-256 validation, Java 17
+  toolchain, dependency locking and generated `services/core/gradle.lockfile`.
+- E1.1 TDD: `MoneyAmountTest` first failed to compile because the class was absent;
+  after implementation, `:services:core:test` and full `:services:core:check
+  --rerun-tasks` passed. Tests cover canonical positive decimal input, cent
+  normalization, and invalid/ambiguous forms.
+- Legacy regression after E1.1: `smoke_test.py` passed; contracts remain 8 passed.
 - E0.2 mobile delta identified on `origin/feat/android-fastapi`: FastAPI auth/API,
   SQLite account context, T-Bank import, Kotlin Compose Android and Flutter client.
   Full requirements remain source docs on that branch; inspect before assigning
@@ -69,6 +79,10 @@ Updated: 2026-10-01, Europe/Moscow.
 - First contract test run exposed zero amounts accepted (1 failing case). A stricter
   positive-only regex initially rejected canonical money due test expectation for
   leading-zero strings; updated valid canonical cases and all 8 checks now pass.
+- E1.1 wrapper attempt with Gradle 9.8 URL (missing `.0`) returned 404; corrected to
+  official 9.8.0 distribution and verified its published SHA-256. Initial Gradle
+  cache path was outside the sandbox; setting `GRADLE_USER_HOME` to workspace
+  `.gradle-cache` resolved it.
 
 ## Environment observations
 
@@ -78,5 +92,5 @@ Updated: 2026-10-01, Europe/Moscow.
 
 ## Next action
 
-Review E0 diff, commit the plan/specs/baseline contracts. Then set up the core
-Java build and determine a PostgreSQL integration path for E1.
+Commit E1.1, then begin E1.2 by writing PostgreSQL migration and tenant-isolation
+tests. Search for usable PostgreSQL/Docker runtimes while preserving the legacy app.

@@ -7,7 +7,7 @@
 |---|---|---|
 | Java | Temurin 17.0.18 | `java` and `javac` both returned 17.0.18 |
 | Spring Boot | 4.1.1 | Not installed; system requirements permit Java 17 |
-| Gradle | Wrapper 9.8 | Wrapper/runtime not installed |
+| Gradle | Wrapper 9.8.0 | Wrapper verified with Java 17; distribution SHA-256 pinned |
 | Python | 3.12.14 | v1 requirements installed into ignored `.venv` |
 | Node.js | 24.19.x LTS | `node --version` returned v24.19.0; npm/corepack not found |
 | Go | 1.27.1 | Not installed |

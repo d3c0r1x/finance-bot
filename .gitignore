@@ -4,6 +4,9 @@
 .env.backup
 .venv/
 venv/
+.gradle/
+.gradle-cache/
+**/build/
 
 # Питон
 __pycache__/

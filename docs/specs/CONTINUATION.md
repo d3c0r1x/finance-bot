@@ -148,7 +148,7 @@ auth в Java снимается с открытого выбора.
 |---|---|---|
 | Java JDK | 17.0.18, Java 17 | Найден Temurin в Unity Android toolchain; `java -version` и `javac -version` успешны |
 | Spring Boot | 4.1.1 | Официальный минимум Java 17, Gradle 8.14+ / 9.x |
-| Gradle wrapper | 9.8 | Совместимая ветка; официальный Gradle 9.8 опубликован 2026-09-24 |
+| Gradle wrapper | 9.8.0 | Совместимая ветка; официальный Gradle 9.8.0 опубликован 2026-09-24 |
 | Python | 3.12.14 | Установлен isolated venv; все v1 baseline scripts прошли |
 | Node.js | 24.19.x LTS | Доступен в среде как 24.19.0; использовать package manager lockfile |
 | Go | 1.27.1 | Официальный стабильный patch на дату проверки; локальный Go пока не найден |
