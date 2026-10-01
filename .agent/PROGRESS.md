@@ -13,6 +13,7 @@ Updated: 2026-10-01, Europe/Moscow.
 - Branch: `feat/saas-rewrite`; baseline HEAD: `cfaa013e1c977db24d7ab81944d0113ca79daea9`.
 - E0 commit: `d19269f5c4015170a905c784f558e2e04f809849`.
 - E1.1 commit: `68b8295f33328871e17f08cb3098bdb1c359c16e`.
+- E1.2 commit: `4f0c5e50efbcc5714d2a14809034bb3dc5a2a924`.
 - Original main and separate existing checkout are preserved.
 
 ## Goals
@@ -23,9 +24,10 @@ Updated: 2026-10-01, Europe/Moscow.
 | E0.2 | Legacy baseline, F/D registry, mobile delta inventory | COMPLETE | E0.1 | d19269f |
 | E0.3 | Version matrix, foundational ADRs and initial contracts | COMPLETE | E0.2 | d19269f |
 | E1.1 | Java build foundation and positive decimal money value | COMPLETE | E0 | pending |
-| E1.2 | PostgreSQL schema/migration, RLS tenant isolation, idempotency/audit/outbox persistence | COMPLETE | E1.1 + PostgreSQL runtime | pending |
-| E1.3 | Idempotent transaction HTTP API, membership authorization, atomic business/outbox writes | PLANNED | E1.2 | none |
-| E1 | Complete core vertical slice (E1.1–E1.2) | PLANNED | E0 | none |
+| E1.2 | PostgreSQL schema/migration, RLS tenant isolation, idempotency/audit/outbox persistence | COMPLETE | E1.1 + PostgreSQL runtime | 4f0c5e5 |
+| E1.3 | JWT transaction create/list API, membership authorization, atomic outbox and cursor paging | COMPLETE | E1.2 | pending |
+| E1.4 | Get/void, strict Keycloak JWT validation and least-privilege DB role | PLANNED | E1.3 | none |
+| E1 | Complete core vertical slice (E1.1–E1.4) | PLANNED | E0 | none |
 | E2–E10 | Remaining stages of global plan, including Android supplement | PLANNED | Prior stage gates | none |
 
 ## Verification evidence
@@ -70,6 +72,24 @@ Updated: 2026-10-01, Europe/Moscow.
 - PASS `pytest tools/contracts -q` with `FINANCE_TEST_DATABASE_URL`: 11 passed,
   including all PostgreSQL integration checks. The CI database workflow runs this
   suite against PostgreSQL 18.6.
+- E1.3 adds V2 stable `users`/`external_identities` UUID mapping with a safe RLS-
+  suspended backfill and RLS restoration; Keycloak `sub` is mapped only after JWT
+  validation and active tenant membership is required before business access.
+- E1.3 POST/GET list now enforce positive RUB decimal validation, route-scoped
+  idempotency replay/conflict, tenant context via `set_config(..., true)`, and one
+  SQL transaction for business row, audit, outbox and stored replay response.
+- Event body conforms to the versioned JSON Schema; stable cursor paging orders by
+  `(occurred_at, id)` and uses a bounded opaque cursor. Error responses use
+  `application/problem+json` with code and trace ID.
+- PASS `:services:core:check --rerun-tasks` against PostgreSQL 18.6, including
+  Spring MVC tests for create/replay/conflict, unknown member denial, list paging,
+  bad money, unauthenticated request and durable audit/outbox state.
+- PASS `pytest tools/contracts -p no:cacheprovider -q` with the same DB: 12 passed,
+  including V1/V2 execution, legacy identity backfill/RLS restoration and validation
+  of persisted API event payloads against its public schema.
+- PASS `handlers_test.py`: all legacy Telegram UI scenarios passed after core work.
+- Core CI now runs Java 17 Gradle checks and Python contract/database checks against
+  pinned PostgreSQL 18.6 image digest `sha256:0377e72c5289ed2f98cf61b1a9c2db9eb9d300317fe14244492fbc94343b3d04`.
 - E0.2 mobile delta identified on `origin/feat/android-fastapi`: FastAPI auth/API,
   SQLite account context, T-Bank import, Kotlin Compose Android and Flutter client.
   Full requirements remain source docs on that branch; inspect before assigning
@@ -99,6 +119,12 @@ Updated: 2026-10-01, Europe/Moscow.
   completed. Sandbox blocked `pg_ctl` process startup; approved elevated local
   launch succeeded. Python bundled runtime mishandled the Unicode workspace CWD;
   a temporary ASCII `R:` drive allowed the test runner to access the same files.
+- Spring Boot 4 uses Jackson 3 and split MVC/Flyway test starters; initial compilation
+  and startup exposed these dependency/package differences, corrected before green.
+- First Java test reached the app but found Flyway auto-configuration missing; added
+  the Boot Flyway starter and verified migrations on a clean database.
+- First event-contract check found stale test data from the pre-schema payload shape;
+  recreated only the isolated task-owned test database and verified clean events.
 
 ## Environment observations
 
@@ -108,6 +134,6 @@ Updated: 2026-10-01, Europe/Moscow.
 
 ## Next action
 
-Begin E1.3 with a red test for authenticated tenant transaction create/list,
-  idempotent replay/conflict, and atomic audit/outbox behavior. Add Keycloak JWT
-  subject membership checks before setting transaction-local tenant context.
+Begin E1.4 with red tests for tenant-scoped get/void, If-Match version conflicts,
+  audit/outbox reversal and denial under a non-owner NOBYPASSRLS application role.
+Then test issuer/audience/expiry validation for Keycloak JWTs before proceeding to E2.
