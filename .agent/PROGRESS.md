@@ -12,6 +12,7 @@ Updated: 2026-10-01, Europe/Moscow.
 - Repository: https://github.com/d3c0r1x/finance-bot.git.
 - Branch: `feat/saas-rewrite`; baseline HEAD: `cfaa013e1c977db24d7ab81944d0113ca79daea9`.
 - E0 commit: `d19269f5c4015170a905c784f558e2e04f809849`.
+- E1.1 commit: `68b8295f33328871e17f08cb3098bdb1c359c16e`.
 - Original main and separate existing checkout are preserved.
 
 ## Goals
@@ -22,7 +23,8 @@ Updated: 2026-10-01, Europe/Moscow.
 | E0.2 | Legacy baseline, F/D registry, mobile delta inventory | COMPLETE | E0.1 | d19269f |
 | E0.3 | Version matrix, foundational ADRs and initial contracts | COMPLETE | E0.2 | d19269f |
 | E1.1 | Java build foundation and positive decimal money value | COMPLETE | E0 | pending |
-| E1.2 | PostgreSQL migrations, tenant isolation, idempotent transaction API/outbox | PLANNED | E1.1 + PostgreSQL runtime | none |
+| E1.2 | PostgreSQL schema/migration, RLS tenant isolation, idempotency/audit/outbox persistence | COMPLETE | E1.1 + PostgreSQL runtime | pending |
+| E1.3 | Idempotent transaction HTTP API, membership authorization, atomic business/outbox writes | PLANNED | E1.2 | none |
 | E1 | Complete core vertical slice (E1.1–E1.2) | PLANNED | E0 | none |
 | E2–E10 | Remaining stages of global plan, including Android supplement | PLANNED | Prior stage gates | none |
 
@@ -58,6 +60,16 @@ Updated: 2026-10-01, Europe/Moscow.
   --rerun-tasks` passed. Tests cover canonical positive decimal input, cent
   normalization, and invalid/ambiguous forms.
 - Legacy regression after E1.1: `smoke_test.py` passed; contracts remain 8 passed.
+- E1.2 adds Flyway V1 tables for tenants, memberships, accounts, transactions,
+  idempotency, audit, outbox and inbox; composite tenant/account FK; decimal and
+  status constraints; tenant/history and outbox retry indexes; forced RLS policies.
+- PASS against a real isolated PostgreSQL 18.6 server: migration applied, app-role
+  saw only tenant A despite an existing tenant B row, cross-tenant insert denied,
+  duplicate idempotency key denied, and rollback removed transaction and outbox
+  together. Schema and non-login role are uniquely named and cleaned per test.
+- PASS `pytest tools/contracts -q` with `FINANCE_TEST_DATABASE_URL`: 11 passed,
+  including all PostgreSQL integration checks. The CI database workflow runs this
+  suite against PostgreSQL 18.6.
 - E0.2 mobile delta identified on `origin/feat/android-fastapi`: FastAPI auth/API,
   SQLite account context, T-Bank import, Kotlin Compose Android and Flutter client.
   Full requirements remain source docs on that branch; inspect before assigning
@@ -83,6 +95,10 @@ Updated: 2026-10-01, Europe/Moscow.
   official 9.8.0 distribution and verified its published SHA-256. Initial Gradle
   cache path was outside the sandbox; setting `GRADLE_USER_HOME` to workspace
   `.gradle-cache` resolved it.
+- PostgreSQL binary cluster initialization emitted a restricted-token warning but
+  completed. Sandbox blocked `pg_ctl` process startup; approved elevated local
+  launch succeeded. Python bundled runtime mishandled the Unicode workspace CWD;
+  a temporary ASCII `R:` drive allowed the test runner to access the same files.
 
 ## Environment observations
 
@@ -92,5 +108,6 @@ Updated: 2026-10-01, Europe/Moscow.
 
 ## Next action
 
-Commit E1.1, then begin E1.2 by writing PostgreSQL migration and tenant-isolation
-tests. Search for usable PostgreSQL/Docker runtimes while preserving the legacy app.
+Begin E1.3 with a red test for authenticated tenant transaction create/list,
+  idempotent replay/conflict, and atomic audit/outbox behavior. Add Keycloak JWT
+  subject membership checks before setting transaction-local tenant context.

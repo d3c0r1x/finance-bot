@@ -11,7 +11,8 @@
 | Python | 3.12.14 | v1 requirements installed into ignored `.venv` |
 | Node.js | 24.19.x LTS | `node --version` returned v24.19.0; npm/corepack not found |
 | Go | 1.27.1 | Not installed |
-| PostgreSQL | 18.6 | Not installed; no Windows service found |
+| PostgreSQL | 18.6 | EDB binaries in isolated temp; real migration and RLS integration passed |
+| Psycopg | 3.3.6 | Installed in ignored `.venv`; used for PostgreSQL integration tests |
 | Redis | OSS 8.10.0 | Not installed |
 | Kafka | 4.3.1 | Not installed |
 | ClickHouse | 26.9.5.2 stable | Not installed |
