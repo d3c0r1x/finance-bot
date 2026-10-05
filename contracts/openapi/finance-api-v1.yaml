@@ -830,6 +830,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Product purchase history is temporarily unavailable }
+  /bff/tenants/{tenantId}/shopping:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserShoppingCandidates
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Member-scoped due-purchase suggestions; never inventory
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShoppingList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Shopping history is temporarily unavailable }
   /bff/tenants/{tenantId}/products/decisions:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -1139,6 +1156,27 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { description: Telegram service credential is not configured or product history is unavailable }
+  /internal/v1/telegram/shopping:
+    post:
+      operationId: getTelegramShoppingCandidates
+      security:
+        - telegramServiceToken: []
+      description: Returns due suggestions for the current Telegram actor after Core revalidates receipt.read. The request cannot select a user or tenant, and the result is never inventory.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Member-scoped due-purchase suggestions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShoppingList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram service credential is not configured or shopping history is unavailable }
   /internal/v1/telegram/summary:
     post:
       operationId: getTelegramDashboardSummary
@@ -2957,6 +2995,21 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Product purchase history is temporarily unavailable }
+  /api/v1/tenants/{tenantId}/shopping:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getShoppingCandidates
+      responses:
+        '200':
+          description: Member-scoped due-purchase suggestions; never inventory
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShoppingList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Shopping history is temporarily unavailable }
   /api/v1/tenants/{tenantId}/products/decisions:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4318,6 +4371,32 @@ components:
           minItems: 1
           maxItems: 12
           items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    ShoppingList:
+      type: object
+      additionalProperties: false
+      required: [candidates, estimatedListCost, inventoryTracked]
+      properties:
+        candidates:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ShoppingCandidate' }
+        estimatedListCost: { type: string, pattern: '^\d{1,22}\.\d{2}$' }
+        inventoryTracked: { type: boolean, const: false, description: Finance does not know what is currently at home. }
+      description: Purchase suggestions from receipt rhythm; this response is never a home-inventory record.
+    ShoppingCandidate:
+      type: object
+      additionalProperties: false
+      required: [productName, purchaseCount, medianIntervalDays, usualUnitPrice, estimatedCost,
+                 lastPurchasedAt, dueAt, daysUntilDue]
+      properties:
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        purchaseCount: { type: integer, minimum: 3, maximum: 5000 }
+        medianIntervalDays: { type: integer, minimum: 3, maximum: 3650 }
+        usualUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        estimatedCost: { type: string, pattern: '^\d{1,22}\.\d{2}$' }
+        lastPurchasedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time }
+        daysUntilDue: { type: integer, minimum: -7300, maximum: 3 }
     PriceComparison:
       type: object
       additionalProperties: false

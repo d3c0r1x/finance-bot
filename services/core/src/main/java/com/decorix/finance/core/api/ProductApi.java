@@ -14,7 +14,16 @@ public final class ProductApi {
 
     public record ProductCatalogRequest(String tenantId, String ownerUserId, String query) {}
 
+    public record ShoppingCandidatesRequest(String tenantId, String ownerUserId) {}
+
     public record ProductCatalogResponse(String mode, String query, List<ProductCard> products) {}
+
+    public record ShoppingList(List<ShoppingCandidate> candidates, String estimatedListCost,
+                               boolean inventoryTracked) {}
+
+    public record ShoppingCandidate(String productName, int purchaseCount, int medianIntervalDays,
+                                    String usualUnitPrice, String estimatedCost, Instant lastPurchasedAt,
+                                    Instant dueAt, int daysUntilDue) {}
 
     public record ProductCard(String productName, int purchaseCount, String usualUnitPrice, boolean hasBaseline,
                               String baselineUnitPrice, String lastUnitPrice, Instant lastPurchasedAt,

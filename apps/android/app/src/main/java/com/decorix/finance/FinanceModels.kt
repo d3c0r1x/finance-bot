@@ -118,6 +118,23 @@ data class FinanceReport(
     val expenseByDay: Map<String, String> = emptyMap(),
 )
 
+data class FinanceShoppingCandidate(
+    val productName: String,
+    val purchaseCount: Int,
+    val medianIntervalDays: Int,
+    val usualUnitPrice: String,
+    val estimatedCost: String,
+    val lastPurchasedAt: String,
+    val dueAt: String,
+    val daysUntilDue: Int,
+)
+
+data class FinanceShoppingList(
+    val candidates: List<FinanceShoppingCandidate>,
+    val estimatedListCost: String,
+    val inventoryTracked: Boolean,
+)
+
 data class FinanceTransactionDraft(
     val id: String,
     val tenantId: String,
@@ -329,6 +346,44 @@ internal object FinanceModels {
         expenseByDay = stringMap(json, "expenseByDay"),
     )
 
+    fun shoppingList(json: JSONObject): FinanceShoppingList {
+        val moneyPattern = Regex("^(?:0|[1-9]\\d{0,21})\\.\\d{2}$")
+        val unitPricePattern = Regex("^(?:0|[1-9]\\d{0,29})\\.\\d{6}$")
+        val totalRaw = json.getString("estimatedListCost")
+        require(moneyPattern.matches(totalRaw) && !json.getBoolean("inventoryTracked")) {
+            "Invalid shopping response"
+        }
+        val items = json.getJSONArray("candidates")
+        require(items.length() <= 10) { "Invalid shopping candidate count" }
+        var estimatedTotal = java.math.BigDecimal("0.00")
+        val candidates = (0 until items.length()).map { index ->
+            val item = items.getJSONObject(index)
+            val name = item.getString("productName")
+            val purchaseCount = exactInt(item, "purchaseCount")
+            val interval = exactInt(item, "medianIntervalDays")
+            val daysUntilDue = exactInt(item, "daysUntilDue")
+            val usualRaw = item.getString("usualUnitPrice")
+            val costRaw = item.getString("estimatedCost")
+            val lastPurchasedAt = item.getString("lastPurchasedAt")
+            val dueAt = item.getString("dueAt")
+            val usual = usualRaw.toBigDecimalOrNull()
+            val cost = costRaw.toBigDecimalOrNull()
+            require(name.isNotBlank() && name.length <= 200 && purchaseCount in 3..5000
+                && interval in 3..3650 && daysUntilDue in -7300..3
+                && unitPricePattern.matches(usualRaw) && usual != null && usual.signum() > 0
+                && moneyPattern.matches(costRaw) && cost != null && cost.signum() >= 0
+                && usual.setScale(2, java.math.RoundingMode.HALF_EVEN) == cost
+                && Instant.parse(dueAt).isAfter(Instant.parse(lastPurchasedAt))) {
+                "Invalid shopping candidate"
+            }
+            estimatedTotal = estimatedTotal.add(cost)
+            FinanceShoppingCandidate(name, purchaseCount, interval, usualRaw, costRaw,
+                lastPurchasedAt, dueAt, daysUntilDue)
+        }
+        require(estimatedTotal.compareTo(totalRaw.toBigDecimal()) == 0) { "Shopping estimate does not match candidates" }
+        return FinanceShoppingList(candidates, totalRaw, false)
+    }
+
     fun budgetProposal(json: JSONObject) = BudgetProposal(
         id = json.getString("id"),
         monthlyIncome = json.getString("monthlyIncome"),
@@ -366,6 +421,11 @@ internal object FinanceModels {
         json.getJSONObject(key).let { values ->
             values.keys().asSequence().associateWith { entry -> values.getString(entry) }
         }
+
+    private fun exactInt(json: JSONObject, key: String): Int {
+        val value = json.get(key) as? Number ?: throw IllegalArgumentException("Invalid shopping integer")
+        return java.math.BigDecimal(value.toString()).intValueExact()
+    }
 
     private fun longMap(json: JSONObject, key: String): Map<String, Long> =
         json.getJSONObject(key).let { values ->

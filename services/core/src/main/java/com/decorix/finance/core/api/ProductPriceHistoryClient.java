@@ -5,6 +5,8 @@ import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogRequest;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ProductCard;
+import com.decorix.finance.core.api.ProductApi.ShoppingCandidate;
+import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import com.decorix.finance.core.api.ProductApi.PriceHistoryPoint;
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.math.BigDecimal;
 import java.util.List;
+import java.math.RoundingMode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -124,6 +127,89 @@ public class ProductPriceHistoryClient {
         } catch (IllegalArgumentException | JacksonException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Price analytics response is invalid", ex);
         }
+    }
+
+    public ShoppingList shopping(String tenantId, String ownerUserId) {
+        if (serviceUrl.isBlank() || serviceToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Price analytics service is not configured");
+        }
+        ProductApi.ShoppingCandidatesRequest request = new ProductApi.ShoppingCandidatesRequest(tenantId, ownerUserId);
+        try {
+            String body = json.writeValueAsString(request);
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(serviceUrl.replaceAll("/+$", "")
+                            + "/internal/v1/shopping/candidates"))
+                    .timeout(timeout)
+                    .header("Authorization", "Bearer " + serviceToken)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body)).build();
+            HttpResponse<InputStream> response = http.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] responseBody;
+            try (InputStream stream = response.body()) {
+                responseBody = stream.readNBytes(MAX_RESPONSE_BYTES + 1);
+            }
+            if (responseBody.length > MAX_RESPONSE_BYTES) throw invalidShoppingResponse();
+            if (response.statusCode() != 200) {
+                throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "Shopping analytics service is unavailable");
+            }
+            ShoppingList result = json.readValue(responseBody, ShoppingList.class);
+            validateShoppingResponse(result);
+            return result;
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Shopping analytics request was interrupted", ex);
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Shopping analytics service is unavailable", ex);
+        } catch (IllegalArgumentException | JacksonException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Shopping analytics response is invalid", ex);
+        }
+    }
+
+    private static void validateShoppingResponse(ShoppingList result) {
+        if (result == null || result.candidates() == null || result.candidates().size() > 10
+                || result.inventoryTracked() || !nonNegativeMoney(result.estimatedListCost())) {
+            throw invalidShoppingResponse();
+        }
+        BigDecimal total = BigDecimal.ZERO.setScale(2);
+        for (ShoppingCandidate candidate : result.candidates()) {
+            if (candidate == null || candidate.productName() == null || candidate.productName().isBlank()
+                    || candidate.purchaseCount() < 3 || candidate.purchaseCount() > 5000
+                    || candidate.medianIntervalDays() < 3 || candidate.medianIntervalDays() > 3650
+                    || candidate.daysUntilDue() > 3 || candidate.daysUntilDue() < -2 * candidate.medianIntervalDays()
+                    || candidate.lastPurchasedAt() == null || candidate.dueAt() == null
+                    || !positiveDecimal(candidate.usualUnitPrice()) || !positiveMoney(candidate.estimatedCost())) {
+                throw invalidShoppingResponse();
+            }
+            BigDecimal usual = new BigDecimal(candidate.usualUnitPrice()).setScale(2, RoundingMode.HALF_EVEN);
+            BigDecimal estimate = new BigDecimal(candidate.estimatedCost()).setScale(2, RoundingMode.UNNECESSARY);
+            if (usual.compareTo(estimate) != 0) throw invalidShoppingResponse();
+            total = total.add(estimate);
+        }
+        if (total.compareTo(new BigDecimal(result.estimatedListCost()).setScale(2, RoundingMode.UNNECESSARY)) != 0) {
+            throw invalidShoppingResponse();
+        }
+    }
+
+    private static boolean positiveMoney(String value) {
+        if (!nonNegativeMoney(value)) return false;
+        return new BigDecimal(value).signum() > 0;
+    }
+
+    private static boolean nonNegativeMoney(String value) {
+        if (value == null) return false;
+        try {
+            BigDecimal amount = new BigDecimal(value);
+            return amount.signum() >= 0 && Math.max(0, amount.scale()) <= 2;
+        } catch (NumberFormatException invalid) { return false; }
+    }
+
+    private static ResponseStatusException invalidShoppingResponse() {
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Shopping candidates response is incomplete");
     }
 
     private static void validateCatalogResponse(ProductCatalogResponse result, ProductCatalogRequest request) {

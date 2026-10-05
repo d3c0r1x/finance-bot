@@ -58,6 +58,26 @@ paths:
         '400': { description: Request is malformed or query exceeds 80 characters }
         '401': { description: Internal service token is missing or invalid }
         '503': { description: Product purchase history is temporarily unavailable }
+  /internal/v1/shopping/candidates:
+    post:
+      operationId: listMemberShoppingCandidates
+      security:
+        - serviceBearer: []
+      description: Derives due suggestions from confirmed receipt history for the tenant and Core-resolved member. It does not track home inventory.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ShoppingCandidatesRequest' }
+      responses:
+        '200':
+          description: Bounded purchase-rhythm suggestions with estimated cost
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShoppingList' }
+        '400': { description: Request is malformed or contains unknown fields }
+        '401': { description: Internal service token is missing or invalid }
+        '503': { description: Shopping history is temporarily unavailable }
   /internal/v1/budget-proposals:
     post:
       operationId: createHistoryBudgetShares
@@ -407,6 +427,14 @@ components:
         tenantId: { type: string, format: uuid }
         ownerUserId: { type: string, format: uuid }
         query: { type: string, maxLength: 80 }
+    ShoppingCandidatesRequest:
+      type: object
+      additionalProperties: false
+      required: [tenantId, ownerUserId]
+      properties:
+        tenantId: { type: string, format: uuid }
+        ownerUserId: { type: string, format: uuid }
+      description: ownerUserId must be resolved by Core from the authenticated active member; callers cannot select another scope.
     ProductCatalogResponse:
       type: object
       additionalProperties: false
@@ -464,6 +492,32 @@ components:
           minItems: 1
           maxItems: 12
           items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    ShoppingList:
+      type: object
+      additionalProperties: false
+      required: [candidates, estimatedListCost, inventoryTracked]
+      properties:
+        candidates:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ShoppingCandidate' }
+        estimatedListCost: { type: string, pattern: '^\d{1,22}\.\d{2}$' }
+        inventoryTracked: { type: boolean, const: false, description: Finance does not know what is currently at home. }
+      description: Purchase suggestions from receipt rhythm; this response is never a home-inventory record.
+    ShoppingCandidate:
+      type: object
+      additionalProperties: false
+      required: [productName, purchaseCount, medianIntervalDays, usualUnitPrice, estimatedCost,
+                 lastPurchasedAt, dueAt, daysUntilDue]
+      properties:
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        purchaseCount: { type: integer, minimum: 3, maximum: 5000 }
+        medianIntervalDays: { type: integer, minimum: 3, maximum: 3650 }
+        usualUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        estimatedCost: { type: string, pattern: '^\d{1,22}\.\d{2}$' }
+        lastPurchasedAt: { type: string, format: date-time }
+        dueAt: { type: string, format: date-time }
+        daysUntilDue: { type: integer, minimum: -7300, maximum: 3 }
     PriceComparison:
       type: object
       additionalProperties: false

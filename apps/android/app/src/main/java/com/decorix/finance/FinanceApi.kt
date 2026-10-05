@@ -146,6 +146,10 @@ class FinanceApi(context: Context) {
         execute("/api/v1/tenants/$tenantId/debts/$debtId/forecast", "GET"),
     ))
 
+    fun shoppingCandidates(tenantId: String): FinanceShoppingList = FinanceModels.shoppingList(JSONObject(
+        execute("/api/v1/tenants/$tenantId/shopping", "GET"),
+    ))
+
     fun memberProfile(tenantId: String): FinanceMemberProfile = FinanceModels.memberProfile(JSONObject(
         execute("/api/v1/tenants/$tenantId/profile/me", "GET"),
     ))

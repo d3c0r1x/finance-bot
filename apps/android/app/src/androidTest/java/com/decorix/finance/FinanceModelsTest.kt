@@ -167,4 +167,25 @@ class FinanceModelsTest {
         assertNull(debts.single().interestRate)
         assertEquals(3L, debts.single().version)
     }
+
+    @Test fun parsesShoppingCandidatesAndExactEstimateWithoutInventoryClaim() {
+        val shopping = FinanceModels.shoppingList(JSONObject("""
+            {"candidates":[{"productName":"Молоко 1 л","purchaseCount":3,"medianIntervalDays":10,
+              "usualUnitPrice":"100.000000","estimatedCost":"100.00",
+              "lastPurchasedAt":"2026-10-04T00:00:00Z","dueAt":"2026-10-05T00:00:00Z","daysUntilDue":0}],
+             "estimatedListCost":"100.00","inventoryTracked":false}
+        """.trimIndent()))
+
+        assertEquals("Молоко 1 л", shopping.candidates.single().productName)
+        assertEquals(3, shopping.candidates.single().purchaseCount)
+        assertEquals("100.00", shopping.estimatedListCost)
+        assertEquals(false, shopping.inventoryTracked)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsShoppingPayloadThatClaimsInventory() {
+        FinanceModels.shoppingList(JSONObject("""
+            {"candidates":[],"estimatedListCost":"0.00","inventoryTracked":true}
+        """.trimIndent()))
+    }
 }

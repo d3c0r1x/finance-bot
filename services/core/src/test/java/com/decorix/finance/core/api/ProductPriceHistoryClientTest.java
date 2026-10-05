@@ -17,6 +17,66 @@ import tools.jackson.databind.ObjectMapper;
 class ProductPriceHistoryClientTest {
     @Test
     @SuppressWarnings("unchecked")
+    void requestsShoppingCandidatesWithCoreResolvedMemberAndValidatesNoInventoryClaim() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        AtomicReference<String> path = new AtomicReference<>();
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        try {
+            server.createContext("/internal/v1/shopping/candidates", exchange -> {
+                path.set(exchange.getRequestURI().getPath());
+                authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+                requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                byte[] body = validShoppingResponse().getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            var client = new ProductPriceHistoryClient(new ObjectMapper(), base(server), "analytics-secret",
+                    Duration.ofSeconds(2));
+
+            var response = client.shopping(tenant.toString(), owner.toString());
+
+            assertEquals("/internal/v1/shopping/candidates", path.get());
+            assertEquals("Bearer analytics-secret", authorization.get());
+            Map<String, Object> sent = new ObjectMapper().readValue(requestBody.get(), Map.class);
+            assertEquals(tenant.toString(), sent.get("tenantId"));
+            assertEquals(owner.toString(), sent.get("ownerUserId"));
+            assertEquals(1, response.candidates().size());
+            assertEquals("100.00", response.estimatedListCost());
+            assertEquals(false, response.inventoryTracked());
+        } finally { server.stop(0); }
+    }
+
+    @Test
+    void rejectsShoppingResponseWithTooFewPurchasesOrInventoryTracking() throws Exception {
+        for (String invalid : new String[]{
+                validShoppingResponse().replace("\"purchaseCount\":3", "\"purchaseCount\":2"),
+                validShoppingResponse().replace("\"inventoryTracked\":false", "\"inventoryTracked\":true"),
+                validShoppingResponse().replace("\"estimatedListCost\":\"100.00\"", "\"estimatedListCost\":\"101.00\"")}) {
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            try {
+                server.createContext("/internal/v1/shopping/candidates", exchange -> {
+                    byte[] body = invalid.getBytes(StandardCharsets.UTF_8);
+                    exchange.sendResponseHeaders(200, body.length);
+                    exchange.getResponseBody().write(body);
+                    exchange.close();
+                });
+                server.start();
+                var client = new ProductPriceHistoryClient(new ObjectMapper(), base(server), "analytics-secret",
+                        Duration.ofSeconds(2));
+                assertThrows(ResponseStatusException.class,
+                        () -> client.shopping(UUID.randomUUID().toString(), UUID.randomUUID().toString()));
+            } finally { server.stop(0); }
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void requestsCatalogWithCoreResolvedMemberAndValidatesRealHistory() throws Exception {
         UUID tenant = UUID.randomUUID();
         UUID owner = UUID.randomUUID();
@@ -99,6 +159,15 @@ class ProductPriceHistoryClientTest {
                   "purchasedAt":"2026-09-01T10:00:00Z","merchant":"Market","name":"tea","unitPrice":"100.000000","current":false},
                  {"receiptId":"00000000-0000-4000-8000-000000000012","itemId":"00000000-0000-4000-8000-000000000013",
                   "purchasedAt":"2026-09-02T10:00:00Z","merchant":"Market","name":"tea","unitPrice":"120.000000","current":false}]}]}
+                """;
+    }
+
+    private static String validShoppingResponse() {
+        return """
+                {"candidates":[{"productName":"Milk Fresh 1l","purchaseCount":3,"medianIntervalDays":10,
+                 "usualUnitPrice":"100.000000","estimatedCost":"100.00",
+                 "lastPurchasedAt":"2026-10-04T00:00:00Z","dueAt":"2026-10-05T00:00:00Z","daysUntilDue":0}],
+                 "estimatedListCost":"100.00","inventoryTracked":false}
                 """;
     }
 }

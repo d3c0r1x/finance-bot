@@ -38,9 +38,14 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	shoppingCandidates, err := prices.NewShoppingCandidatesHandler(os.Getenv("FINANCE_ANALYTICS_SERVICE_TOKEN"), store)
+	if err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/internal/v1/prices/compare", priceHistory)
 	mux.Handle("/internal/v1/products/catalog", productCatalog)
+	mux.Handle("/internal/v1/shopping/candidates", shoppingCandidates)
 	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

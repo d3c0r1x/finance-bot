@@ -3,6 +3,7 @@ package com.decorix.finance.core.api;
 import com.decorix.finance.core.api.ProductApi.PriceCompareRequest;
 import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
+import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -85,6 +86,34 @@ public class ProductPriceHistoryService {
         });
         if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product catalog not found");
         return analytics.catalog(tenantId.toString(), userId.toString(), normalizeCatalogQuery(query));
+    }
+
+    public ShoppingList shopping(UUID tenantId, String subject) {
+        if (tenantId == null || subject == null || subject.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        }
+        UUID userId = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return memberUserId(tenantId, subject);
+        });
+        if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        return analytics.shopping(tenantId.toString(), userId.toString());
+    }
+
+    /** Uses a resolved Telegram actor while rechecking active membership before reading history. */
+    public ShoppingList shopping(UUID tenantId, UUID ownerUserId) {
+        if (tenantId == null || ownerUserId == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        }
+        UUID userId = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            List<UUID> members = jdbc.query("""
+                    SELECT user_id FROM memberships WHERE tenant_id = ? AND user_id = ? AND status = 'active'
+                    """, (rs, row) -> rs.getObject("user_id", UUID.class), tenantId, ownerUserId);
+            return members.isEmpty() ? null : members.get(0);
+        });
+        if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        return analytics.shopping(tenantId.toString(), userId.toString());
     }
 
     private static void validateCatalogRequest(UUID tenantId, String query) {

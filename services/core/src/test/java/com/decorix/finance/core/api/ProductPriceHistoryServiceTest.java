@@ -25,6 +25,58 @@ import org.springframework.web.server.ResponseStatusException;
 class ProductPriceHistoryServiceTest {
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
+    void shoppingCandidatesResolveOnlyAuthenticatedActiveMemberBeforeAnalyticsCall() {
+        UUID tenantId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        String subject = "keycloak-subject";
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        TransactionTemplate transaction = mock(TransactionTemplate.class);
+        ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        when(jdbc.queryForObject(eq("SELECT set_config('app.tenant_id', ?, true)"), eq(String.class), eq(tenantId.toString())))
+                .thenReturn(tenantId.toString());
+        doAnswer(invocation -> List.of(ownerId)).when(jdbc).query(anyString(), any(RowMapper.class),
+                eq(tenantId), eq(subject));
+        var expected = new ProductApi.ShoppingList(List.of(new ProductApi.ShoppingCandidate(
+                "Milk Fresh 1l", 3, 10, "100.000000", "100.00", java.time.Instant.parse("2026-10-04T00:00:00Z"),
+                java.time.Instant.parse("2026-10-05T00:00:00Z"), 0)), "100.00", false);
+        when(analytics.shopping(tenantId.toString(), ownerId.toString())).thenReturn(expected);
+
+        var service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+
+        assertEquals(expected, service.shopping(tenantId, subject));
+        verify(analytics).shopping(tenantId.toString(), ownerId.toString());
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void shoppingCandidatesDoNotQueryAnalyticsForInactiveMember() {
+        UUID tenantId = UUID.randomUUID();
+        String subject = "inactive-subject";
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        TransactionTemplate transaction = mock(TransactionTemplate.class);
+        ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        when(jdbc.queryForObject(eq("SELECT set_config('app.tenant_id', ?, true)"), eq(String.class), eq(tenantId.toString())))
+                .thenReturn(tenantId.toString());
+        doAnswer(invocation -> List.of()).when(jdbc).query(anyString(), any(RowMapper.class), eq(tenantId), eq(subject));
+        var service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.shopping(tenantId, subject));
+
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
+        verify(analytics, never()).shopping(anyString(), anyString());
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
     void catalogResolvesOnlyAuthenticatedActiveMemberBeforeAnalyticsCall() {
         UUID tenantId = UUID.randomUUID();
         UUID ownerId = UUID.randomUUID();

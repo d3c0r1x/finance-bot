@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 import re
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
 from urllib.parse import quote
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
@@ -337,6 +337,10 @@ class TelegramCoreClient:
         }, expected_status=200)
         return self._validated_product_catalog(body, normalized)
 
+    async def get_shopping_candidates(self, actor_context_token: str) -> dict:
+        body = await self._post_json("shopping", {"token": actor_context_token}, expected_status=200)
+        return self._validated_shopping_candidates(body)
+
     @staticmethod
     def _validated_product_catalog(body: dict, expected_query: str) -> dict:
         mode = "catalog" if not expected_query else "search"
@@ -417,6 +421,46 @@ class TelegramCoreClient:
         if not number.is_finite() or positive and number <= 0:
             raise TelegramCoreError("unavailable")
         return number
+
+    @staticmethod
+    def _validated_shopping_candidates(body: dict) -> dict:
+        candidates = body.get("candidates")
+        total_raw = body.get("estimatedListCost")
+        if type(body.get("inventoryTracked")) is not bool or body["inventoryTracked"] \
+                or not isinstance(candidates, list) or len(candidates) > 10:
+            raise TelegramCoreError("unavailable")
+        total = TelegramCoreClient._validated_product_decimal(total_raw, "estimatedListCost", _PRODUCT_TOTAL,
+                                                               positive=False)
+        estimated = Decimal("0")
+        normalized = []
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                raise TelegramCoreError("unavailable")
+            name = candidate.get("productName")
+            count = candidate.get("purchaseCount")
+            interval = candidate.get("medianIntervalDays")
+            days_until_due = candidate.get("daysUntilDue")
+            if not isinstance(name, str) or not name.strip() or len(name) > 200 \
+                    or type(count) is not int or not 3 <= count <= 5000 \
+                    or type(interval) is not int or not 3 <= interval <= 3650 \
+                    or type(days_until_due) is not int or not -7300 <= days_until_due <= 3:
+                raise TelegramCoreError("unavailable")
+            usual = TelegramCoreClient._validated_product_decimal(
+                candidate.get("usualUnitPrice"), "usualUnitPrice", _PRODUCT_UNIT_PRICE, positive=True)
+            cost = TelegramCoreClient._validated_product_decimal(
+                candidate.get("estimatedCost"), "estimatedCost", _PRODUCT_TOTAL, positive=False)
+            if usual.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN) != cost:
+                raise TelegramCoreError("unavailable")
+            last = TelegramCoreClient._validated_product_datetime(candidate.get("lastPurchasedAt"),
+                                                                  "lastPurchasedAt")
+            due = TelegramCoreClient._validated_product_datetime(candidate.get("dueAt"), "dueAt")
+            if due <= last:
+                raise TelegramCoreError("unavailable")
+            estimated += cost
+            normalized.append(candidate)
+        if estimated != total:
+            raise TelegramCoreError("unavailable")
+        return {"candidates": normalized, "estimatedListCost": total_raw, "inventoryTracked": False}
 
     @staticmethod
     def _validated_product_datetime(value: object, field: str) -> datetime:

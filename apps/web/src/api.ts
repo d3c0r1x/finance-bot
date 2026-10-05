@@ -161,6 +161,11 @@ export type ProductCatalogCard = {
   chartAvailable: boolean; history: ProductPricePoint[];
 };
 export type ProductCatalogResponse = { mode: 'catalog' | 'search'; query: string; products: ProductCatalogCard[] };
+export type ShoppingCandidate = {
+  productName: string; purchaseCount: number; medianIntervalDays: number; usualUnitPrice: string;
+  estimatedCost: string; lastPurchasedAt: string; dueAt: string; daysUntilDue: number;
+};
+export type ShoppingList = { candidates: ShoppingCandidate[]; estimatedListCost: string; inventoryTracked: false };
 export type ReceiptItemPage = { items: ReceiptItem[]; page: number; totalItems: number; hasMore: boolean };
 export type ReceiptRepeatWarning = {
   itemId: string; name: string; productKey: string; verdict: string; title: string;
@@ -368,6 +373,7 @@ export const api = {
     const search = query.trim();
     return request<ProductCatalogResponse>(`/bff/tenants/${tenantId}/products${search ? `?query=${encodeURIComponent(search)}` : ''}`);
   },
+  getShoppingCandidates: (tenantId: string) => request<ShoppingList>(`/bff/tenants/${tenantId}/shopping`),
   allowReceiptProduct: (tenantId: string, productKey: string) => request<{ productKey: string; decision: 'allowed'; version: number; updatedAt: string }>(
     `/bff/tenants/${tenantId}/products/${encodeURIComponent(productKey)}/decision`,
     { method: 'PUT', body: JSON.stringify({ decision: 'allowed' }) },

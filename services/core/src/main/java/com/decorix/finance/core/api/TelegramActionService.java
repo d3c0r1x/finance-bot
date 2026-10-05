@@ -26,6 +26,7 @@ import com.decorix.finance.core.api.DebtApi.DebtResponse;
 import com.decorix.finance.core.api.BudgetApi.Overview;
 import com.decorix.finance.core.api.BudgetApi.BudgetProposalResponse;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
+import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -86,6 +87,14 @@ public class TelegramActionService {
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "receipt.read");
             return productHistory.catalog(actor.tenantId(), actor.userId(), request.query());
+        });
+    }
+
+    public ShoppingList shopping(ResolveRequest request) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Shopping request is required");
+        return transaction.execute(status -> {
+            ActorContext actor = actorContexts.require(request.token(), "receipt.read");
+            return productHistory.shopping(actor.tenantId(), actor.userId());
         });
     }
 

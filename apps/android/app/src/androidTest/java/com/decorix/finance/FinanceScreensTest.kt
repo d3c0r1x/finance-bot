@@ -49,6 +49,21 @@ class FinanceScreensTest {
         compose.onNodeWithText("Прогноз выплаты").performScrollTo().assertIsDisplayed()
     }
 
+    @Test fun shoppingSuggestionsAreLocalizedAndNeverPresentedAsInventory() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), shoppingList = shopping()))
+
+        compose.onNodeWithText("Покупки").performScrollTo().performClick()
+        compose.onNodeWithText("Пора купить").assertIsDisplayed()
+        compose.onNodeWithText("Молоко 1 л").assertIsDisplayed()
+        compose.onNodeWithText("Оценка: 100.00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Медиана: раз в 10 дн. · 3 покупки").assertIsDisplayed()
+        compose.onNodeWithText("Это подсказка по чекам, не учёт запасов.").assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Shopping list").assertIsDisplayed()
+        compose.onNodeWithText("Not home inventory: suggestions use your confirmed receipt rhythm.").assertIsDisplayed()
+    }
+
     @Test fun viewerCannotSubmitTransactionOrChangeFamilyBudget() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")), budgets = budget()))
         compose.onNodeWithText("Операции").performClick()
@@ -155,7 +170,7 @@ class FinanceScreensTest {
         compose.onNodeWithText("Расходы месяца: 42000.35 ₽").assertIsDisplayed()
         compose.onNodeWithText("Безопасно тратить в день: 4444.44 ₽").assertIsDisplayed()
 
-        compose.onNodeWithText("Отчёты").performClick()
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
         compose.onNodeWithText("Доходы: 120000.00 ₽").assertIsDisplayed()
         compose.onNodeWithText("Платежи по долгам: 3000.00 ₽").assertIsDisplayed()
     }
@@ -164,7 +179,7 @@ class FinanceScreensTest {
         var requested: List<String>? = null
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),
             onReportLoad = { period, scope, month, from, to -> requested = listOf(period, scope, month, from, to) })
-        compose.onNodeWithText("Отчёты").performClick()
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
         compose.onNodeWithText("Месяц ▾").performClick()
         compose.onNodeWithText("Неделя ▾").performClick()
         compose.onNodeWithText("90 дней ▾").performClick()
@@ -179,7 +194,7 @@ class FinanceScreensTest {
     @Test fun reportScreenShowsServerDailyExpensesForZeroAndNonzeroDays() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
             report = report().copy(expenseByDay = mapOf("2026-10-01" to "15000.00", "2026-10-02" to "0.00"))))
-        compose.onNodeWithText("Отчёты").performClick()
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
         compose.onNodeWithTag("report-results").performScrollToIndex(2)
         compose.onNodeWithText("Расходы по дням").assertIsDisplayed()
         compose.onNodeWithTag("report-results").performScrollToIndex(3)
@@ -293,6 +308,10 @@ class FinanceScreensTest {
 
     private fun debt() = FinanceDebt("debt-1", "tenant-1", "Кредитная карта", "10000.00", "8400.00",
         "19.9", "500.00", "open", 3L)
+
+    private fun shopping() = FinanceShoppingList(listOf(FinanceShoppingCandidate(
+        "Молоко 1 л", 3, 10, "100.000000", "100.00", "2026-10-04T00:00:00Z",
+        "2026-10-05T00:00:00Z", 0)), "100.00", false)
 
     private fun report() = FinanceReport("month", "family", "2026-10-01", "2026-10-01", "2026-10-01",
         "Europe/Moscow", "RUB", "120000.00", "64000.50", "3000.00", "250.00", 12,

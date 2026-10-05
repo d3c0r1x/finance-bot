@@ -431,7 +431,7 @@ describe('web onboarding and transaction flow', () => {
     await user.clear(screen.getByLabelText('Дата'));
     await user.type(screen.getByLabelText('Дата'), '2026-10-02');
     await user.click(screen.getByRole('button', { name: 'Обновить' }));
-    expect(await screen.findByText('Покупки')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Повторить Покупки' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Повторить Покупки' }));
     await waitFor(() => expect(transactions).toHaveLength(2));

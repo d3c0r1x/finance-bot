@@ -495,9 +495,19 @@ features:
     feature: "Покупки по ритму, медиана интервалов, стоимость списка"
     target: "G shopping candidates; J personal policies"
     acceptance: "≥3 покупки; устаревшие товары исчезают после двух обычных интервалов; это не учёт запасов"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/analytics-go/prices/shopping_test.go
+      - services/analytics-go/prices/shopping_api_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TelegramShoppingTest.java
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/presentation/tests/test_product_catalog_renderer.py
+      - apps/web/src/ShoppingPanel.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+    evidence:
+      - "F35 preserves the legacy `services/shopping.py` policy: minimum 3 confirmed purchases, median cadence and unit-price estimate, 3-day due horizon, expiry after 2 overdue intervals, and explicit no-inventory wording. Go deduplicates same-receipt rows and scopes candidates by tenant/member. Core exposes authenticated Web/BFF and Telegram actor routes; Telegram `/shopping`, Web, and Android present localized estimates without claiming stock inventory. GREEN: Go `go test ./...` + `go vet ./...`; Core `check` 216 tests/0 failures (88 environment/container-gated skips) plus PostgreSQL `TransactionApiPostgresTest` 86/86 on isolated PostgreSQL 18.6, including both shopping member-scope tests; Python Telegram/presentation 87/87; contracts 49 passed/2 optional skips; Web 42/42 + production build; Android emulator instrumentation 29/29, debug package installed (SHA-256 `01BA6456F816407E7C6A5BF0903B458AD2D774B64BD787C775B1E77620655049`); `git diff --check` clean. F35 is complete."
     intentional_differences: []
   - id: F36
     feature: "«Уже купил», mute/unmute, блокировки, копирование закупки"

@@ -438,6 +438,60 @@ def test_core_client_requests_member_product_catalog_with_actor_token_only():
     }
 
 
+def test_core_client_requests_shopping_with_actor_token_only_and_validates_no_inventory():
+    seen = {}
+    shopping = {"candidates": [{"productName": "Milk Fresh 1l", "purchaseCount": 3,
+                "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
+                "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
+                "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False}
+
+    async def get_shopping(request):
+        seen["path"] = request.path
+        seen["token"] = request.headers.get("X-Finance-Service-Token")
+        seen["body"] = await request.json()
+        return web.json_response(shopping)
+
+    async def exercise():
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/shopping", get_shopping)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "telegram-service-secret")
+            return await client.get_shopping_candidates("opaque-context")
+
+    result = asyncio.run(exercise())
+    assert result["estimatedListCost"] == "100.00"
+    assert seen == {
+        "path": "/internal/v1/telegram/shopping", "token": "telegram-service-secret",
+        "body": {"token": "opaque-context"},
+    }
+
+
+def test_core_client_rejects_shopping_candidates_that_claim_inventory_or_have_fewer_than_three_purchases():
+    valid = {"candidates": [{"productName": "Milk Fresh 1l", "purchaseCount": 3,
+             "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
+             "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
+             "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False}
+
+    async def exercise(invalid):
+        async def get_shopping(_request):
+            return web.json_response(invalid)
+
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/shopping", get_shopping)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "telegram-service-secret")
+            await client.get_shopping_candidates("opaque-context")
+
+    for invalid in ({**valid, "inventoryTracked": True},
+                    {**valid, "candidates": [{**valid["candidates"][0], "purchaseCount": 2}]}):
+        try:
+            asyncio.run(exercise(invalid))
+        except TelegramCoreError as error:
+            assert error.code == "unavailable"
+        else:
+            raise AssertionError("invalid shopping candidates were accepted")
+
+
 def test_core_client_rejects_fabricated_product_baseline_without_history():
     invalid = product_card()
     invalid.update(purchaseCount=1, hasBaseline=False, baselineUnitPrice="0.000000",

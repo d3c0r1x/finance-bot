@@ -99,6 +99,17 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 .product-price-chart { width: 100%; height: 118px; overflow: visible; }
 .product-price-chart polyline { fill: none; stroke: #548f69; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .product-price-chart circle { fill: white; stroke: #548f69; stroke-width: 2.5; }
+.shopping-panel { display: grid; gap: 18px; }
+.shopping-list { display: grid; gap: 12px; }
+.shopping-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px;
+  border: 1px solid #e8edf4; border-radius: 13px; background: #fbfcfe; }
+.shopping-card-copy { min-width: 0; }
+.shopping-card h3 { margin: 0 0 7px; overflow-wrap: anywhere; font-size: 16px; }
+.shopping-card p { margin: 4px 0 0; color: #718097; font-size: 12px; }
+.shopping-card-cost { flex: none; color: #25354b; }
+.shopping-total { margin: 0; color: #526177; }
+.shopping-total strong { color: #25354b; }
+.shopping-disclosure { margin: 0; color: #718097; font-size: 12px; }
 .report-chart, .budget-usage-chart { min-width: 0; margin: 0; padding: 16px; border: 1px solid #e8edf4; border-radius: 13px; background: #fbfcfe; }
 .report-chart figcaption, .budget-usage-chart figcaption { margin-bottom: 14px; color: #25354b; font-size: 14px; font-weight: 700; }
 .report-chart ul, .budget-usage-chart ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }

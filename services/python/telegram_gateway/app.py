@@ -38,7 +38,7 @@ from services.python.telegram_gateway.dedup import (
 )
 from services.python.telegram_gateway.core_client import TelegramCoreClient, TelegramCoreError
 from services.python.telegram_gateway.digest_worker import run_notification_worker
-from services.python.presentation.report_renderer import render_product_catalog, render_report
+from services.python.presentation.report_renderer import render_product_catalog, render_report, render_shopping_candidates
 
 MENU_BUTTON = "Меню"
 QUICK_AMOUNTS = ("500.00", "1000.00", "2000.00", "5000.00")
@@ -144,7 +144,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     async def help_command(message: Message) -> None:
         await message.answer(
             "Команды: /start, /menu, /help, /link <код>, /add <описание операции>, /history, /debts, "
-            "/price [название товара], /budget [set <family|personal> <category|total|food_week> <amount>|reset|propose|suggest <income>], "
+            "/price [название товара], /shopping, /budget [set <family|personal> <category|total|food_week> <amount>|reset|propose|suggest <income>], "
             "/report. /budget propose строит предложение по истории, /budget suggest <income> — по доходу. "
             "Для финансов сначала привяжите аккаунт и выберите пространство.",
             reply_markup=MAIN_MENU,
@@ -270,6 +270,34 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             )
             return
         await message.answer(content.decode("utf-8"), reply_markup=MAIN_MENU)
+
+    async def show_shopping(message: Message, state: FSMContext) -> None:
+        if message.chat.type != "private":
+            await message.answer("Список покупок доступен только в личном чате с ботом.", reply_markup=MAIN_MENU)
+            return
+        actor = (await state.get_data()).get("telegram_actor_context")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await message.answer("Сначала выберите пространство командой /menu.", reply_markup=MAIN_MENU)
+            return
+        try:
+            shopping = await core.get_shopping_candidates(actor["token"])
+        except TelegramCoreError as error:
+            response = {
+                "unauthorized": "Сессия истекла. Выберите пространство командой /menu.",
+                "forbidden": "У вашей роли нет доступа к чекам.",
+                "unavailable": "Список покупок временно недоступен. Попробуйте позже.",
+            }.get(error.code, "Не удалось загрузить список покупок. Попробуйте позже.")
+            if error.code == "unauthorized":
+                await state.clear()
+            await message.answer(response, reply_markup=MAIN_MENU)
+            return
+        try:
+            text = render_shopping_candidates(shopping)
+        except (TypeError, ValueError, KeyError):
+            await message.answer("Список покупок получен в неверном формате. Попробуйте позже.",
+                                 reply_markup=MAIN_MENU)
+            return
+        await message.answer(text, reply_markup=MAIN_MENU, parse_mode=None)
 
     async def show_budget(message: Message, command: CommandObject, state: FSMContext) -> None:
         if message.chat.type != "private":
@@ -858,6 +886,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(help_command, Command("help"))
     router.message.register(show_report, Command("report"))
     router.message.register(show_product_catalog, Command("price"))
+    router.message.register(show_shopping, Command("shopping"))
     router.message.register(show_debts, Command("debts"))
     router.message.register(show_budget, Command("budget"))
     router.message.register(link_account, Command("link"))

@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-05 02:40, Europe/Moscow.
+Updated: 2026-10-05 04:42, Europe/Moscow.
 
 ## Global plan
 
@@ -42,12 +42,12 @@ Updated: 2026-10-05 02:40, Europe/Moscow.
 ## Current goal
 
 - ID and outcome: F35 — due-purchase candidates from personal receipt rhythm, median interval and estimated list cost.
-- Status: IN PROGRESS — legacy Python implementation exists; new Go/Core/Web/Android parity is not built or accepted yet.
+- Status: IMPLEMENTING — Go candidate policy passes; authenticated internal query API and Java/client parity remain.
 - Acceptance: require at least 3 real purchases; use median purchase interval; remove stale products after 2 normal intervals; describe the list as a suggestion, never inventory.
-- Ruling: F34 acceptance is GREEN. Search works after 1 purchase; blank-query catalog requires 3; chart needs 2 real points. Core enforces active member scope for Web and Telegram. `/products` and Telegram `/price` PNG show actual confirmed history; isolated PostgreSQL member-scope acceptance passed. F33 Kafka/ClickHouse replay remains a separate NOT_RUN integration gate. F31 price/waste reports remain absent until F33/F40 provide authoritative datasets.
+- Ruling: F34 acceptance is GREEN. Search works after 1 purchase; blank-query catalog requires 3; chart needs 2 real points. Core enforces active member scope for Web and Telegram. `/products` and Telegram `/price` PNG show actual confirmed history; isolated PostgreSQL member-scope acceptance passed. Commit `00068b5735d74111c4f1eea91ea6fb4d58f364e5` is the first catch-up checkpoint through F34 because earlier SaaS work had accumulated uncommitted. Future goals receive dedicated commits. F33 Kafka/ClickHouse replay remains a separate NOT_RUN integration gate. F31 price/waste reports remain absent until F33/F40 provide authoritative datasets.
 - User choices: F31 charts use Web/PNG now; price and optional-purchase series wait for F33/F40 data. No placeholders. The active user objective requires a commit after every fully verified goal; earlier final-only commit deferral is superseded.
 - Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `fb00ede` plus current uncommitted plan work.
-- Updated at: 2026-10-05 02:40 Europe/Moscow.
+- Updated at: 2026-10-05 04:42 Europe/Moscow.
 
 ## Verification evidence
 
@@ -66,7 +66,7 @@ Updated: 2026-10-05 02:40, Europe/Moscow.
 
 ## Next action
 
-- Next: inspect legacy F35 behavior and tests, record SaaS baseline, then add RED tests for the Go candidate policy and authenticated Core/member API. Preserve median interval, stale-after-two-intervals and no-inventory semantics.
+- Next: add RED handler tests for service-token auth, tenant/member history scope and request validation. Then implement Analytics handler and Core owner-authorized endpoint.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
@@ -79,8 +79,15 @@ Updated: 2026-10-05 02:40, Europe/Moscow.
 - Observed RED in Go/Core/Web/Python: missing catalog API, member-scoped Core endpoint, Web product route, Telegram `/price`, and PNG renderer failed their new tests. Implemented each over confirmed price-history projection; blank-query catalog requires 3 purchases, search accepts 1, and charts require 2 real points. No baseline or series is invented.
 - PASS Go suite, vet, Linux build; Web 40/40 and production build; Python presentation/Telegram 84 passed; contract suite 48 passed/2 skipped; Core check; isolated PostgreSQL member-scope acceptance. `git diff --check` clean.
 - First Core DB acceptance run used a populated schema without Flyway history and failed before test logic. Created a separate empty `finance_test_f34_catalog_20261005`; the targeted PostgreSQL test passed. Shared test DB stayed unchanged.
-- F34 stays in progress until live F33 ClickHouse data path can be verified. F31 price/waste charts stay deferred. Next: F35 purchase rhythm and due products.
-- F34 acceptance is complete independently of F33's unavailable live infrastructure gate; parity registry now marks F34 complete. User requested whole-project commit after the main plan, so preserve current mixed worktree and defer final commit.
+- F34 acceptance is complete independently of F33's unavailable live infrastructure gate; parity registry marks F34 complete. Commit `00068b5735d74111c4f1eea91ea6fb4d58f364e5` checkpoints the accumulated migration files through F34. F35 onward uses separate goal commits.
+
+## E6.8 F35 shopping rhythm — 2026-10-05 04:40 MSK
+
+- Legacy baseline: `services/shopping.py` requires 3 purchases, uses the median of intervals at least 3 days, shows due items within a 3-day horizon, expires them after 2 overdue intervals, estimates one usual unit price per product, and states it is not inventory.
+- Added Go acceptance tests before implementation for three-purchase threshold, median interval/price, same-receipt duplicate rows, stale boundary, and tenant/member separation.
+- Observed RED: `go test ./prices -run TestShoppingList -count=1` first failed at the missing `BuildShoppingList` symbol. First invocation could not start because Go was absent from PATH. Installed pinned Go 1.27.1 under user cache; official archive SHA-256 matched `a3911b5e0e1b1053f25ed0675f4c1c6aad1e2bfcf253df2b9be4caabd2edd95d`. Initial implementation then failed 2 median assertions because the price slice was unsorted; sorting before `median` fixed both.
+- PASS F35 Go policy tests: focused `TestShoppingList` and full `go test ./prices`; `gofmt` applied.
+- Current F35 gate: implementation and authenticated API/client parity remain. F35 test file is untracked and excluded from the F34 commit.
 
 ## Verification evidence
 
@@ -917,3 +924,9 @@ Updated: 2026-10-05 02:40, Europe/Moscow.
 - Verified the user's approved F31 slice: report category/day charts and monthly-limit usage use only Core values in Web and Android; Telegram PNG uses the same report DTO, caps overrun visualization but keeps exact negative remaining, and falls back to readable text. No price or optional-purchase placeholders are present.
 - Reused current GREEN evidence: Core 201/201 with 2 integration-only skips, Web 36/36 and TypeScript, Android emulator 26/26, Python report/digest/worker/commands 71/71, contracts 46 passed/2 skipped. `report_renderer.py` tests specifically cover PNG size/readability, capped overrun, exact remaining, fallback, and DTO validation.
 - F31 stays in progress because its remaining price/waste chart data depends on F33/F40. Next: inspect and finish F33 authoritative price pipeline gates.
+
+## E3.21 F35 shopping cadence suggestions — 2026-10-05 23:39 MSK
+
+- F35 preserves the legacy three-purchase threshold, median cadence and unit-price estimate, 3-day due horizon, and expiry after two overdue intervals. Go ignores duplicate rows within one receipt and separates tenant/member histories. Core exposes authenticated API/BFF and Telegram actor routes; Telegram `/shopping`, Web, and Android show RU/EN suggestions and estimated list cost with an explicit no-inventory statement.
+- GREEN: Go `go test ./...` + `go vet ./...`; Core `check` 216 tests, 0 failures, 88 environment/container-gated skips; isolated PostgreSQL 18.6 `TransactionApiPostgresTest` 86/86, including member-scoped Web/BFF and Telegram acceptance; Python Telegram/presentation 87/87; contracts 49 passed/2 optional skips; Web 42/42 + production build; Android emulator instrumentation 29/29, debug package installed (SHA-256 `01BA6456F816407E7C6A5BF0903B458AD2D774B64BD787C775B1E77620655049`); `git diff --check` clean.
+- F35 is complete and marked complete in `contracts/parity/feature-parity.yaml`. Next: F36, validate “already bought”, mute/unmute, blocking, and purchase-list copy behavior.

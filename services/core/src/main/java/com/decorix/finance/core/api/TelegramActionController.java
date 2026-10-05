@@ -26,6 +26,7 @@ import com.decorix.finance.core.api.DebtApi.DebtResponse;
 import com.decorix.finance.core.api.BudgetApi.Overview;
 import com.decorix.finance.core.api.BudgetApi.BudgetProposalResponse;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
+import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import java.util.UUID;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -73,6 +74,14 @@ public class TelegramActionController {
             @RequestBody ProductCatalogRequest request) {
         requireServiceToken(suppliedToken);
         return actions.productCatalog(request);
+    }
+
+    @PostMapping("/shopping")
+    ShoppingList shopping(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.shopping(request);
     }
 
     @PostMapping("/transaction-drafts")

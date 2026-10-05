@@ -461,3 +461,47 @@ def render_product_catalog(catalog: Mapping[str, object]) -> tuple[str, bytes]:
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return "image/png", output.getvalue()
+
+
+def render_shopping_candidates(shopping: Mapping[str, object]) -> str:
+    if not isinstance(shopping, Mapping) or shopping.get("inventoryTracked") is not False:
+        raise ValueError("Shopping suggestions cannot claim inventory tracking")
+    candidates = shopping.get("candidates")
+    if not isinstance(candidates, list) or len(candidates) > 10:
+        raise ValueError("Shopping candidates must be a bounded list")
+    total = _money(shopping.get("estimatedListCost"), "estimatedListCost")
+    estimated = Decimal("0.00")
+    lines = ["🛒 Пора купить"]
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            raise ValueError("Shopping candidate must be an object")
+        name = candidate.get("productName")
+        count = candidate.get("purchaseCount")
+        interval = candidate.get("medianIntervalDays")
+        days_until_due = candidate.get("daysUntilDue")
+        if not isinstance(name, str) or not name.strip() or len(name) > 200 \
+                or type(count) is not int or not 3 <= count <= 5000 \
+                or type(interval) is not int or not 3 <= interval <= 3650 \
+                or type(days_until_due) is not int or not -7300 <= days_until_due <= 3:
+            raise ValueError("Shopping candidate fields are invalid")
+        cost = _money(candidate.get("estimatedCost"), "estimatedCost")
+        estimated += cost
+        if days_until_due < 0:
+            due = f"Просрочено на {abs(days_until_due)} дн."
+        elif days_until_due == 0:
+            due = "Пора"
+        else:
+            due = f"Через {days_until_due} дн."
+        lines.append(f"• {name} — {due}; около {_format_rub(cost)} ₽; раз в {interval} дн. ({count} покупки)")
+    if estimated != total:
+        raise ValueError("Shopping estimate does not match its candidates")
+    if not candidates:
+        lines.append("Пока нет подсказок: нужны минимум 3 покупки и интервалы от 3 дней.")
+    else:
+        lines.extend(("", f"Оценка списка: {_format_rub(total)} ₽"))
+    lines.append("Это подсказка по чекам, не учёт запасов: бот не знает, что уже есть дома.")
+    return "\n".join(lines)
+
+
+def _format_rub(amount: Decimal) -> str:
+    return f"{amount:,.2f}".replace(",", " ").replace(".", ",")

@@ -666,6 +666,49 @@ def test_price_command_renders_member_catalog_png_with_real_best_store(monkeypat
     assert sent[0].reply_markup.keyboard[0][0].text == "Меню"
 
 
+def test_shopping_command_uses_linked_actor_and_explains_it_is_not_inventory(monkeypatch):
+    sent = []
+    calls = []
+    shopping = {"candidates": [{"productName": "Молоко 1 л", "purchaseCount": 3,
+                "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
+                "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
+                "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False}
+
+    class FakeCore:
+        async def get_shopping_candidates(self, token):
+            calls.append(token)
+            return shopping
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(
+        message_id=902,
+        date=datetime(2026, 10, 5, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"),
+        from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/shopping",
+        entities=[MessageEntity(type="bot_command", offset=0, length=9)],
+    )
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "owner"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=902, message=message)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    assert calls == ["opaque-context"]
+    assert len(sent) == 1
+    assert sent[0].__class__.__name__ == "SendMessage"
+    assert "Молоко 1 л" in sent[0].text
+    assert "100,00" in sent[0].text
+    assert "не учёт запасов" in sent[0].text.lower()
+
+
 def test_debts_command_rejects_foreign_tenant_response_without_disclosing_debt(monkeypatch):
     sent = []
 

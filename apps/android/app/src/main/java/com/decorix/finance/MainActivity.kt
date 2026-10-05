@@ -90,7 +90,8 @@ class MainActivity : ComponentActivity() {
                         onLogout = ::logout, onBudgetUpdate = ::updateBudget, onBudgetReset = ::resetPersonalBudgets,
                         onBudgetProposal = ::createBudgetProposal, onBudgetApply = ::applyBudgetProposal,
                         onDebtCreate = ::createDebt, onDebtPay = ::payDebt, onDebtAdjust = ::adjustDebt,
-                        onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport)
+                        onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
+                        onShoppingLoad = ::loadShoppingCandidates)
                 }
             }
         }
@@ -276,6 +277,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadShoppingCandidates() {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        ui = ui.copy(shoppingLoading = true, shoppingError = null)
+        executor.execute {
+            runCatching { api.shoppingCandidates(tenantId) }
+                .onSuccess { shopping ->
+                    if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(shoppingLoading = false, shoppingList = shopping, shoppingError = null)
+                    }
+                }
+                .onFailure { error ->
+                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    else if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
+                    }
+                }
+        }
+    }
+
     private fun logout() {
         ui = ui.copy(busy = true, error = null)
         executor.execute {
@@ -308,6 +328,9 @@ data class FinanceUiState(
     val telegramLinkCode: FinanceTelegramLinkCode? = null,
     val notificationPreferences: FinanceNotificationPreferences? = null,
     val budgetAlerts: List<FinanceBudgetAlert> = emptyList(),
+    val shoppingList: FinanceShoppingList? = null,
+    val shoppingLoading: Boolean = false,
+    val shoppingError: String? = null,
 )
 
 private data class FinanceWorkspaceSnapshot(
@@ -344,7 +367,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onDebtForecast: (String) -> Unit,
                           onReportLoad: (String, String, String, String, String) -> Unit,
                           onCreateTelegramLink: () -> Unit = {},
-                          onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {}) {
+                          onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
+                          onShoppingLoad: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -412,10 +436,14 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 Text(state.tenants.first().name, style = MaterialTheme.typography.headlineSmall)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "budgets", "debts", "reports", "profile").forEach { screen ->
-                        TextButton(onClick = { activeScreen = screen }) {
+                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile").forEach { screen ->
+                        TextButton(onClick = {
+                            activeScreen = screen
+                            if (screen == "shopping" && state.shoppingList == null && !state.shoppingLoading) onShoppingLoad()
+                        }) {
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
+                                "shopping" -> if (russian) "Покупки" else "Shopping"
                                 "budgets" -> if (russian) "Бюджеты" else "Budgets"
                                 "debts" -> if (russian) "Долги" else "Debts"
                                 "reports" -> if (russian) "Отчёты" else "Reports"
@@ -427,6 +455,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
+                    "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad)
                     "budgets" -> BudgetScreen(state, language, onBudgetUpdate, onBudgetReset, onBudgetProposal, onBudgetApply)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad)
@@ -469,6 +498,63 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
         }
         if (state.busy) androidx.compose.material3.CircularProgressIndicator()
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: String, onRetry: () -> Unit) {
+    val russian = language == "ru"
+    val shopping = state.shoppingList
+    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Text(if (russian) "Пора купить" else "Shopping list", style = MaterialTheme.typography.titleLarge)
+        }
+        when {
+            state.shoppingLoading -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            state.shoppingError != null -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (russian) "Список покупок временно недоступен." else "Shopping suggestions are temporarily unavailable.")
+                    Button(onClick = onRetry) { Text(if (russian) "Повторить" else "Retry") }
+                }
+            }
+            shopping == null -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            shopping.candidates.isEmpty() -> item {
+                Text(if (russian) "Пока нечего добавить: нужны минимум три покупки с интервалами от трёх дней."
+                    else "Nothing to suggest yet: at least three purchases with gaps of three days or more are needed.")
+            }
+            else -> shopping.candidates.forEach { candidate ->
+                item {
+                    val due = when {
+                        candidate.daysUntilDue < 0 -> if (russian) "Просрочено на ${-candidate.daysUntilDue} дн."
+                            else "${-candidate.daysUntilDue} days overdue"
+                        candidate.daysUntilDue == 0 -> if (russian) "Пора" else "Due now"
+                        else -> if (russian) "Через ${candidate.daysUntilDue} дн." else "In ${candidate.daysUntilDue} days"
+                    }
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(candidate.productName, style = MaterialTheme.typography.titleMedium)
+                            Text(due)
+                            Text(if (russian) "Медиана: раз в ${candidate.medianIntervalDays} дн. · ${candidate.purchaseCount} покупки"
+                                else "Median: every ${candidate.medianIntervalDays} days · ${candidate.purchaseCount} purchases")
+                            Text(if (russian) "Оценка: ${candidate.estimatedCost} ₽" else "Estimate: ${candidate.estimatedCost} RUB")
+                            Text(if (russian) "Последняя покупка: ${candidate.lastPurchasedAt.take(10)}"
+                                else "Last purchased: ${candidate.lastPurchasedAt.take(10)}")
+                        }
+                    }
+                }
+            }
+        }
+        if (shopping != null && state.shoppingError == null) {
+            item {
+                Text(if (russian) "Оценка списка: ${shopping.estimatedListCost} ₽"
+                    else "Estimated list cost: ${shopping.estimatedListCost} RUB",
+                    style = MaterialTheme.typography.titleMedium)
+            }
+            item {
+                Text(if (russian) "Это подсказка по чекам, не учёт запасов."
+                    else "Not home inventory: suggestions use your confirmed receipt rhythm.")
+            }
+        }
     }
 }
 

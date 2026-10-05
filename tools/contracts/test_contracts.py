@@ -194,6 +194,51 @@ def test_private_product_catalog_contract_requires_tenant_and_core_resolved_memb
         assert spec["components"]["schemas"][name] == public["components"]["schemas"][name]
 
 
+def test_shopping_candidates_are_member_scoped_and_explicitly_not_inventory():
+    public = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    internal = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+    validate(public)
+    validate(internal)
+
+    for path, expected_security in (
+            ("/api/v1/tenants/{tenantId}/shopping", None),
+            ("/bff/tenants/{tenantId}/shopping", [{"bffSession": []}])):
+        operation = public["paths"][path]["get"]
+        assert operation.get("security") == expected_security
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "ShoppingList")
+        assert {"401", "403", "404", "503"}.issubset(operation["responses"])
+
+    shopping = public["components"]["schemas"]["ShoppingList"]
+    assert shopping["additionalProperties"] is False
+    assert shopping["properties"]["inventoryTracked"]["const"] is False
+    assert shopping["properties"]["candidates"]["maxItems"] == 10
+    candidate = public["components"]["schemas"]["ShoppingCandidate"]
+    assert candidate["properties"]["purchaseCount"]["minimum"] == 3
+    assert candidate["properties"]["medianIntervalDays"]["minimum"] == 3
+    assert candidate["properties"]["daysUntilDue"]["maximum"] == 3
+
+    operation = internal["paths"]["/internal/v1/shopping/candidates"]["post"]
+    assert operation["security"] == [{"serviceBearer": []}]
+    assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ShoppingCandidatesRequest")
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ShoppingList")
+    request = internal["components"]["schemas"]["ShoppingCandidatesRequest"]
+    assert request["additionalProperties"] is False
+    assert set(request["required"]) == {"tenantId", "ownerUserId"}
+    assert "userId" not in request["properties"]
+    assert internal["components"]["schemas"]["ShoppingList"] == shopping
+    assert internal["components"]["schemas"]["ShoppingCandidate"] == candidate
+
+    telegram = public["paths"]["/internal/v1/telegram/shopping"]["post"]
+    assert telegram["security"] == [{"telegramServiceToken": []}]
+    assert telegram["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ResolveTelegramActorContext")
+    assert telegram["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ShoppingList")
+
+
 def test_telegram_actor_context_contract_is_service_scoped_and_never_accepts_user_id():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     paths = spec["paths"]
