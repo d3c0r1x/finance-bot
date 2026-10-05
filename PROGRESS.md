@@ -40,7 +40,7 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 | F32 | Durable daily and weekly digest delivery | COMPLETE — PostgreSQL schedules/outbox, Core API, Python worker, Web/Android settings | F25 rendering | pending |
 | F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
 | F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
-| F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | pending |
+| F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 
 ## Current goal
 
@@ -49,7 +49,7 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 - Acceptance: at least two distinct receipts before the window and one within it for each product; at least three eligible products; median unit prices and prior-spend weights; top three rise/fall; receipt-price disclosure; insufficient history has no invented totals.
 - Ruling: Preserve v1's `services/inflation.py` and `services/purchase_history.py` behavior and shared `prices.SameProduct` identity. Core authenticates active membership before the owner ID reaches Go. User approved the F31 chart boundary; no F33/F40 price/waste placeholders were added.
 - User choices: Keycloak + OIDC; use F31 Web/PNG charts now, add price and optional-purchase series only after F33/F40 data; commit each fully verified goal.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `d758099` plus completed F37 work, ready to commit.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `41b14f0` (F37 pushed).
 - Updated at: 2026-10-06 01:48 Europe/Moscow.
 
 ## Verification evidence
@@ -69,7 +69,7 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 
 ## Next action
 
-- F37 is GREEN and ready for its dedicated commit/push. Then start F38 by comparing recurring-expense behavior with v1 and writing deterministic RED acceptance tests.
+- F37 commit `41b14f0` is pushed. Start F38 by comparing recurring-expense behavior with v1 and writing deterministic RED acceptance tests.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
@@ -962,4 +962,4 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 - Observed RED for missing Go algorithm/HTTP handler, Java/Core API, Python client/renderer and `/inflation`, Web panel, Android DTO/screen, and contract shape. Fixed one pre-existing dangling `try` in the Python client tests before collection.
 - GREEN: Go `go test ./...` and `go vet ./...`; Core `:services:core:check` and isolated PostgreSQL member-scope API/BFF acceptance; Python Telegram/presentation 101 passed; contracts 52 passed/2 optional skips; Web 46/46 and production build; Android clean-AVD instrumentation 36/36. Built and installed the debug APK on isolated Android 14 AVD, launched `com.decorix.finance.debug/.MainActivity`; SHA-256 `8BA2E392D0F2F7FC3198BC604622DC646CAE2CB9E0BA2B7B5CF5C89600BC5E44`. `git diff --check` passes.
 - First Android run exposed the new tab pushing existing budget/debt tabs outside the viewport. Moved the price-trend tab after established navigation; the full instrumented suite then passed. The existing user AVD and its data were not used for installation.
-- F37 is complete. F33's live Kafka/ClickHouse replay remains NOT_RUN because no configured integration endpoint is available; it is not presented as verified. Next: commit/push F37, then begin F38 recurring-income/expense detection.
+- F37 is complete and pushed as `41b14f02dfe28928ccf411e7017d471010046851`. F33's live Kafka/ClickHouse replay remains NOT_RUN because no configured integration endpoint is available; it is not presented as verified. Next: begin F38 recurring-income/expense detection.
