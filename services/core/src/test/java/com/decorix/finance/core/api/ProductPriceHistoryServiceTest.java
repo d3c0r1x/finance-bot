@@ -32,6 +32,7 @@ class ProductPriceHistoryServiceTest {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         TransactionTemplate transaction = mock(TransactionTemplate.class);
         ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        ShoppingDecisionService decisions = mock(ShoppingDecisionService.class);
         when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
             TransactionCallback callback = invocation.getArgument(0);
             return callback.doInTransaction(mock(TransactionStatus.class));
@@ -44,11 +45,13 @@ class ProductPriceHistoryServiceTest {
                 "Milk Fresh 1l", 3, 10, "100.000000", "100.00", java.time.Instant.parse("2026-10-04T00:00:00Z"),
                 java.time.Instant.parse("2026-10-05T00:00:00Z"), 0)), "100.00", false);
         when(analytics.shopping(tenantId.toString(), ownerId.toString())).thenReturn(expected);
+        when(decisions.apply(tenantId, ownerId, expected)).thenReturn(expected);
 
-        var service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+        var service = new ProductPriceHistoryService(jdbc, transaction, analytics, decisions);
 
         assertEquals(expected, service.shopping(tenantId, subject));
         verify(analytics).shopping(tenantId.toString(), ownerId.toString());
+        verify(decisions).apply(tenantId, ownerId, expected);
     }
 
     @Test

@@ -213,10 +213,37 @@ def test_shopping_candidates_are_member_scoped_and_explicitly_not_inventory():
     assert shopping["additionalProperties"] is False
     assert shopping["properties"]["inventoryTracked"]["const"] is False
     assert shopping["properties"]["candidates"]["maxItems"] == 10
+    assert {"boughtCandidates", "mutedCandidates", "blockedCandidates"}.issubset(shopping["required"])
+    assert shopping["properties"]["boughtCandidates"]["items"]["$ref"].endswith("ShoppingCandidate")
+    assert shopping["properties"]["mutedCandidates"]["items"]["$ref"].endswith("ShoppingCandidate")
+    assert shopping["properties"]["blockedCandidates"]["items"]["$ref"].endswith("BlockedShoppingCandidate")
     candidate = public["components"]["schemas"]["ShoppingCandidate"]
+    assert "productKey" in candidate["required"]
+    assert candidate["properties"]["productKey"]["pattern"] == "^[a-zа-я0-9]{1,256}$"
     assert candidate["properties"]["purchaseCount"]["minimum"] == 3
     assert candidate["properties"]["medianIntervalDays"]["minimum"] == 3
     assert candidate["properties"]["daysUntilDue"]["maximum"] == 3
+    assert public["components"]["schemas"]["BlockedShoppingCandidate"]["properties"]["reasonCode"]["const"] \
+        == "confirmed_not_to_buy"
+
+    for path, method, operation_id in (
+            ("/api/v1/tenants/{tenantId}/shopping/{productKey}/bought", "post", "markShoppingCandidateBought"),
+            ("/api/v1/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "put", "muteShoppingCandidate"),
+            ("/api/v1/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "delete", "unmuteShoppingCandidate"),
+            ("/bff/tenants/{tenantId}/shopping/{productKey}/bought", "post", "markBrowserShoppingCandidateBought"),
+            ("/bff/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "put", "muteBrowserShoppingCandidate"),
+            ("/bff/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "delete", "unmuteBrowserShoppingCandidate")):
+        operation = public["paths"][path][method]
+        assert operation["operationId"] == operation_id
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "ShoppingList")
+    for path in ("/bff/tenants/{tenantId}/shopping/{productKey}/bought",
+                 "/bff/tenants/{tenantId}/suggestions/shopping/{productKey}/mute"):
+        for method in ("post", "put", "delete"):
+            if method in public["paths"][path]:
+                assert {"bffSession": []} in public["paths"][path][method]["security"]
+                assert any(parameter["$ref"].endswith("CsrfToken")
+                           for parameter in public["paths"][path][method]["parameters"])
 
     operation = internal["paths"]["/internal/v1/shopping/candidates"]["post"]
     assert operation["security"] == [{"serviceBearer": []}]
@@ -228,8 +255,9 @@ def test_shopping_candidates_are_member_scoped_and_explicitly_not_inventory():
     assert request["additionalProperties"] is False
     assert set(request["required"]) == {"tenantId", "ownerUserId"}
     assert "userId" not in request["properties"]
-    assert internal["components"]["schemas"]["ShoppingList"] == shopping
-    assert internal["components"]["schemas"]["ShoppingCandidate"] == candidate
+    assert internal["components"]["schemas"]["ShoppingList"]["required"] == [
+        "candidates", "estimatedListCost", "inventoryTracked"]
+    assert "productKey" not in internal["components"]["schemas"]["ShoppingCandidate"]["required"]
 
     telegram = public["paths"]["/internal/v1/telegram/shopping"]["post"]
     assert telegram["security"] == [{"telegramServiceToken": []}]
@@ -237,6 +265,17 @@ def test_shopping_candidates_are_member_scoped_and_explicitly_not_inventory():
         "ResolveTelegramActorContext")
     assert telegram["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "ShoppingList")
+    for path, operation_id in (
+            ("/internal/v1/telegram/shopping/{productKey}/bought", "markTelegramShoppingCandidateBought"),
+            ("/internal/v1/telegram/shopping/{productKey}/mute", "muteTelegramShoppingCandidate"),
+            ("/internal/v1/telegram/shopping/{productKey}/unmute", "unmuteTelegramShoppingCandidate")):
+        operation = public["paths"][path]["post"]
+        assert operation["operationId"] == operation_id
+        assert operation["security"] == [{"telegramServiceToken": []}]
+        assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "ResolveTelegramActorContext")
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "ShoppingList")
 
 
 def test_telegram_actor_context_contract_is_service_scoped_and_never_accepts_user_id():

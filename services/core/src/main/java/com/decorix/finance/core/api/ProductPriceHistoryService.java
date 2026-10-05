@@ -3,12 +3,15 @@ package com.decorix.finance.core.api;
 import com.decorix.finance.core.api.ProductApi.PriceCompareRequest;
 import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
+import com.decorix.finance.core.api.ProductApi.ShoppingCandidate;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
+import com.decorix.finance.core.domain.ProductIdentityPolicy;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -20,12 +23,21 @@ public class ProductPriceHistoryService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final ProductPriceHistoryClient analytics;
+    private final ShoppingDecisionService shoppingDecisions;
 
+    @Autowired
     public ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
-                                      ProductPriceHistoryClient analytics) {
+                                      ProductPriceHistoryClient analytics,
+                                      ShoppingDecisionService shoppingDecisions) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.analytics = analytics;
+        this.shoppingDecisions = shoppingDecisions;
+    }
+
+    ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
+                               ProductPriceHistoryClient analytics) {
+        this(jdbc, transaction, analytics, new ShoppingDecisionService(jdbc, transaction));
     }
 
     public PriceComparison get(UUID tenantId, String subject, UUID receiptId, UUID itemId) {
@@ -97,7 +109,7 @@ public class ProductPriceHistoryService {
             return memberUserId(tenantId, subject);
         });
         if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
-        return analytics.shopping(tenantId.toString(), userId.toString());
+        return shoppingForMember(tenantId, userId);
     }
 
     /** Uses a resolved Telegram actor while rechecking active membership before reading history. */
@@ -113,7 +125,79 @@ public class ProductPriceHistoryService {
             return members.isEmpty() ? null : members.get(0);
         });
         if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
-        return analytics.shopping(tenantId.toString(), userId.toString());
+        return shoppingForMember(tenantId, userId);
+    }
+
+    public ShoppingList markShoppingBought(UUID tenantId, String subject, String productKey) {
+        UUID userId = memberForSubject(tenantId, subject);
+        return updateShoppingDecision(tenantId, userId, productKey, "bought");
+    }
+
+    public ShoppingList markShoppingBought(UUID tenantId, UUID ownerUserId, String productKey) {
+        return updateShoppingDecision(tenantId, ownerUserId, productKey, "bought");
+    }
+
+    public ShoppingList muteShopping(UUID tenantId, String subject, String productKey) {
+        UUID userId = memberForSubject(tenantId, subject);
+        return updateShoppingDecision(tenantId, userId, productKey, "mute");
+    }
+
+    public ShoppingList muteShopping(UUID tenantId, UUID ownerUserId, String productKey) {
+        return updateShoppingDecision(tenantId, ownerUserId, productKey, "mute");
+    }
+
+    public ShoppingList unmuteShopping(UUID tenantId, String subject, String productKey) {
+        UUID userId = memberForSubject(tenantId, subject);
+        return updateShoppingDecision(tenantId, userId, productKey, "unmute");
+    }
+
+    public ShoppingList unmuteShopping(UUID tenantId, UUID ownerUserId, String productKey) {
+        return updateShoppingDecision(tenantId, ownerUserId, productKey, "unmute");
+    }
+
+    private ShoppingList shoppingForMember(UUID tenantId, UUID userId) {
+        return shoppingDecisions.apply(tenantId, userId, analytics.shopping(tenantId.toString(), userId.toString()));
+    }
+
+    private ShoppingList updateShoppingDecision(UUID tenantId, UUID userId, String productKey, String action) {
+        if (tenantId == null || userId == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        }
+        ShoppingList source = analytics.shopping(tenantId.toString(), activeMember(tenantId, userId).toString());
+        ShoppingCandidate target = source.candidates().stream().filter(candidate ->
+                productKey.equals(ProductIdentityPolicy.productKey(candidate.productName()))).findFirst().orElse(null);
+        if (target == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping suggestion not found");
+        switch (action) {
+            case "bought" -> shoppingDecisions.markBought(tenantId, userId, productKey);
+            case "mute" -> shoppingDecisions.mute(tenantId, userId, productKey);
+            case "unmute" -> shoppingDecisions.unmute(tenantId, userId, productKey);
+            default -> throw new IllegalArgumentException("Unknown shopping decision");
+        }
+        return shoppingDecisions.apply(tenantId, userId, source);
+    }
+
+    private UUID activeMember(UUID tenantId, UUID userId) {
+        UUID member = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            List<UUID> members = jdbc.query("SELECT user_id FROM memberships WHERE tenant_id = ? AND user_id = ? "
+                            + "AND status = 'active'",
+                    (rs, row) -> rs.getObject("user_id", UUID.class), tenantId, userId);
+            return members.isEmpty() ? null : members.get(0);
+        });
+        if (member == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        return member;
+    }
+
+    private UUID memberForSubject(UUID tenantId, String subject) {
+        if (tenantId == null || subject == null || subject.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        }
+        UUID userId = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return memberUserId(tenantId, subject);
+        });
+        if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
+        return userId;
     }
 
     private static void validateCatalogRequest(UUID tenantId, String query) {

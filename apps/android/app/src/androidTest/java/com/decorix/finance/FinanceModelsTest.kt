@@ -170,13 +170,15 @@ class FinanceModelsTest {
 
     @Test fun parsesShoppingCandidatesAndExactEstimateWithoutInventoryClaim() {
         val shopping = FinanceModels.shoppingList(JSONObject("""
-            {"candidates":[{"productName":"Молоко 1 л","purchaseCount":3,"medianIntervalDays":10,
+            {"candidates":[{"productName":"Молоко 1 л","productKey":"milk","purchaseCount":3,"medianIntervalDays":10,
               "usualUnitPrice":"100.000000","estimatedCost":"100.00",
               "lastPurchasedAt":"2026-10-04T00:00:00Z","dueAt":"2026-10-05T00:00:00Z","daysUntilDue":0}],
-             "estimatedListCost":"100.00","inventoryTracked":false}
+             "estimatedListCost":"100.00","inventoryTracked":false,
+             "boughtCandidates":[],"mutedCandidates":[],"blockedCandidates":[]}
         """.trimIndent()))
 
         assertEquals("Молоко 1 л", shopping.candidates.single().productName)
+        assertEquals("milk", shopping.candidates.single().productKey)
         assertEquals(3, shopping.candidates.single().purchaseCount)
         assertEquals("100.00", shopping.estimatedListCost)
         assertEquals(false, shopping.inventoryTracked)
@@ -185,7 +187,23 @@ class FinanceModelsTest {
     @Test(expected = IllegalArgumentException::class)
     fun rejectsShoppingPayloadThatClaimsInventory() {
         FinanceModels.shoppingList(JSONObject("""
-            {"candidates":[],"estimatedListCost":"0.00","inventoryTracked":true}
+            {"candidates":[],"estimatedListCost":"0.00","inventoryTracked":true,
+             "boughtCandidates":[],"mutedCandidates":[],"blockedCandidates":[]}
         """.trimIndent()))
+    }
+
+    @Test fun parsesShoppingDecisionSectionsAndBlockReason() {
+        val candidate = """{"productName":"Молоко 1 л","productKey":"milk","purchaseCount":3,
+            "medianIntervalDays":10,"usualUnitPrice":"100.000000","estimatedCost":"100.00",
+            "lastPurchasedAt":"2026-10-04T00:00:00Z","dueAt":"2026-10-05T00:00:00Z","daysUntilDue":0}"""
+        val shopping = FinanceModels.shoppingList(JSONObject("""
+            {"candidates":[],"estimatedListCost":"0.00","inventoryTracked":false,
+             "boughtCandidates":[$candidate],"mutedCandidates":[],
+             "blockedCandidates":[{"productKey":"tea","productName":"Чай","reasonCode":"confirmed_not_to_buy"}]}
+        """.trimIndent()))
+
+        assertEquals(1, shopping.boughtCandidates.size)
+        assertEquals("milk", shopping.boughtCandidates.single().productKey)
+        assertEquals("confirmed_not_to_buy", shopping.blockedCandidates.single().reasonCode)
     }
 }

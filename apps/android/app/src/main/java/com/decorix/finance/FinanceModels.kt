@@ -120,6 +120,7 @@ data class FinanceReport(
 
 data class FinanceShoppingCandidate(
     val productName: String,
+    val productKey: String,
     val purchaseCount: Int,
     val medianIntervalDays: Int,
     val usualUnitPrice: String,
@@ -133,7 +134,12 @@ data class FinanceShoppingList(
     val candidates: List<FinanceShoppingCandidate>,
     val estimatedListCost: String,
     val inventoryTracked: Boolean,
+    val boughtCandidates: List<FinanceShoppingCandidate> = emptyList(),
+    val mutedCandidates: List<FinanceShoppingCandidate> = emptyList(),
+    val blockedCandidates: List<FinanceBlockedShoppingCandidate> = emptyList(),
 )
+
+data class FinanceBlockedShoppingCandidate(val productKey: String, val productName: String, val reasonCode: String)
 
 data class FinanceTransactionDraft(
     val id: String,
@@ -349,39 +355,63 @@ internal object FinanceModels {
     fun shoppingList(json: JSONObject): FinanceShoppingList {
         val moneyPattern = Regex("^(?:0|[1-9]\\d{0,21})\\.\\d{2}$")
         val unitPricePattern = Regex("^(?:0|[1-9]\\d{0,29})\\.\\d{6}$")
+        val productKeyPattern = Regex("^[a-zа-я0-9]{1,256}$")
         val totalRaw = json.getString("estimatedListCost")
         require(moneyPattern.matches(totalRaw) && !json.getBoolean("inventoryTracked")) {
             "Invalid shopping response"
         }
-        val items = json.getJSONArray("candidates")
-        require(items.length() <= 10) { "Invalid shopping candidate count" }
-        var estimatedTotal = java.math.BigDecimal("0.00")
-        val candidates = (0 until items.length()).map { index ->
-            val item = items.getJSONObject(index)
-            val name = item.getString("productName")
-            val purchaseCount = exactInt(item, "purchaseCount")
-            val interval = exactInt(item, "medianIntervalDays")
-            val daysUntilDue = exactInt(item, "daysUntilDue")
-            val usualRaw = item.getString("usualUnitPrice")
-            val costRaw = item.getString("estimatedCost")
-            val lastPurchasedAt = item.getString("lastPurchasedAt")
-            val dueAt = item.getString("dueAt")
-            val usual = usualRaw.toBigDecimalOrNull()
-            val cost = costRaw.toBigDecimalOrNull()
-            require(name.isNotBlank() && name.length <= 200 && purchaseCount in 3..5000
-                && interval in 3..3650 && daysUntilDue in -7300..3
-                && unitPricePattern.matches(usualRaw) && usual != null && usual.signum() > 0
-                && moneyPattern.matches(costRaw) && cost != null && cost.signum() >= 0
-                && usual.setScale(2, java.math.RoundingMode.HALF_EVEN) == cost
-                && Instant.parse(dueAt).isAfter(Instant.parse(lastPurchasedAt))) {
-                "Invalid shopping candidate"
+        val keys = mutableSetOf<String>()
+        fun parseCandidates(field: String): List<FinanceShoppingCandidate> {
+            val items = json.getJSONArray(field)
+            return (0 until items.length()).map { index ->
+                val item = items.getJSONObject(index)
+                val name = item.getString("productName")
+                val productKey = item.getString("productKey")
+                val purchaseCount = exactInt(item, "purchaseCount")
+                val interval = exactInt(item, "medianIntervalDays")
+                val daysUntilDue = exactInt(item, "daysUntilDue")
+                val usualRaw = item.getString("usualUnitPrice")
+                val costRaw = item.getString("estimatedCost")
+                val lastPurchasedAt = item.getString("lastPurchasedAt")
+                val dueAt = item.getString("dueAt")
+                val usual = usualRaw.toBigDecimalOrNull()
+                val cost = costRaw.toBigDecimalOrNull()
+                require(name.isNotBlank() && name.length <= 200 && productKeyPattern.matches(productKey)
+                    && keys.add(productKey) && purchaseCount in 3..5000
+                    && interval in 3..3650 && daysUntilDue in -7300..3
+                    && unitPricePattern.matches(usualRaw) && usual != null && usual.signum() > 0
+                    && moneyPattern.matches(costRaw) && cost != null && cost.signum() >= 0
+                    && usual.setScale(2, java.math.RoundingMode.HALF_EVEN) == cost
+                    && Instant.parse(dueAt).isAfter(Instant.parse(lastPurchasedAt))) {
+                    "Invalid shopping candidate"
+                }
+                FinanceShoppingCandidate(name, productKey, purchaseCount, interval, usualRaw, costRaw,
+                    lastPurchasedAt, dueAt, daysUntilDue)
             }
-            estimatedTotal = estimatedTotal.add(cost)
-            FinanceShoppingCandidate(name, purchaseCount, interval, usualRaw, costRaw,
-                lastPurchasedAt, dueAt, daysUntilDue)
+        }
+        val candidates = parseCandidates("candidates")
+        val bought = parseCandidates("boughtCandidates")
+        val muted = parseCandidates("mutedCandidates")
+        val blockedJson = json.getJSONArray("blockedCandidates")
+        val blocked = (0 until blockedJson.length()).map { index ->
+            val item = blockedJson.getJSONObject(index)
+            val productKey = item.getString("productKey")
+            val name = item.getString("productName")
+            val reason = item.getString("reasonCode")
+            require(productKeyPattern.matches(productKey) && keys.add(productKey)
+                && name.isNotBlank() && name.length <= 200 && reason == "confirmed_not_to_buy") {
+                "Invalid blocked shopping candidate"
+            }
+            FinanceBlockedShoppingCandidate(productKey, name, reason)
+        }
+        require(candidates.size + bought.size + muted.size + blocked.size <= 10) {
+            "Invalid shopping candidate count"
+        }
+        val estimatedTotal = candidates.fold(java.math.BigDecimal("0.00")) { total, candidate ->
+            total.add(candidate.estimatedCost.toBigDecimal())
         }
         require(estimatedTotal.compareTo(totalRaw.toBigDecimal()) == 0) { "Shopping estimate does not match candidates" }
-        return FinanceShoppingList(candidates, totalRaw, false)
+        return FinanceShoppingList(candidates, totalRaw, false, bought, muted, blocked)
     }
 
     fun budgetProposal(json: JSONObject) = BudgetProposal(

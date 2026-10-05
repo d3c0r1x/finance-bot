@@ -1,8 +1,11 @@
 package com.decorix.finance
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -91,7 +94,8 @@ class MainActivity : ComponentActivity() {
                         onBudgetProposal = ::createBudgetProposal, onBudgetApply = ::applyBudgetProposal,
                         onDebtCreate = ::createDebt, onDebtPay = ::payDebt, onDebtAdjust = ::adjustDebt,
                         onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
-                        onShoppingLoad = ::loadShoppingCandidates)
+                        onShoppingLoad = ::loadShoppingCandidates, onShoppingDecision = ::applyShoppingDecision,
+                        onShoppingCopy = ::copyShoppingList)
                 }
             }
         }
@@ -296,6 +300,36 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun applyShoppingDecision(productKey: String, action: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        ui = ui.copy(shoppingLoading = true, shoppingError = null)
+        executor.execute {
+            runCatching {
+                when (action) {
+                    "bought" -> api.markShoppingBought(tenantId, productKey)
+                    "mute" -> api.muteShoppingSuggestion(tenantId, productKey)
+                    "unmute" -> api.unmuteShoppingSuggestion(tenantId, productKey)
+                    else -> error("Unknown shopping decision")
+                }
+            }.onSuccess { shopping ->
+                if (ui.tenants.firstOrNull()?.id == tenantId) {
+                    ui = ui.copy(shoppingLoading = false, shoppingList = shopping, shoppingError = null)
+                }
+            }.onFailure { error ->
+                if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                else if (ui.tenants.firstOrNull()?.id == tenantId) {
+                    ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
+                }
+            }
+        }
+    }
+
+    private fun copyShoppingList(text: String) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Finance shopping list", text))
+        Toast.makeText(this, if (language == "ru") "Список скопирован" else "List copied", Toast.LENGTH_SHORT).show()
+    }
+
     private fun logout() {
         ui = ui.copy(busy = true, error = null)
         executor.execute {
@@ -368,7 +402,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReportLoad: (String, String, String, String, String) -> Unit,
                           onCreateTelegramLink: () -> Unit = {},
                           onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
-                          onShoppingLoad: () -> Unit = {}) {
+                          onShoppingLoad: () -> Unit = {},
+                          onShoppingDecision: (String, String) -> Unit = { _, _ -> },
+                          onShoppingCopy: (String) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -455,7 +491,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
-                    "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad)
+                    "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
+                        onShoppingDecision, onShoppingCopy)
                     "budgets" -> BudgetScreen(state, language, onBudgetUpdate, onBudgetReset, onBudgetProposal, onBudgetApply)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad)
@@ -502,12 +539,20 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
 }
 
 @androidx.compose.runtime.Composable
-private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: String, onRetry: () -> Unit) {
+private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: String, onRetry: () -> Unit,
+                           onDecision: (String, String) -> Unit, onCopy: (String) -> Unit) {
     val russian = language == "ru"
     val shopping = state.shoppingList
-    LazyColumn(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    LazyColumn(modifier = modifier.testTag("shopping-list"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text(if (russian) "Пора купить" else "Shopping list", style = MaterialTheme.typography.titleLarge)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (russian) "Пора купить" else "Shopping list", style = MaterialTheme.typography.titleLarge)
+                if (shopping != null && state.shoppingError == null && shopping.candidates.isNotEmpty()) {
+                    Button(onClick = { onCopy(shoppingClipboardText(shopping, russian)) }) {
+                        Text(if (russian) "Скопировать список" else "Copy list")
+                    }
+                }
+            }
         }
         when {
             state.shoppingLoading -> item { Text(if (russian) "Загрузка…" else "Loading…") }
@@ -519,8 +564,12 @@ private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: 
             }
             shopping == null -> item { Text(if (russian) "Загрузка…" else "Loading…") }
             shopping.candidates.isEmpty() -> item {
-                Text(if (russian) "Пока нечего добавить: нужны минимум три покупки с интервалами от трёх дней."
-                    else "Nothing to suggest yet: at least three purchases with gaps of three days or more are needed.")
+                val hasHidden = shopping.boughtCandidates.isNotEmpty() || shopping.mutedCandidates.isNotEmpty()
+                    || shopping.blockedCandidates.isNotEmpty()
+                Text(if (hasHidden) {
+                    if (russian) "Активных подсказок пока нет." else "No active suggestions right now."
+                } else if (russian) "Пока нечего добавить: нужны минимум три покупки с интервалами от трёх дней."
+                else "Nothing to suggest yet: at least three purchases with gaps of three days or more are needed.")
             }
             else -> shopping.candidates.forEach { candidate ->
                 item {
@@ -539,12 +588,52 @@ private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: 
                             Text(if (russian) "Оценка: ${candidate.estimatedCost} ₽" else "Estimate: ${candidate.estimatedCost} RUB")
                             Text(if (russian) "Последняя покупка: ${candidate.lastPurchasedAt.take(10)}"
                                 else "Last purchased: ${candidate.lastPurchasedAt.take(10)}")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = { onDecision(candidate.productKey, "bought") }) {
+                                    Text(if (russian) "Уже купил" else "Already bought")
+                                }
+                                TextButton(onClick = { onDecision(candidate.productKey, "mute") }) {
+                                    Text(if (russian) "Скрыть" else "Hide")
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         if (shopping != null && state.shoppingError == null) {
+            if (shopping.boughtCandidates.isNotEmpty()) {
+                item {
+                    Text(if (russian) "Уже куплено" else "Already bought", style = MaterialTheme.typography.titleMedium)
+                    Text(if (russian) "Отметка действует до следующего обычного интервала покупки."
+                        else "This mark expires after the next usual purchase interval.")
+                    shopping.boughtCandidates.forEach { Text(it.productName) }
+                }
+            }
+            if (shopping.mutedCandidates.isNotEmpty()) {
+                item { Text(if (russian) "Скрытые подсказки" else "Hidden suggestions", style = MaterialTheme.typography.titleMedium) }
+                shopping.mutedCandidates.forEach { candidate ->
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column(Modifier.weight(1f)) {
+                                Text(candidate.productName)
+                                Text(if (russian) "Вы скрыли эту подсказку." else "You hid this suggestion.")
+                            }
+                            TextButton(onClick = { onDecision(candidate.productKey, "unmute") }) {
+                                Text(if (russian) "Вернуть подсказку" else "Restore suggestion")
+                            }
+                        }
+                    }
+                }
+            }
+            if (shopping.blockedCandidates.isNotEmpty()) {
+                item { Text(if (russian) "Не брать" else "Do not buy", style = MaterialTheme.typography.titleMedium) }
+                shopping.blockedCandidates.forEach { candidate ->
+                    item {
+                        Text("${candidate.productName} · ${if (russian) "Вы отметили как «не брать»." else "You marked this as do not buy."}")
+                    }
+                }
+            }
             item {
                 Text(if (russian) "Оценка списка: ${shopping.estimatedListCost} ₽"
                     else "Estimated list cost: ${shopping.estimatedListCost} RUB",
@@ -556,6 +645,12 @@ private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: 
             }
         }
     }
+}
+
+private fun shoppingClipboardText(shopping: FinanceShoppingList, russian: Boolean): String = buildString {
+    shopping.candidates.forEach { appendLine("${it.productName} — ${it.estimatedCost} RUB") }
+    append(if (russian) "Оценка списка: ${shopping.estimatedListCost} ₽"
+        else "Estimated list cost: ${shopping.estimatedListCost} RUB")
 }
 
 @androidx.compose.runtime.Composable

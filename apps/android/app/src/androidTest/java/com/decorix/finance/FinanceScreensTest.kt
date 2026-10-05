@@ -64,6 +64,29 @@ class FinanceScreensTest {
         compose.onNodeWithText("Not home inventory: suggestions use your confirmed receipt rhythm.").assertIsDisplayed()
     }
 
+    @Test fun shoppingDecisionsExplainHiddenItemsAndCopyOnlyActiveCandidates() {
+        var decision: Pair<String, String>? = null
+        var copied = ""
+        val active = shopping().candidates.single()
+        val list = shopping().copy(boughtCandidates = listOf(active),
+            mutedCandidates = listOf(active.copy(productKey = "tea")),
+            blockedCandidates = listOf(FinanceBlockedShoppingCandidate("candy", "Конфеты", "confirmed_not_to_buy")))
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), shoppingList = list),
+            onShoppingDecision = { key, action -> decision = key to action }, onShoppingCopy = { copied = it })
+
+        compose.onNodeWithText("Покупки").performScrollTo().performClick()
+        compose.onNodeWithText("Отметка действует до следующего обычного интервала покупки.").assertIsDisplayed()
+        compose.onNodeWithText("Вы скрыли эту подсказку.").assertIsDisplayed()
+        compose.onNodeWithText("Скопировать список").performClick()
+        assertEquals("Молоко 1 л — 100.00 RUB\nОценка списка: 100.00 ₽", copied)
+        assertEquals(false, copied.contains("Конфеты"))
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(1)
+        compose.onNodeWithText("Скрыть").performClick()
+        assertEquals("milk" to "mute", decision)
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(6)
+        compose.onNodeWithText("Конфеты · Вы отметили как «не брать».").assertIsDisplayed()
+    }
+
     @Test fun viewerCannotSubmitTransactionOrChangeFamilyBudget() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")), budgets = budget()))
         compose.onNodeWithText("Операции").performClick()
@@ -261,8 +284,10 @@ class FinanceScreensTest {
                      onCreateDraft: (String, String) -> Unit = { _, _ -> }, onUpdateDraft: (TransactionDraftEdit) -> Unit = {},
                      onConfirmDraft: (String, Long) -> Unit = { _, _ -> },
                      onCancelDraft: (String, Long) -> Unit = { _, _ -> },
-                      onCreateTelegramLink: () -> Unit = {},
-                      onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {}) {
+                     onCreateTelegramLink: () -> Unit = {},
+                     onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
+                     onShoppingDecision: (String, String) -> Unit = { _, _ -> },
+                     onShoppingCopy: (String) -> Unit = {}) {
         val language = mutableStateOf("ru")
         compose.setContent {
         MaterialTheme {
@@ -273,6 +298,7 @@ class FinanceScreensTest {
                 onProfileSave = onProfileSave, onCreateDraft = onCreateDraft,
                 onCreateTelegramLink = onCreateTelegramLink,
                 onNotificationPreferencesSave = onNotificationPreferencesSave,
+                onShoppingDecision = onShoppingDecision, onShoppingCopy = onShoppingCopy,
                 onUpdateDraft = onUpdateDraft, onConfirmDraft = onConfirmDraft, onCancelDraft = onCancelDraft,
                 onLogout = {},
                 onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = {},
@@ -310,7 +336,7 @@ class FinanceScreensTest {
         "19.9", "500.00", "open", 3L)
 
     private fun shopping() = FinanceShoppingList(listOf(FinanceShoppingCandidate(
-        "Молоко 1 л", 3, 10, "100.000000", "100.00", "2026-10-04T00:00:00Z",
+        "Молоко 1 л", "milk", 3, 10, "100.000000", "100.00", "2026-10-04T00:00:00Z",
         "2026-10-05T00:00:00Z", 0)), "100.00", false)
 
     private fun report() = FinanceReport("month", "family", "2026-10-01", "2026-10-01", "2026-10-01",

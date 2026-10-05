@@ -142,6 +142,25 @@ def test_renderer_rejects_mismatched_monthly_budget_fields():
         render_report_png(report)
 
 
+def test_shopping_renderer_explains_bought_muted_and_blocked_candidates():
+    from services.python.presentation.report_renderer import render_shopping_candidates
+
+    candidate = {"productKey": "freshmilk", "productName": "Молоко 1 л", "purchaseCount": 3,
+                 "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
+                 "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
+                 "daysUntilDue": 0}
+    text = render_shopping_candidates({"candidates": [], "estimatedListCost": "0.00", "inventoryTracked": False,
+        "boughtCandidates": [{**candidate, "productKey": "boughtmilk"}],
+        "mutedCandidates": [{**candidate, "productKey": "mutedmilk"}],
+        "blockedCandidates": [{"productKey": "blockedmilk", "productName": "Молоко 1 л",
+                               "reasonCode": "confirmed_not_to_buy"}]})
+
+    assert "Уже куплено" in text
+    assert "Активных подсказок нет." in text
+    assert "Вы скрыли" in text
+    assert "не брать" in text.lower()
+
+
 @pytest.mark.parametrize("field,value", [
     ("expenseTotal", "60.001"),
     ("expenseByDay", {"2026-10-02": "-1.00"}),

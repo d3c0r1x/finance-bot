@@ -19,11 +19,26 @@ public final class ProductApi {
     public record ProductCatalogResponse(String mode, String query, List<ProductCard> products) {}
 
     public record ShoppingList(List<ShoppingCandidate> candidates, String estimatedListCost,
-                               boolean inventoryTracked) {}
+                               boolean inventoryTracked, List<ShoppingCandidate> boughtCandidates,
+                               List<ShoppingCandidate> mutedCandidates,
+                               List<BlockedShoppingCandidate> blockedCandidates) {
+        public ShoppingList(List<ShoppingCandidate> candidates, String estimatedListCost, boolean inventoryTracked) {
+            this(candidates, estimatedListCost, inventoryTracked, List.of(), List.of(), List.of());
+        }
+    }
 
     public record ShoppingCandidate(String productName, int purchaseCount, int medianIntervalDays,
                                     String usualUnitPrice, String estimatedCost, Instant lastPurchasedAt,
-                                    Instant dueAt, int daysUntilDue) {}
+                                    Instant dueAt, int daysUntilDue, String productKey) {
+        public ShoppingCandidate(String productName, int purchaseCount, int medianIntervalDays,
+                                 String usualUnitPrice, String estimatedCost, Instant lastPurchasedAt,
+                                 Instant dueAt, int daysUntilDue) {
+            this(productName, purchaseCount, medianIntervalDays, usualUnitPrice, estimatedCost,
+                    lastPurchasedAt, dueAt, daysUntilDue, null);
+        }
+    }
+
+    public record BlockedShoppingCandidate(String productKey, String productName, String reasonCode) {}
 
     public record ProductCard(String productName, int purchaseCount, String usualUnitPrice, boolean hasBaseline,
                               String baselineUnitPrice, String lastUnitPrice, Instant lastPurchasedAt,

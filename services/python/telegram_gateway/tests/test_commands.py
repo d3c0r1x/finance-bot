@@ -670,9 +670,11 @@ def test_shopping_command_uses_linked_actor_and_explains_it_is_not_inventory(mon
     sent = []
     calls = []
     shopping = {"candidates": [{"productName": "Молоко 1 л", "purchaseCount": 3,
+                "productKey": "milk",
                 "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
                 "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
-                "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False}
+                "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False,
+                "boughtCandidates": [], "mutedCandidates": [], "blockedCandidates": []}
 
     class FakeCore:
         async def get_shopping_candidates(self, token):
@@ -707,6 +709,63 @@ def test_shopping_command_uses_linked_actor_and_explains_it_is_not_inventory(mon
     assert "Молоко 1 л" in sent[0].text
     assert "100,00" in sent[0].text
     assert "не учёт запасов" in sent[0].text.lower()
+    assert any("Уже купил" in button.text for row in sent[0].reply_markup.inline_keyboard for button in row)
+
+
+def test_shopping_bought_callback_uses_saved_product_key_and_refreshes_hidden_reason(monkeypatch):
+    sent = []
+    calls = []
+    candidate = {"productName": "Молоко 1 л", "productKey": "milk", "purchaseCount": 3,
+                 "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
+                 "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
+                 "daysUntilDue": 0}
+    active = {"candidates": [candidate], "estimatedListCost": "100.00", "inventoryTracked": False,
+              "boughtCandidates": [], "mutedCandidates": [], "blockedCandidates": []}
+    marked = {"candidates": [], "estimatedListCost": "0.00", "inventoryTracked": False,
+              "boughtCandidates": [candidate], "mutedCandidates": [], "blockedCandidates": []}
+
+    class FakeCore:
+        async def get_shopping_candidates(self, token):
+            assert token == "opaque-context"
+            return active
+
+        async def mark_shopping_bought(self, token, key):
+            calls.append((token, key))
+            return marked
+
+        async def mute_shopping_suggestion(self, _token, _key):
+            raise AssertionError("unexpected mute action")
+
+        async def unmute_shopping_suggestion(self, _token, _key):
+            raise AssertionError("unexpected unmute action")
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(message_id=903, date=datetime(2026, 10, 5, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"), from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/shopping", entities=[MessageEntity(type="bot_command", offset=0, length=9)])
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "owner"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=903, message=message)))
+        shopping_message = next(method for method in sent if method.__class__.__name__ == "SendMessage")
+        bought = next(button for row in shopping_message.reply_markup.inline_keyboard for button in row
+                      if button.text.startswith("Уже купил"))
+        callback = CallbackQuery(id="shopping-bought", from_user=message.from_user,
+                                 chat_instance="chat-instance", message=message, data=bought.callback_data)
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=904, callback_query=callback)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    assert calls == [("opaque-context", "milk")]
+    edit = next(method for method in sent if method.__class__.__name__ == "EditMessageText")
+    assert "Уже куплено" in edit.text
+    assert "обычного интервала" in edit.text
 
 
 def test_debts_command_rejects_foreign_tenant_response_without_disclosing_debt(monkeypatch):

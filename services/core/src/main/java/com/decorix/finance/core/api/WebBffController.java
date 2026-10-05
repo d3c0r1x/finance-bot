@@ -513,6 +513,24 @@ public class WebBffController {
         return productPriceHistory.shopping(tenantId, user.getSubject());
     }
 
+    @PostMapping("/tenants/{tenantId}/shopping/{productKey}/bought")
+    ShoppingList markShoppingBought(@PathVariable UUID tenantId, @PathVariable String productKey,
+                                    @AuthenticationPrincipal OidcUser user) {
+        return productPriceHistory.markShoppingBought(tenantId, user.getSubject(), productKey);
+    }
+
+    @PutMapping("/tenants/{tenantId}/suggestions/shopping/{productKey}/mute")
+    ShoppingList muteShopping(@PathVariable UUID tenantId, @PathVariable String productKey,
+                              @AuthenticationPrincipal OidcUser user) {
+        return productPriceHistory.muteShopping(tenantId, user.getSubject(), productKey);
+    }
+
+    @DeleteMapping("/tenants/{tenantId}/suggestions/shopping/{productKey}/mute")
+    ShoppingList unmuteShopping(@PathVariable UUID tenantId, @PathVariable String productKey,
+                                @AuthenticationPrincipal OidcUser user) {
+        return productPriceHistory.unmuteShopping(tenantId, user.getSubject(), productKey);
+    }
+
     @DeleteMapping("/tenants/{tenantId}/products/{productKey}/decision")
     ResponseEntity<Void> revokeProduct(@PathVariable UUID tenantId, @PathVariable String productKey,
             @AuthenticationPrincipal OidcUser user) {

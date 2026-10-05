@@ -441,9 +441,11 @@ def test_core_client_requests_member_product_catalog_with_actor_token_only():
 def test_core_client_requests_shopping_with_actor_token_only_and_validates_no_inventory():
     seen = {}
     shopping = {"candidates": [{"productName": "Milk Fresh 1l", "purchaseCount": 3,
+                "productKey": "freshmilk",
                 "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
                 "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
-                "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False}
+                "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False,
+                "boughtCandidates": [], "mutedCandidates": [], "blockedCandidates": []}
 
     async def get_shopping(request):
         seen["path"] = request.path
@@ -468,9 +470,11 @@ def test_core_client_requests_shopping_with_actor_token_only_and_validates_no_in
 
 def test_core_client_rejects_shopping_candidates_that_claim_inventory_or_have_fewer_than_three_purchases():
     valid = {"candidates": [{"productName": "Milk Fresh 1l", "purchaseCount": 3,
+             "productKey": "freshmilk",
              "medianIntervalDays": 10, "usualUnitPrice": "100.000000", "estimatedCost": "100.00",
              "lastPurchasedAt": "2026-10-04T00:00:00Z", "dueAt": "2026-10-05T00:00:00Z",
-             "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False}
+             "daysUntilDue": 0}], "estimatedListCost": "100.00", "inventoryTracked": False,
+             "boughtCandidates": [], "mutedCandidates": [], "blockedCandidates": []}
 
     async def exercise(invalid):
         async def get_shopping(_request):
@@ -490,6 +494,49 @@ def test_core_client_rejects_shopping_candidates_that_claim_inventory_or_have_fe
             assert error.code == "unavailable"
         else:
             raise AssertionError("invalid shopping candidates were accepted")
+
+
+def test_shopping_decision_actions_keep_actor_token_and_validate_returned_lists():
+    valid = {"candidates": [], "estimatedListCost": "0.00", "inventoryTracked": False,
+             "boughtCandidates": [], "mutedCandidates": [], "blockedCandidates": []}
+    seen = []
+
+    async def action(request):
+        seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
+        return web.json_response(valid)
+
+    async def exercise():
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/shopping/freshmilk/bought", action)
+        app.router.add_post("/internal/v1/telegram/shopping/freshmilk/mute", action)
+        app.router.add_post("/internal/v1/telegram/shopping/freshmilk/unmute", action)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "telegram-service-secret")
+            results = [await client.mark_shopping_bought("opaque-context", "freshmilk"),
+                       await client.mute_shopping_suggestion("opaque-context", "freshmilk"),
+                       await client.unmute_shopping_suggestion("opaque-context", "freshmilk")]
+            return results
+
+    results = asyncio.run(exercise())
+    assert results == [valid, valid, valid]
+    assert seen == [(f"/internal/v1/telegram/shopping/freshmilk/{action}", "telegram-service-secret",
+                     {"token": "opaque-context"}) for action in ("bought", "mute", "unmute")]
+
+
+def test_shopping_validation_requires_member_decision_sections_and_explained_blocks():
+    from services.python.telegram_gateway.core_client import TelegramCoreClient
+
+    valid = {"candidates": [], "estimatedListCost": "0.00", "inventoryTracked": False,
+             "boughtCandidates": [], "mutedCandidates": [], "blockedCandidates": [
+                 {"productKey": "freshmilk", "productName": "Milk Fresh 1l", "reasonCode": "confirmed_not_to_buy"}]}
+    assert TelegramCoreClient._validated_shopping_candidates(valid)["blockedCandidates"] == valid["blockedCandidates"]
+    invalid = {**valid, "blockedCandidates": [{**valid["blockedCandidates"][0], "reasonCode": "unknown"}]}
+    try:
+        TelegramCoreClient._validated_shopping_candidates(invalid)
+    except TelegramCoreError as error:
+        assert error.code == "unavailable"
+    else:
+        raise AssertionError("an unexplained shopping block was accepted")
 
 
 def test_core_client_rejects_fabricated_product_baseline_without_history():

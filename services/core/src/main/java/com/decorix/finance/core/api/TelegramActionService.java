@@ -98,6 +98,31 @@ public class TelegramActionService {
         });
     }
 
+    public ShoppingList markShoppingBought(ResolveRequest request, String productKey) {
+        return shoppingDecision(request, productKey, "bought");
+    }
+
+    public ShoppingList muteShopping(ResolveRequest request, String productKey) {
+        return shoppingDecision(request, productKey, "mute");
+    }
+
+    public ShoppingList unmuteShopping(ResolveRequest request, String productKey) {
+        return shoppingDecision(request, productKey, "unmute");
+    }
+
+    private ShoppingList shoppingDecision(ResolveRequest request, String productKey, String action) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Shopping request is required");
+        return transaction.execute(status -> {
+            ActorContext actor = actorContexts.require(request.token(), "receipt.read");
+            return switch (action) {
+                case "bought" -> productHistory.markShoppingBought(actor.tenantId(), actor.userId(), productKey);
+                case "mute" -> productHistory.muteShopping(actor.tenantId(), actor.userId(), productKey);
+                case "unmute" -> productHistory.unmuteShopping(actor.tenantId(), actor.userId(), productKey);
+                default -> throw new IllegalArgumentException("Unknown shopping decision");
+            };
+        });
+    }
+
     public DraftResponse createDraft(CreateDraftRequest request) {
         if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Draft request is required");
         return transaction.execute(status -> {

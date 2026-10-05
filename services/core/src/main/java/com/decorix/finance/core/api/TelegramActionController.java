@@ -84,6 +84,30 @@ public class TelegramActionController {
         return actions.shopping(request);
     }
 
+    @PostMapping("/shopping/{productKey}/bought")
+    ShoppingList markShoppingBought(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @PathVariable String productKey, @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.markShoppingBought(request, productKey);
+    }
+
+    @PostMapping("/shopping/{productKey}/mute")
+    ShoppingList muteShopping(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @PathVariable String productKey, @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.muteShopping(request, productKey);
+    }
+
+    @PostMapping("/shopping/{productKey}/unmute")
+    ShoppingList unmuteShopping(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @PathVariable String productKey, @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.unmuteShopping(request, productKey);
+    }
+
     @PostMapping("/transaction-drafts")
     ResponseEntity<DraftResponse> createDraft(
             @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,

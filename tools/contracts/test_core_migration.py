@@ -147,6 +147,29 @@ def test_notification_schedules_and_delivery_attempts_are_durable_and_service_sc
     assert "notification_service_profile_lookup" in access_sql
 
 
+def test_shopping_marks_and_mutes_are_member_scoped_and_rls_protected():
+    migration = next((path for path in MIGRATIONS if path.name.startswith("V32")), None)
+    assert migration is not None, "shopping marks and mutes need an additive V32 migration"
+    normalized = re.sub(r"--[^\n]*", "", migration.read_text(encoding="utf-8").lower())
+    for table in ("shopping_marks", "muted_suggestions"):
+        assert f"create table {table}" in normalized
+        assert f"alter table {table} enable row level security" in normalized
+        assert f"alter table {table} force row level security" in normalized
+        assert f"foreign key (tenant_id, user_id) references memberships (tenant_id, user_id)" in normalized
+    assert "primary key (tenant_id, user_id, product_key)" in normalized
+    assert "primary key (tenant_id, user_id, section, suggestion_key)" in normalized
+    assert "current_setting('app.tenant_id', true)" in normalized
+
+
+def test_shopping_mark_key_constraint_supports_full_product_key_length_in_postgres():
+    migration = next((path for path in MIGRATIONS if path.name.startswith("V33")), None)
+    assert migration is not None, "V33 must repair the PostgreSQL shopping-key repetition limit"
+    normalized = re.sub(r"--[^\n]*", "", migration.read_text(encoding="utf-8").lower())
+    assert "drop constraint shopping_marks_product_key_check" in normalized
+    assert "product_key ~ '^[a-zа-я0-9]+$'" in normalized
+    assert "varchar(256)" in "\n".join(path.read_text(encoding="utf-8").lower() for path in MIGRATIONS)
+
+
 def test_merchant_mappings_and_classification_cache_are_personal_and_tenant_scoped():
     migration = next((path for path in MIGRATIONS if path.name.startswith("V26")), None)
     assert migration is not None, "merchant categories need an additive V26 migration"

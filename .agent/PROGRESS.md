@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-05 04:42, Europe/Moscow.
+Updated: 2026-10-06 00:33, Europe/Moscow.
 
 ## Global plan
 
@@ -38,16 +38,18 @@ Updated: 2026-10-05 04:42, Europe/Moscow.
 | F26 | Safe-to-spend cash planning | COMPLETE — current recurring history, payday boundary, reserve and no-plan cases verified | F38 | pending |
 | F31 | Report charts and PNG | IN PROGRESS — Web/Android/PNG category, day and limit charts verified; price/waste awaits F33/F40 | F33, F40 | pending |
 | F32 | Durable daily and weekly digest delivery | COMPLETE — PostgreSQL schedules/outbox, Core API, Python worker, Web/Android settings | F25 rendering | pending |
+| F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
+| F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | pending |
 
 ## Current goal
 
-- ID and outcome: F35 — due-purchase candidates from personal receipt rhythm, median interval and estimated list cost.
-- Status: IMPLEMENTING — Go candidate policy passes; authenticated internal query API and Java/client parity remain.
-- Acceptance: require at least 3 real purchases; use median purchase interval; remove stale products after 2 normal intervals; describe the list as a suggestion, never inventory.
-- Ruling: F34 acceptance is GREEN. Search works after 1 purchase; blank-query catalog requires 3; chart needs 2 real points. Core enforces active member scope for Web and Telegram. `/products` and Telegram `/price` PNG show actual confirmed history; isolated PostgreSQL member-scope acceptance passed. Commit `00068b5735d74111c4f1eea91ea6fb4d58f364e5` is the first catch-up checkpoint through F34 because earlier SaaS work had accumulated uncommitted. Future goals receive dedicated commits. F33 Kafka/ClickHouse replay remains a separate NOT_RUN integration gate. F31 price/waste reports remain absent until F33/F40 provide authoritative datasets.
-- User choices: F31 charts use Web/PNG now; price and optional-purchase series wait for F33/F40 data. No placeholders. The active user objective requires a commit after every fully verified goal; earlier final-only commit deferral is superseded.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `fb00ede` plus current uncommitted plan work.
-- Updated at: 2026-10-05 04:42 Europe/Moscow.
+- ID and outcome: F36 — bought marks, mute/unmute, visible blocks, and copy active purchase suggestions.
+- Status: COMPLETE — implementation and all feature gates are GREEN; next inspect F37 dependencies and authoritative data.
+- Acceptance: bought marks never create expenses, expire after one median interval or a newer real receipt; mutes are member-local; blocks show a reason; clipboard includes active candidates only.
+- Ruling: F32 needed no new decision: its approved ADR-016 design is complete (PostgreSQL preferences/outbox, Python Telegram delivery, preserved local-time defaults). F36 stores decisions under tenant/member RLS, preserves `user_product_decisions.confirmed` as the block source, and applies bought → blocked → muted precedence. F33 runtime replay remains a separate NOT_RUN integration gate; F31 price/waste reports remain absent until F33/F40 provide authoritative datasets.
+- User choices: F31 charts use Web/PNG now; price and optional-purchase series wait for F33/F40 data. No placeholders. Commit each fully verified goal.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `d001969` plus current F36 changes.
+- Updated at: 2026-10-06 00:33 Europe/Moscow.
 
 ## Verification evidence
 
@@ -66,7 +68,7 @@ Updated: 2026-10-05 04:42, Europe/Moscow.
 
 ## Next action
 
-- Next: add RED handler tests for service-token auth, tenant/member history scope and request validation. Then implement Analytics handler and Core owner-authorized endpoint.
+- F36 is GREEN; commit only its source, tests, migration, contract, parity, and progress files. Then inspect F37 dependencies and start its next independently testable goal.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
@@ -930,3 +932,9 @@ Updated: 2026-10-05 04:42, Europe/Moscow.
 - F35 preserves the legacy three-purchase threshold, median cadence and unit-price estimate, 3-day due horizon, and expiry after two overdue intervals. Go ignores duplicate rows within one receipt and separates tenant/member histories. Core exposes authenticated API/BFF and Telegram actor routes; Telegram `/shopping`, Web, and Android show RU/EN suggestions and estimated list cost with an explicit no-inventory statement.
 - GREEN: Go `go test ./...` + `go vet ./...`; Core `check` 216 tests, 0 failures, 88 environment/container-gated skips; isolated PostgreSQL 18.6 `TransactionApiPostgresTest` 86/86, including member-scoped Web/BFF and Telegram acceptance; Python Telegram/presentation 87/87; contracts 49 passed/2 optional skips; Web 42/42 + production build; Android emulator instrumentation 29/29, debug package installed (SHA-256 `01BA6456F816407E7C6A5BF0903B458AD2D774B64BD787C775B1E77620655049`); `git diff --check` clean.
 - F35 is complete and marked complete in `contracts/parity/feature-parity.yaml`. Next: F36, validate “already bought”, mute/unmute, blocking, and purchase-list copy behavior.
+
+## E3.22 F36 shopping decisions and copy — 2026-10-05 23:45 MSK
+
+- Goal active. Inherited from the approved `PLAN.md` and legacy: keep bought marks separate from transactions; suppress only while mark is newer than the latest receipt and younger than one median interval; persist member-local mutes; preserve confirmed “не брать” decisions with a visible reason; copy only active suggestions.
+- Planned ownership: Core/PostgreSQL validates active tenant membership and owns marks/mutes; existing `user_product_decisions.confirmed` remains the blocking source. Telegram actor actions, Web BFF with CSRF, and Android direct API all use the same Core rules.
+- Next: write deterministic policy and PostgreSQL/API tests first, observe RED, then implement API, clients, localized hidden-state explanations and clipboard behavior.

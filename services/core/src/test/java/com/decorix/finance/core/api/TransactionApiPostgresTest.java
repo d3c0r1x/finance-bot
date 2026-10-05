@@ -3129,12 +3129,16 @@ class TransactionApiPostgresTest {
         transactions.executeWithoutResult(status -> {
             jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
             List<UUID> users = jdbc.query("SELECT user_id FROM external_identities WHERE provider = 'telegram' "
-                            + "AND subject ~ '^9[0-9]{8}$'", (rs, row) -> rs.getObject("user_id", UUID.class));
+                            + "AND subject ~ '^[1-9][0-9]{8,9}$'", (rs, row) -> rs.getObject("user_id", UUID.class));
             for (UUID user : users) {
                 jdbc.update("DELETE FROM notification_intents WHERE user_id = ?", user);
                 jdbc.update("DELETE FROM notification_preferences WHERE user_id = ?", user);
                 jdbc.update("DELETE FROM external_identities WHERE user_id = ? AND provider = 'telegram'", user);
             }
+            Integer remaining = jdbc.queryForObject("SELECT count(*) FROM external_identities WHERE provider = 'telegram' "
+                    + "AND subject ~ '^[1-9][0-9]{8,9}$'", Integer.class);
+            org.junit.jupiter.api.Assertions.assertEquals(0, remaining,
+                    "notification integration cleanup must remove both 9- and 10-digit synthetic Telegram IDs");
         });
     }
 
@@ -3800,6 +3804,87 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.inventoryTracked").value(false));
         org.junit.jupiter.api.Assertions.assertEquals(userIdFor(memberSubject).toString(),
                 com.jayway.jsonpath.JsonPath.read(LAST_SHOPPING_REQUEST.get(), "$.ownerUserId"));
+    }
+
+    @Test
+    void shoppingBoughtMarkIsMemberScopedAndNeverChangesTheLedger() throws Exception {
+        int transactionsBefore = shoppingTransactionCount();
+        String boughtPath = "/api/v1/tenants/" + tenantId + "/shopping/freshmilk/bought";
+        mvc.perform(post(boughtPath).with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates").isEmpty())
+                .andExpect(jsonPath("$.boughtCandidates.length()").value(1))
+                .andExpect(jsonPath("$.estimatedListCost").value("0.00"));
+        org.junit.jupiter.api.Assertions.assertEquals(transactionsBefore, shoppingTransactionCount(),
+                "marking a product bought must never create a transaction");
+
+        String memberSubject = "keycloak|shopping-mark-member-" + UUID.randomUUID();
+        addTenantMember(memberSubject, "Taylor", "member");
+        mvc.perform(get("/api/v1/tenants/{tenantId}/shopping", tenantId)
+                        .with(jwt().jwt(token -> token.subject(memberSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates.length()").value(1))
+                .andExpect(jsonPath("$.boughtCandidates").isEmpty());
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE shopping_marks SET marked_at = now() - interval '10 days' "
+                    + "WHERE tenant_id = ? AND user_id = ? AND product_key = 'freshmilk'",
+                    tenantId, userIdFor(subject));
+        });
+        mvc.perform(get("/api/v1/tenants/{tenantId}/shopping", tenantId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates.length()").value(1))
+                .andExpect(jsonPath("$.boughtCandidates").isEmpty());
+    }
+
+    @Test
+    void shoppingMuteCanBeReversedAndBffWritesRequireCsrf() throws Exception {
+        String mutePath = "/bff/tenants/" + tenantId + "/suggestions/shopping/freshmilk/mute";
+        var auth = oidcLogin().idToken(token -> token.subject(subject));
+        mvc.perform(put(mutePath).with(auth)).andExpect(status().isForbidden());
+        mvc.perform(put(mutePath).with(auth).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates").isEmpty())
+                .andExpect(jsonPath("$.mutedCandidates[0].productKey").value("freshmilk"));
+
+        String memberSubject = "keycloak|shopping-mute-member-" + UUID.randomUUID();
+        addTenantMember(memberSubject, "Taylor", "member");
+        mvc.perform(get("/bff/tenants/{tenantId}/shopping", tenantId)
+                        .with(oidcLogin().idToken(token -> token.subject(memberSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates.length()").value(1))
+                .andExpect(jsonPath("$.mutedCandidates").isEmpty());
+
+        mvc.perform(delete(mutePath).with(auth).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates.length()").value(1))
+                .andExpect(jsonPath("$.mutedCandidates").isEmpty());
+    }
+
+    @Test
+    void confirmedNotToBuyDecisionIsShownAsBlockedWithItsReason() throws Exception {
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("INSERT INTO user_product_decisions (tenant_id, user_id, product_key, decision) "
+                            + "VALUES (?, ?, 'freshmilk', 'confirmed')",
+                    tenantId, userIdFor(subject));
+        });
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/shopping", tenantId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates").isEmpty())
+                .andExpect(jsonPath("$.blockedCandidates[0].productKey").value("freshmilk"))
+                .andExpect(jsonPath("$.blockedCandidates[0].reasonCode").value("confirmed_not_to_buy"));
+    }
+
+    private int shoppingTransactionCount() {
+        return transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT count(*) FROM transactions WHERE tenant_id = ?", Integer.class, tenantId);
+        });
     }
 
     @Test

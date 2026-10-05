@@ -162,10 +162,15 @@ export type ProductCatalogCard = {
 };
 export type ProductCatalogResponse = { mode: 'catalog' | 'search'; query: string; products: ProductCatalogCard[] };
 export type ShoppingCandidate = {
-  productName: string; purchaseCount: number; medianIntervalDays: number; usualUnitPrice: string;
+  productName: string; productKey: string; purchaseCount: number; medianIntervalDays: number; usualUnitPrice: string;
   estimatedCost: string; lastPurchasedAt: string; dueAt: string; daysUntilDue: number;
 };
-export type ShoppingList = { candidates: ShoppingCandidate[]; estimatedListCost: string; inventoryTracked: false };
+export type BlockedShoppingCandidate = { productKey: string; productName: string; reasonCode: 'confirmed_not_to_buy' };
+export type ShoppingList = {
+  candidates: ShoppingCandidate[]; estimatedListCost: string; inventoryTracked: false;
+  boughtCandidates: ShoppingCandidate[]; mutedCandidates: ShoppingCandidate[];
+  blockedCandidates: BlockedShoppingCandidate[];
+};
 export type ReceiptItemPage = { items: ReceiptItem[]; page: number; totalItems: number; hasMore: boolean };
 export type ReceiptRepeatWarning = {
   itemId: string; name: string; productKey: string; verdict: string; title: string;
@@ -374,6 +379,15 @@ export const api = {
     return request<ProductCatalogResponse>(`/bff/tenants/${tenantId}/products${search ? `?query=${encodeURIComponent(search)}` : ''}`);
   },
   getShoppingCandidates: (tenantId: string) => request<ShoppingList>(`/bff/tenants/${tenantId}/shopping`),
+  markShoppingBought: (tenantId: string, productKey: string) => request<ShoppingList>(
+    `/bff/tenants/${tenantId}/shopping/${encodeURIComponent(productKey)}/bought`, { method: 'POST' },
+  ),
+  muteShoppingSuggestion: (tenantId: string, productKey: string) => request<ShoppingList>(
+    `/bff/tenants/${tenantId}/suggestions/shopping/${encodeURIComponent(productKey)}/mute`, { method: 'PUT' },
+  ),
+  unmuteShoppingSuggestion: (tenantId: string, productKey: string) => request<ShoppingList>(
+    `/bff/tenants/${tenantId}/suggestions/shopping/${encodeURIComponent(productKey)}/mute`, { method: 'DELETE' },
+  ),
   allowReceiptProduct: (tenantId: string, productKey: string) => request<{ productKey: string; decision: 'allowed'; version: number; updatedAt: string }>(
     `/bff/tenants/${tenantId}/products/${encodeURIComponent(productKey)}/decision`,
     { method: 'PUT', body: JSON.stringify({ decision: 'allowed' }) },

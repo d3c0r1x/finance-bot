@@ -297,7 +297,73 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             await message.answer("Список покупок получен в неверном формате. Попробуйте позже.",
                                  reply_markup=MAIN_MENU)
             return
-        await message.answer(text, reply_markup=MAIN_MENU, parse_mode=None)
+        revision = secrets.token_urlsafe(6)
+        await state.update_data(telegram_shopping_decision={
+            "revision": revision,
+            "tenantId": actor["tenantId"],
+            "products": {
+                "bought": [item["productKey"] for item in shopping["candidates"]],
+                "mute": [item["productKey"] for item in shopping["candidates"]],
+                "unmute": [item["productKey"] for item in shopping["mutedCandidates"]],
+            },
+        })
+        await message.answer(text, reply_markup=_shopping_keyboard(shopping, revision), parse_mode=None)
+
+    async def decide_shopping(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = (callback.data or "").split(":")
+        if len(parts) != 4 or parts[0] != "shopping" or parts[2] not in {"bought", "mute", "unmute"}:
+            await callback.answer("Действие устарело. Откройте /shopping снова.", show_alert=True)
+            return
+        if callback.message is None or callback.message.chat.type != "private" or callback.from_user is None:
+            await callback.answer("Действие доступно только в личном чате.", show_alert=True)
+            return
+        data = await state.get_data()
+        actor = data.get("telegram_actor_context")
+        selection = data.get("telegram_shopping_decision")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            return
+        if not isinstance(selection, dict) or selection.get("revision") != parts[1] \
+                or selection.get("tenantId") != actor.get("tenantId"):
+            await callback.answer("Список обновился. Откройте /shopping снова.", show_alert=True)
+            return
+        products = selection.get("products")
+        try:
+            index = int(parts[3])
+            keys = products.get(parts[2]) if isinstance(products, dict) else None
+            product_key = keys[index] if isinstance(keys, list) and 0 <= index < len(keys) else None
+        except (ValueError, TypeError, IndexError):
+            product_key = None
+        if not isinstance(product_key, str):
+            await callback.answer("Подсказка устарела. Откройте /shopping снова.", show_alert=True)
+            return
+        action = {"bought": core.mark_shopping_bought, "mute": core.mute_shopping_suggestion,
+                  "unmute": core.unmute_shopping_suggestion}[parts[2]]
+        try:
+            shopping = await action(actor["token"], product_key)
+            text = render_shopping_candidates(shopping)
+        except TelegramCoreError as error:
+            if error.code == "unauthorized":
+                await state.clear()
+                await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            else:
+                await callback.answer("Не удалось обновить список. Откройте /shopping позже.", show_alert=True)
+            return
+        except (TypeError, ValueError, KeyError):
+            await callback.answer("Список покупок получен в неверном формате.", show_alert=True)
+            return
+        revision = secrets.token_urlsafe(6)
+        await state.update_data(telegram_shopping_decision={
+            "revision": revision, "tenantId": actor["tenantId"],
+            "products": {
+                "bought": [item["productKey"] for item in shopping["candidates"]],
+                "mute": [item["productKey"] for item in shopping["candidates"]],
+                "unmute": [item["productKey"] for item in shopping["mutedCandidates"]],
+            },
+        })
+        await callback.message.edit_text(text, reply_markup=_shopping_keyboard(shopping, revision), parse_mode=None)
+        await callback.answer({"bought": "Отмечено: уже куплено", "mute": "Подсказка скрыта",
+                               "unmute": "Подсказка возвращена"}[parts[2]])
 
     async def show_budget(message: Message, command: CommandObject, state: FSMContext) -> None:
         if message.chat.type != "private":
@@ -895,6 +961,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(menu, F.text.casefold() == MENU_BUTTON.casefold())
     router.message.register(receive_transaction_draft_edit, F.text)
     router.callback_query.register(decide_transaction_draft, F.data.startswith("draft:"))
+    router.callback_query.register(decide_shopping, F.data.startswith("shopping:"))
     router.callback_query.register(decide_transaction_history, F.data.startswith("history:"))
     router.callback_query.register(decide_budget_proposal, F.data.startswith("budget_proposal:"))
 
@@ -1214,6 +1281,27 @@ def _transaction_history_keyboard(transactions: list[dict], revision: str) -> In
             text="Отменить последнюю",
             callback_data=f"history:{revision}:undo:0",
         )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+
+def _shopping_keyboard(shopping: dict, revision: str) -> InlineKeyboardMarkup | None:
+    buttons = []
+    for index, candidate in enumerate(shopping["candidates"]):
+        key = candidate["productKey"]
+        if not isinstance(key, str):
+            raise ValueError("Shopping candidate has no product key")
+        buttons.append([
+            InlineKeyboardButton(text=f"Уже купил · {candidate['productName'][:28]}",
+                                 callback_data=f"shopping:{revision}:bought:{index}"),
+            InlineKeyboardButton(text=f"Скрыть · {candidate['productName'][:28]}",
+                                 callback_data=f"shopping:{revision}:mute:{index}"),
+        ])
+    for index, candidate in enumerate(shopping["mutedCandidates"]):
+        key = candidate["productKey"]
+        if not isinstance(key, str):
+            raise ValueError("Muted shopping candidate has no product key")
+        buttons.append([InlineKeyboardButton(text=f"Вернуть · {candidate['productName'][:32]}",
+                                             callback_data=f"shopping:{revision}:unmute:{index}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
 
 

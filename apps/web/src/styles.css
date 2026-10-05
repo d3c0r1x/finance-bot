@@ -107,6 +107,12 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 .shopping-card h3 { margin: 0 0 7px; overflow-wrap: anywhere; font-size: 16px; }
 .shopping-card p { margin: 4px 0 0; color: #718097; font-size: 12px; }
 .shopping-card-cost { flex: none; color: #25354b; }
+.shopping-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+.shopping-hidden { display: grid; gap: 8px; padding-top: 4px; border-top: 1px solid #e8edf4; }
+.shopping-hidden h3, .shopping-hidden p { margin: 0; }
+.shopping-hidden p, .shopping-copy-status { color: #718097; font-size: 12px; }
+.shopping-hidden-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.shopping-hidden-row span { color: #526177; font-size: 13px; }
 .shopping-total { margin: 0; color: #526177; }
 .shopping-total strong { color: #25354b; }
 .shopping-disclosure { margin: 0; color: #718097; font-size: 12px; }

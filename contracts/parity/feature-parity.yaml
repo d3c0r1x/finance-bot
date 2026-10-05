@@ -513,9 +513,19 @@ features:
     feature: "«Уже купил», mute/unmute, блокировки, копирование закупки"
     target: "J shopping decisions; W clipboard; P buttons"
     acceptance: "Отметка не создаёт расход; устаревает; скрытое перечислено с причиной"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ShoppingDecisionPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ProductPriceHistoryServiceTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/python/presentation/tests/test_report_renderer.py
+      - apps/web/src/ShoppingPanel.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Bought marks are member-scoped and never create a ledger entry; they expire after one median interval and stop suppressing after a later real receipt. Muted and confirmed-blocked candidates stay visible with explanations, while list copy contains active candidates only. Core full check with PostgreSQL acceptance passes; Python Telegram/presentation 91 passed; Web 44 passed and production build passes; contracts 51 passed/2 optional skips; Android emulator instrumentation 31/31 passes. Installed debug APK matches the built artifact, SHA-256 7D7654246341328548CC5D2CE0AD1416C78EDB03171EA3820B7DAE05B43ED82B. `git diff --check` passes with line-ending notices only."
     intentional_differences: []
   - id: F37
     feature: "Личная инфляция по корзине, окно 90 дней, top rise/fall"

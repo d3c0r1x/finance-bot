@@ -467,38 +467,89 @@ def render_shopping_candidates(shopping: Mapping[str, object]) -> str:
     if not isinstance(shopping, Mapping) or shopping.get("inventoryTracked") is not False:
         raise ValueError("Shopping suggestions cannot claim inventory tracking")
     candidates = shopping.get("candidates")
-    if not isinstance(candidates, list) or len(candidates) > 10:
+    bought = shopping.get("boughtCandidates", [])
+    muted = shopping.get("mutedCandidates", [])
+    blocked = shopping.get("blockedCandidates", [])
+    if not isinstance(candidates, list) or not isinstance(bought, list) or not isinstance(muted, list) \
+            or not isinstance(blocked, list) or len(candidates) + len(bought) + len(muted) + len(blocked) > 10:
         raise ValueError("Shopping candidates must be a bounded list")
     total = _money(shopping.get("estimatedListCost"), "estimatedListCost")
     estimated = Decimal("0.00")
     lines = ["🛒 Пора купить"]
-    for candidate in candidates:
+
+    def candidate_line(candidate: object) -> str:
         if not isinstance(candidate, Mapping):
             raise ValueError("Shopping candidate must be an object")
         name = candidate.get("productName")
+        key = candidate.get("productKey")
         count = candidate.get("purchaseCount")
         interval = candidate.get("medianIntervalDays")
         days_until_due = candidate.get("daysUntilDue")
         if not isinstance(name, str) or not name.strip() or len(name) > 200 \
+                or not isinstance(key, str) or not re.fullmatch(r"[a-zа-я0-9]{1,256}", key) \
                 or type(count) is not int or not 3 <= count <= 5000 \
                 or type(interval) is not int or not 3 <= interval <= 3650 \
                 or type(days_until_due) is not int or not -7300 <= days_until_due <= 3:
             raise ValueError("Shopping candidate fields are invalid")
         cost = _money(candidate.get("estimatedCost"), "estimatedCost")
-        estimated += cost
+        usual = _product_decimal(candidate.get("usualUnitPrice"), "usualUnitPrice", places=6, positive=True)
+        if usual.quantize(Decimal("0.01")) != cost:
+            raise ValueError("Shopping candidate cost is invalid")
+        last = _product_time(candidate.get("lastPurchasedAt"), "lastPurchasedAt")
+        due_at = _product_time(candidate.get("dueAt"), "dueAt")
+        if due_at <= last:
+            raise ValueError("Shopping candidate dates are invalid")
         if days_until_due < 0:
             due = f"Просрочено на {abs(days_until_due)} дн."
         elif days_until_due == 0:
             due = "Пора"
         else:
             due = f"Через {days_until_due} дн."
-        lines.append(f"• {name} — {due}; около {_format_rub(cost)} ₽; раз в {interval} дн. ({count} покупки)")
+        return f"• {name} — {due}; около {_format_rub(cost)} ₽; раз в {interval} дн. ({count} покупки)"
+
+    seen_keys = set()
+    for candidate in candidates:
+        rendered = candidate_line(candidate)
+        key = candidate["productKey"]
+        if key in seen_keys:
+            raise ValueError("Shopping product keys must be unique")
+        seen_keys.add(key)
+        estimated += _money(candidate["estimatedCost"], "estimatedCost")
+        lines.append(rendered)
     if estimated != total:
         raise ValueError("Shopping estimate does not match its candidates")
     if not candidates:
-        lines.append("Пока нет подсказок: нужны минимум 3 покупки и интервалы от 3 дней.")
+        if bought or muted or blocked:
+            lines.append("Активных подсказок нет.")
+        else:
+            lines.append("Пока нет подсказок: нужны минимум 3 покупки и интервалы от 3 дней.")
     else:
         lines.extend(("", f"Оценка списка: {_format_rub(total)} ₽"))
+    for section, title, reason in ((bought, "Уже куплено", "Отметка действует до следующего обычного интервала покупки."),
+                                   (muted, "Вы скрыли", "Подсказка скрыта вами; её можно вернуть в списке.")):
+        if section:
+            lines.extend(("", f"{title}:"))
+            for candidate in section:
+                rendered = candidate_line(candidate)
+                key = candidate["productKey"]
+                if key in seen_keys:
+                    raise ValueError("Shopping product keys must be unique")
+                seen_keys.add(key)
+                lines.append(f"{rendered} · {reason}")
+    if blocked:
+        lines.extend(("", "Не брать:"))
+        for candidate in blocked:
+            if not isinstance(candidate, Mapping) or not isinstance(candidate.get("productName"), str) \
+                    or not candidate["productName"].strip() or len(candidate["productName"]) > 200 \
+                    or not isinstance(candidate.get("productKey"), str) \
+                    or not re.fullmatch(r"[a-zа-я0-9]{1,256}", candidate["productKey"]) \
+                    or candidate.get("reasonCode") != "confirmed_not_to_buy":
+                raise ValueError("Blocked shopping candidate is invalid")
+            key = candidate["productKey"]
+            if key in seen_keys:
+                raise ValueError("Shopping product keys must be unique")
+            seen_keys.add(key)
+            lines.append(f"• {candidate['productName']} — вы отметили «не брать».")
     lines.append("Это подсказка по чекам, не учёт запасов: бот не знает, что уже есть дома.")
     return "\n".join(lines)
 

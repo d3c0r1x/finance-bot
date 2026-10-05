@@ -150,6 +150,18 @@ class FinanceApi(context: Context) {
         execute("/api/v1/tenants/$tenantId/shopping", "GET"),
     ))
 
+    fun markShoppingBought(tenantId: String, productKey: String): FinanceShoppingList = FinanceModels.shoppingList(JSONObject(
+        execute("/api/v1/tenants/$tenantId/shopping/${android.net.Uri.encode(productKey)}/bought", "POST", "{}"),
+    ))
+
+    fun muteShoppingSuggestion(tenantId: String, productKey: String): FinanceShoppingList = FinanceModels.shoppingList(JSONObject(
+        execute("/api/v1/tenants/$tenantId/suggestions/shopping/${android.net.Uri.encode(productKey)}/mute", "PUT", "{}"),
+    ))
+
+    fun unmuteShoppingSuggestion(tenantId: String, productKey: String): FinanceShoppingList = FinanceModels.shoppingList(JSONObject(
+        execute("/api/v1/tenants/$tenantId/suggestions/shopping/${android.net.Uri.encode(productKey)}/mute", "DELETE", "{}"),
+    ))
+
     fun memberProfile(tenantId: String): FinanceMemberProfile = FinanceModels.memberProfile(JSONObject(
         execute("/api/v1/tenants/$tenantId/profile/me", "GET"),
     ))
