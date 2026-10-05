@@ -83,6 +83,19 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 .report-categories li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 9px; color: #526177; background: #f6f8fb; }
 .report-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; margin-top: 22px; }
 .product-catalog { display: grid; gap: 18px; }
+.personal-inflation { display: grid; gap: 18px; }
+.inflation-disclosure { margin: 0; color: #718097; font-size: 13px; }
+.inflation-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.inflation-summary > div, .inflation-product { padding: 16px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.inflation-summary dt, .inflation-product p { color: #718097; font-size: 13px; }
+.inflation-summary dd { margin: 7px 0 0; color: #25354b; font-size: 20px; font-weight: 700; }
+.inflation-comparisons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.inflation-group h3 { margin: 0 0 10px; }
+.inflation-group > p { color: #718097; }
+.inflation-product-list { display: grid; gap: 10px; }
+.inflation-product { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.inflation-product h4, .inflation-product p { margin: 4px 0; }
+.inflation-product strong { flex: none; font-size: 16px; }
 .product-search { display: grid; gap: 7px; max-width: 620px; color: #526177; font-size: 13px; font-weight: 600; }
 .product-search > div { display: flex; gap: 9px; }
 .product-search input { flex: 1; min-width: 0; padding: 11px 12px; border: 1px solid #d8e0ec; border-radius: 9px; background: white; }
@@ -217,3 +230,4 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 @media (max-width: 900px) { .budget-row { grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr); } }
 @media (max-width: 640px) { .app-shell { display: block; } .sidebar { min-height: auto; padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 10px; } .sidebar nav { grid-column: 1 / -1; display: flex; margin: 0; } .sidebar-footer { grid-column: 1 / -1; margin: 0; padding-top: 9px; } .main-content { padding: 27px 16px; } .page-header { align-items: start; flex-direction: column; } .transactions-layout { gap: 14px; } .transaction-form { grid-template-columns: 1fr; } .transaction-form .panel-heading, .transaction-form button, .transaction-form .form-error { grid-column: auto; } .history-panel { padding: 17px 14px; } .filters { display: flex; align-items: stretch; flex-direction: column; } .filters select { width: 100%; } .summary-grid { grid-template-columns: 1fr; } .transaction-row { grid-template-columns: 34px minmax(0, 1fr); } .receipt-items .transaction-row, .receipt-candidates .transaction-row { grid-template-columns: minmax(0, 1fr); } .receipt-items .transaction-row > form, .receipt-add-item { grid-template-columns: 1fr; } .receipt-add-item .button { grid-column: auto; } .transaction-amount, .transaction-actions { grid-column: 2; } .budget-panel, .debt-panel { padding: 17px 14px; } .budget-row, .debt-create-form, .debt-actions { grid-template-columns: 1fr; } .debt-create-form h3, .debt-create-form button { grid-column: auto; } .debt-title { flex-direction: column; } .debt-actions form { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .import-upload form { grid-template-columns: 1fr; } .import-upload, .import-preview { padding: 17px 14px; } .import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .import-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; } .import-row-selection { grid-column: 1 / -1; } .import-period { grid-template-columns: auto 1fr; } }
+@media (max-width: 700px) { .inflation-summary, .inflation-comparisons { grid-template-columns: 1fr; } .inflation-product { padding: 13px; } }

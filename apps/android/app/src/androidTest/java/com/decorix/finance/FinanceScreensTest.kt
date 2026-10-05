@@ -87,6 +87,56 @@ class FinanceScreensTest {
         compose.onNodeWithText("Конфеты · Вы отметили как «не брать».").assertIsDisplayed()
     }
 
+    @Test fun personalInflationShowsReceiptOnlyDisclosureAndCoreBasketInRussianAndEnglish() {
+        val inflation = FinancePersonalInflation(
+            available = true, reasonCode = "available", asOf = "2026-10-06T12:00:00Z", windowDays = 90,
+            productCount = 3, basketBefore = "1250.00", basketNow = "1275.00", indexPercent = "2.00",
+            rising = listOf(FinancePersonalInflationItem("Кофе", "100.00", "110.00", "500.00", "10.00", 2, 1)),
+            falling = listOf(FinancePersonalInflationItem("Молоко", "200.00", "180.00", "700.00", "-10.00", 3, 2)),
+        )
+        var loads = 0
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), personalInflation = inflation),
+            onPersonalInflationLoad = { loads++ })
+
+        compose.onNodeWithText("Динамика цен").performScrollTo().performClick()
+        compose.onNodeWithText("Личная динамика цен · 90 дней").assertIsDisplayed()
+        compose.onNodeWithText("Корзина по старым ценам: 1250.00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Та же корзина по новым ценам: 1275.00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Личный индекс: 2.00% · 3 товара").assertIsDisplayed()
+        compose.onNodeWithText("Кофе · 100.00 → 110.00 ₽ · 10.00% · вес 500.00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Цены только из ваших чеков, не официальная статистика.").assertIsDisplayed()
+        assertEquals(0, loads)
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Personal price trend · 90 days").assertIsDisplayed()
+        compose.onNodeWithText("Receipt prices only; not official inflation statistics.").assertIsDisplayed()
+    }
+
+    @Test fun personalInflationLoadsWhenScreenOpensAndExplainsMissingHistory() {
+        var loads = 0
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),
+            onPersonalInflationLoad = { loads++ })
+
+        compose.onNodeWithText("Динамика цен").performScrollTo().performClick()
+
+        assertEquals(1, loads)
+        compose.onNodeWithText("Загрузка…").assertIsDisplayed()
+    }
+
+    @Test fun personalInflationExplainsInsufficientHistoryWithoutShowingZeroTotals() {
+        val unavailable = FinancePersonalInflation(
+            available = false, reasonCode = "insufficient_history", asOf = "2026-10-06T12:00:00Z", windowDays = 90,
+            productCount = 0, basketBefore = null, basketNow = null, indexPercent = null, rising = emptyList(), falling = emptyList(),
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), personalInflation = unavailable))
+
+        compose.onNodeWithText("Динамика цен").performScrollTo().performClick()
+        compose.onNodeWithText("Недостаточно истории для расчёта.").assertIsDisplayed()
+        compose.onNodeWithText("Нужно минимум 3 товара: для каждого — 2 покупки до окна и 1 внутри 90-дневного окна.")
+            .assertIsDisplayed()
+        compose.onNodeWithText("0.00 ₽").assertDoesNotExist()
+    }
+
     @Test fun viewerCannotSubmitTransactionOrChangeFamilyBudget() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")), budgets = budget()))
         compose.onNodeWithText("Операции").performClick()
@@ -285,9 +335,10 @@ class FinanceScreensTest {
                      onConfirmDraft: (String, Long) -> Unit = { _, _ -> },
                      onCancelDraft: (String, Long) -> Unit = { _, _ -> },
                      onCreateTelegramLink: () -> Unit = {},
-                     onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
-                     onShoppingDecision: (String, String) -> Unit = { _, _ -> },
-                     onShoppingCopy: (String) -> Unit = {}) {
+                      onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
+                      onShoppingDecision: (String, String) -> Unit = { _, _ -> },
+                      onShoppingCopy: (String) -> Unit = {},
+                      onPersonalInflationLoad: () -> Unit = {}) {
         val language = mutableStateOf("ru")
         compose.setContent {
         MaterialTheme {
@@ -299,6 +350,7 @@ class FinanceScreensTest {
                 onCreateTelegramLink = onCreateTelegramLink,
                 onNotificationPreferencesSave = onNotificationPreferencesSave,
                 onShoppingDecision = onShoppingDecision, onShoppingCopy = onShoppingCopy,
+                onPersonalInflationLoad = onPersonalInflationLoad,
                 onUpdateDraft = onUpdateDraft, onConfirmDraft = onConfirmDraft, onCancelDraft = onCancelDraft,
                 onLogout = {},
                 onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = {},

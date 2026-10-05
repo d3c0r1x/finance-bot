@@ -99,6 +99,7 @@ class TransactionApiPostgresTest {
     private static final AtomicReference<String> LAST_PRICE_COMPARE_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_PRICE_CATALOG_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_SHOPPING_REQUEST = new AtomicReference<>("");
+    private static final AtomicReference<String> LAST_PERSONAL_INFLATION_REQUEST = new AtomicReference<>("");
     private static final String ANALYTICS_SERVICE_TOKEN = "integration-analytics-price-token";
     private static final HttpServer AI_SERVER = startAiServer();
     private static final String JDBC_URL = System.getenv("FINANCE_TEST_JDBC_URL");
@@ -3864,6 +3865,33 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void personalInflationUsesOnlyAuthenticatedActiveMemberForApiAndBff() throws Exception {
+        LAST_PERSONAL_INFLATION_REQUEST.set("");
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/personal-inflation", tenantId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.reasonCode").value("insufficient_history"))
+                .andExpect(jsonPath("$.basketBefore").doesNotExist());
+        org.junit.jupiter.api.Assertions.assertEquals(userIdFor(subject).toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_PERSONAL_INFLATION_REQUEST.get(), "$.ownerUserId"));
+
+        String memberSubject = "keycloak|inflation-member-" + UUID.randomUUID();
+        addTenantMember(memberSubject, "Taylor", "member");
+        mvc.perform(get("/bff/tenants/{tenantId}/analytics/personal-inflation", tenantId)
+                        .with(oidcLogin().idToken(token -> token.subject(memberSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.reasonCode").value("insufficient_history"));
+        org.junit.jupiter.api.Assertions.assertEquals(userIdFor(memberSubject).toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_PERSONAL_INFLATION_REQUEST.get(), "$.ownerUserId"));
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/personal-inflation", UUID.randomUUID())
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void confirmedNotToBuyDecisionIsShownAsBlockedWithItsReason() throws Exception {
         transactions.executeWithoutResult(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
@@ -4876,6 +4904,26 @@ class TransactionApiPostgresTest {
                          "lastPurchasedAt":"2026-10-04T00:00:00Z","dueAt":"2026-10-05T00:00:00Z","daysUntilDue":0}],
                          "estimatedListCost":"100.00","inventoryTracked":false}
                         """.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+                exchange.sendResponseHeaders(200, body.length);
+                try (var output = exchange.getResponseBody()) {
+                    output.write(body);
+                }
+            });
+            server.createContext("/internal/v1/analytics/personal-inflation", exchange -> {
+                if (!("Bearer " + ANALYTICS_SERVICE_TOKEN).equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
+                    exchange.sendResponseHeaders(401, -1);
+                    exchange.close();
+                    return;
+                }
+                LAST_PERSONAL_INFLATION_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                String asOf = com.jayway.jsonpath.JsonPath.read(LAST_PERSONAL_INFLATION_REQUEST.get(), "$.asOf");
+                String response = """
+                        {"available":false,"reasonCode":"insufficient_history","asOf":"%s","windowDays":90,
+                         "productCount":0,"basketBefore":null,"basketNow":null,"indexPercent":null,
+                         "rising":[],"falling":[]}
+                        """.formatted(asOf);
+                byte[] body = response.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
                 exchange.sendResponseHeaders(200, body.length);
                 try (var output = exchange.getResponseBody()) {

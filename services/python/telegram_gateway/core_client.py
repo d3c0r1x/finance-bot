@@ -16,6 +16,8 @@ _BUDGET_ALERT_AMOUNT = re.compile(r"(?:0|[1-9]\d{0,17})\.\d{2}\Z")
 _PRODUCT_UNIT_PRICE = re.compile(r"-?\d{1,30}\.\d{6}\Z")
 _PRODUCT_TOTAL = re.compile(r"\d{1,30}\.\d{2}\Z")
 _PRODUCT_KEY = re.compile(r"[a-zа-я0-9]{1,256}\Z")
+_PERSONAL_INFLATION_MONEY = re.compile(r"(?:0|[1-9]\d{0,29})\.\d{2}\Z")
+_PERSONAL_INFLATION_PERCENT = re.compile(r"-?(?:0|[1-9]\d{0,29})\.\d{2}\Z")
 _BUDGET_STATES = {"disabled", "normal", "near", "exceeded"}
 
 
@@ -342,6 +344,14 @@ class TelegramCoreClient:
         body = await self._post_json("shopping", {"token": actor_context_token}, expected_status=200)
         return self._validated_shopping_candidates(body)
 
+    async def get_personal_inflation(self, actor_context_token: str) -> dict:
+        if not isinstance(actor_context_token, str) or not actor_context_token:
+            raise TelegramCoreError("unavailable")
+        body = await self._post_json("actions/personal-inflation", {
+            "token": actor_context_token,
+        }, expected_status=200)
+        return self._validated_personal_inflation(body)
+
     async def mark_shopping_bought(self, actor_context_token: str, product_key: str) -> dict:
         return await self._shopping_decision(actor_context_token, product_key, "bought")
 
@@ -512,6 +522,93 @@ class TelegramCoreClient:
         return {"candidates": normalized, "estimatedListCost": total_raw, "inventoryTracked": False,
                 "boughtCandidates": normalized_bought, "mutedCandidates": normalized_muted,
                 "blockedCandidates": normalized_blocked}
+
+    @staticmethod
+    def _validated_personal_inflation(body: object) -> dict:
+        if not isinstance(body, dict) or type(body.get("available")) is not bool \
+                or body.get("reasonCode") not in {"available", "insufficient_history"} \
+                or type(body.get("windowDays")) is not int or body["windowDays"] != 90 \
+                or type(body.get("productCount")) is not int or not 0 <= body["productCount"] <= 5000 \
+                or not isinstance(body.get("rising"), list) or len(body["rising"]) > 3 \
+                or not isinstance(body.get("falling"), list) or len(body["falling"]) > 3:
+            raise TelegramCoreError("unavailable")
+        try:
+            TelegramCoreClient._validated_product_datetime(body.get("asOf"), "asOf")
+        except TelegramCoreError:
+            raise
+
+        totals = (body.get("basketBefore"), body.get("basketNow"), body.get("indexPercent"))
+        if not body["available"]:
+            if body["reasonCode"] != "insufficient_history" or body["productCount"] != 0 \
+                    or any(value is not None for value in totals) or body["rising"] or body["falling"]:
+                raise TelegramCoreError("unavailable")
+            return {key: body[key] for key in (
+                "available", "reasonCode", "asOf", "windowDays", "productCount", "basketBefore",
+                "basketNow", "indexPercent", "rising", "falling")}
+
+        if body["reasonCode"] != "available" or body["productCount"] < 3 \
+                or any(not isinstance(value, str) for value in totals):
+            raise TelegramCoreError("unavailable")
+        before = TelegramCoreClient._validated_product_decimal(
+            body["basketBefore"], "basketBefore", _PERSONAL_INFLATION_MONEY, positive=True)
+        now = TelegramCoreClient._validated_product_decimal(
+            body["basketNow"], "basketNow", _PERSONAL_INFLATION_MONEY, positive=True)
+        index = TelegramCoreClient._validated_product_decimal(
+            body["indexPercent"], "indexPercent", _PERSONAL_INFLATION_PERCENT, positive=False)
+        if index <= Decimal("-100") or before <= 0 or now <= 0:
+            raise TelegramCoreError("unavailable")
+
+        seen_names: set[str] = set()
+
+        def validate_items(items: list, *, rising: bool) -> list[dict]:
+            result = []
+            for item in items:
+                if not isinstance(item, dict):
+                    raise TelegramCoreError("unavailable")
+                name = item.get("productName")
+                older = item.get("olderPurchaseCount")
+                window = item.get("windowPurchaseCount")
+                if not isinstance(name, str) or not name.strip() or len(name) > 200 \
+                        or name.casefold() in seen_names \
+                        or type(older) is not int or not 2 <= older <= 5000 \
+                        or type(window) is not int or not 1 <= window <= 5000:
+                    raise TelegramCoreError("unavailable")
+                old_price = TelegramCoreClient._validated_product_decimal(
+                    item.get("oldUnitPrice"), "oldUnitPrice", _PERSONAL_INFLATION_MONEY, positive=True)
+                new_price = TelegramCoreClient._validated_product_decimal(
+                    item.get("newUnitPrice"), "newUnitPrice", _PERSONAL_INFLATION_MONEY, positive=True)
+                weight = TelegramCoreClient._validated_product_decimal(
+                    item.get("oldSpendWeight"), "oldSpendWeight", _PERSONAL_INFLATION_MONEY, positive=True)
+                change = TelegramCoreClient._validated_product_decimal(
+                    item.get("changePercent"), "changePercent", _PERSONAL_INFLATION_PERCENT, positive=False)
+                if rising and change <= 0 or not rising and change >= 0:
+                    raise TelegramCoreError("unavailable")
+                seen_names.add(name.casefold())
+                result.append({
+                    "productName": name,
+                    "oldUnitPrice": item["oldUnitPrice"],
+                    "newUnitPrice": item["newUnitPrice"],
+                    "oldSpendWeight": item["oldSpendWeight"],
+                    "changePercent": item["changePercent"],
+                    "olderPurchaseCount": older,
+                    "windowPurchaseCount": window,
+                })
+            return result
+
+        rising = validate_items(body["rising"], rising=True)
+        falling = validate_items(body["falling"], rising=False)
+        return {
+            "available": True,
+            "reasonCode": "available",
+            "asOf": body["asOf"],
+            "windowDays": 90,
+            "productCount": body["productCount"],
+            "basketBefore": body["basketBefore"],
+            "basketNow": body["basketNow"],
+            "indexPercent": body["indexPercent"],
+            "rising": rising,
+            "falling": falling,
+        }
 
     @staticmethod
     def _validated_product_datetime(value: object, field: str) -> datetime:

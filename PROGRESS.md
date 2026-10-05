@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-05 04:42, Europe/Moscow.
+Updated: 2026-10-06 01:48, Europe/Moscow.
 
 ## Global plan
 
@@ -38,16 +38,19 @@ Updated: 2026-10-05 04:42, Europe/Moscow.
 | F26 | Safe-to-spend cash planning | COMPLETE — current recurring history, payday boundary, reserve and no-plan cases verified | F38 | pending |
 | F31 | Report charts and PNG | IN PROGRESS — Web/Android/PNG category, day and limit charts verified; price/waste awaits F33/F40 | F33, F40 | pending |
 | F32 | Durable daily and weekly digest delivery | COMPLETE — PostgreSQL schedules/outbox, Core API, Python worker, Web/Android settings | F25 rendering | pending |
+| F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
+| F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
+| F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | pending |
 
 ## Current goal
 
-- ID and outcome: F35 — due-purchase candidates from personal receipt rhythm, median interval and estimated list cost.
-- Status: IMPLEMENTING — Go candidate policy passes; authenticated internal query API and Java/client parity remain.
-- Acceptance: require at least 3 real purchases; use median purchase interval; remove stale products after 2 normal intervals; describe the list as a suggestion, never inventory.
-- Ruling: F34 acceptance is GREEN. Search works after 1 purchase; blank-query catalog requires 3; chart needs 2 real points. Core enforces active member scope for Web and Telegram. `/products` and Telegram `/price` PNG show actual confirmed history; isolated PostgreSQL member-scope acceptance passed. Commit `00068b5735d74111c4f1eea91ea6fb4d58f364e5` is the first catch-up checkpoint through F34 because earlier SaaS work had accumulated uncommitted. Future goals receive dedicated commits. F33 Kafka/ClickHouse replay remains a separate NOT_RUN integration gate. F31 price/waste reports remain absent until F33/F40 provide authoritative datasets.
-- User choices: F31 charts use Web/PNG now; price and optional-purchase series wait for F33/F40 data. No placeholders. The active user objective requires a commit after every fully verified goal; earlier final-only commit deferral is superseded.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `fb00ede` plus current uncommitted plan work.
-- Updated at: 2026-10-05 04:42 Europe/Moscow.
+- ID and outcome: F37 — personal 90-day price index from the member's own receipt basket.
+- Status: COMPLETE — Go projection reader, authenticated Java API, Telegram, Web and Android are implemented and verified; F33 live replay remains a separate NOT_RUN runtime gate.
+- Acceptance: at least two distinct receipts before the window and one within it for each product; at least three eligible products; median unit prices and prior-spend weights; top three rise/fall; receipt-price disclosure; insufficient history has no invented totals.
+- Ruling: Preserve v1's `services/inflation.py` and `services/purchase_history.py` behavior and shared `prices.SameProduct` identity. Core authenticates active membership before the owner ID reaches Go. User approved the F31 chart boundary; no F33/F40 price/waste placeholders were added.
+- User choices: Keycloak + OIDC; use F31 Web/PNG charts now, add price and optional-purchase series only after F33/F40 data; commit each fully verified goal.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `d758099` plus completed F37 work, ready to commit.
+- Updated at: 2026-10-06 01:48 Europe/Moscow.
 
 ## Verification evidence
 
@@ -66,7 +69,7 @@ Updated: 2026-10-05 04:42, Europe/Moscow.
 
 ## Next action
 
-- Next: add RED handler tests for service-token auth, tenant/member history scope and request validation. Then implement Analytics handler and Core owner-authorized endpoint.
+- F37 is GREEN and ready for its dedicated commit/push. Then start F38 by comparing recurring-expense behavior with v1 and writing deterministic RED acceptance tests.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
@@ -944,3 +947,19 @@ Updated: 2026-10-05 04:42, Europe/Moscow.
 - Observed RED for the policy, PostgreSQL scope/ledger, client contracts, Telegram callback, Web clipboard, and Android UI cases before implementation. Fixed V32's unsupported regex repetition limit with backward-compatible V33 migration; widened digest-test fixture cleanup after the full Core check exposed stale synthetic jobs.
 - GREEN: Core full `:services:core:check` with PostgreSQL passes; Python Telegram/presentation 91 passed; Web 44 passed plus TypeScript/Vite production build; contracts 51 passed/2 optional skips; Android connected instrumentation 31/31. Installed `com.decorix.finance.debug` APK matches the build, SHA-256 `7D7654246341328548CC5D2CE0AD1416C78EDB03171EA3820B7DAE05B43ED82B`. `git diff --check` passes; only line-ending notices remain.
 - F36 parity is complete. Next: inspect F37's dependencies and data source before starting its RED acceptance goal. F33 Kafka/ClickHouse replay and F31 price/waste data remain separate runtime/data gates.
+
+## E3.24 F37 personal basket inflation — 2026-10-06 00:39 MSK
+
+- F36 committed as `d758099` after full GREEN verification.
+- F37 uses the legacy 90-day Laspeyres basket: each exact/fuzzy-matched product needs two older and one in-window receipt line; median unit prices compare periods; older total paid is the weight; fewer than three eligible products yields no fabricated totals. Top rise/fall and receipt-price disclosure are preserved.
+- Source is the existing tenant/member-scoped ClickHouse receipt-price projection, with identity from Go `prices.SameProduct`; Java remains the authorization/API owner. User-facing parity includes Web, Telegram, and Android per `docs/specs/CONTINUATION.md`.
+- Baseline: prior F35 `go test ./...` + `go vet ./...` passed; F36 made no Go changes. F36 full Core/PostgreSQL, Web, Python, contracts, and Android evidence is recorded above. No F37 implementation started yet.
+- Next: add deterministic Go policy and member-scoped API/reader tests before implementation; prove the RED is behavioral.
+
+## E3.25 F37 personal basket inflation — 2026-10-06 01:48 MSK
+
+- Preserved the legacy 90-day Laspeyres basket, shared `prices.SameProduct` identity, median unit prices, old-paid-amount weights, top rise/fall ordering, and receipt-only disclosure. Each product requires two distinct older receipts and one in-window receipt; fewer than three eligible products returns explicit insufficient history without totals.
+- Observed RED for missing Go algorithm/HTTP handler, Java/Core API, Python client/renderer and `/inflation`, Web panel, Android DTO/screen, and contract shape. Fixed one pre-existing dangling `try` in the Python client tests before collection.
+- GREEN: Go `go test ./...` and `go vet ./...`; Core `:services:core:check` and isolated PostgreSQL member-scope API/BFF acceptance; Python Telegram/presentation 101 passed; contracts 52 passed/2 optional skips; Web 46/46 and production build; Android clean-AVD instrumentation 36/36. Built and installed the debug APK on isolated Android 14 AVD, launched `com.decorix.finance.debug/.MainActivity`; SHA-256 `8BA2E392D0F2F7FC3198BC604622DC646CAE2CB9E0BA2B7B5CF5C89600BC5E44`. `git diff --check` passes.
+- First Android run exposed the new tab pushing existing budget/debt tabs outside the viewport. Moved the price-trend tab after established navigation; the full instrumented suite then passed. The existing user AVD and its data were not used for installation.
+- F37 is complete. F33's live Kafka/ClickHouse replay remains NOT_RUN because no configured integration endpoint is available; it is not presented as verified. Next: commit/push F37, then begin F38 recurring-income/expense detection.

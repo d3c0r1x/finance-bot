@@ -17,6 +17,48 @@ import tools.jackson.databind.ObjectMapper;
 class ProductPriceHistoryClientTest {
     @Test
     @SuppressWarnings("unchecked")
+    void requestsPersonalInflationWithCoreResolvedMemberAndValidatesExplicitNoHistory() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        var asOf = java.time.Instant.parse("2026-10-06T12:00:00Z");
+        AtomicReference<String> path = new AtomicReference<>();
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        try {
+            server.createContext("/internal/v1/analytics/personal-inflation", exchange -> {
+                path.set(exchange.getRequestURI().getPath());
+                authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+                requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                byte[] body = ("{\"available\":false,\"reasonCode\":\"insufficient_history\","
+                        + "\"asOf\":\"2026-10-06T12:00:00Z\",\"windowDays\":90,\"productCount\":0,"
+                        + "\"basketBefore\":null,\"basketNow\":null,\"indexPercent\":null,"
+                        + "\"rising\":[],\"falling\":[]}").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                exchange.getResponseBody().write(body);
+                exchange.close();
+            });
+            server.start();
+            var client = new ProductPriceHistoryClient(new ObjectMapper(), base(server), "analytics-secret",
+                    Duration.ofSeconds(2));
+
+            var response = client.personalInflation(tenant, owner, asOf);
+
+            assertEquals("/internal/v1/analytics/personal-inflation", path.get());
+            assertEquals("Bearer analytics-secret", authorization.get());
+            Map<String, Object> sent = new ObjectMapper().readValue(requestBody.get(), Map.class);
+            assertEquals(tenant.toString(), sent.get("tenantId"));
+            assertEquals(owner.toString(), sent.get("ownerUserId"));
+            assertEquals("2026-10-06T12:00:00Z", sent.get("asOf"));
+            assertEquals(false, response.available());
+            assertEquals("insufficient_history", response.reasonCode());
+            assertEquals(null, response.basketBefore());
+        } finally { server.stop(0); }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void requestsShoppingCandidatesWithCoreResolvedMemberAndValidatesNoInventoryClaim() throws Exception {
         UUID tenant = UUID.randomUUID();
         UUID owner = UUID.randomUUID();

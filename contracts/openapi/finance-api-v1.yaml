@@ -847,6 +847,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Shopping history is temporarily unavailable }
+  /bff/tenants/{tenantId}/analytics/personal-inflation:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserPersonalInflation
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Authenticated member's 90-day price basket; insufficient history has null totals
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PersonalInflation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Personal receipt-price history is temporarily unavailable }
   /bff/tenants/{tenantId}/shopping/{productKey}/bought:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -1238,6 +1255,27 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { description: Telegram service credential is not configured or shopping history is unavailable }
+  /internal/v1/telegram/actions/personal-inflation:
+    post:
+      operationId: getTelegramPersonalInflation
+      security:
+        - telegramServiceToken: []
+      description: Returns personal receipt-price inflation for the verified Telegram actor; request cannot select a user or tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Member-scoped 90-day basket; insufficient history has null totals
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PersonalInflation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram or price analytics service is unavailable }
   /internal/v1/telegram/shopping/{productKey}/bought:
     parameters:
       - name: productKey
@@ -3143,6 +3181,21 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Shopping history is temporarily unavailable }
+  /api/v1/tenants/{tenantId}/analytics/personal-inflation:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getPersonalInflation
+      responses:
+        '200':
+          description: Authenticated member's 90-day price basket; insufficient history has null totals
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PersonalInflation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Personal receipt-price history is temporarily unavailable }
   /api/v1/tenants/{tenantId}/shopping/{productKey}/bought:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4551,6 +4604,49 @@ components:
           minItems: 1
           maxItems: 12
           items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    PersonalInflation:
+      type: object
+      additionalProperties: false
+      required: [available, reasonCode, asOf, windowDays, productCount, basketBefore, basketNow, indexPercent, rising, falling]
+      properties:
+        available: { type: boolean }
+        reasonCode: { type: string, enum: [available, insufficient_history] }
+        asOf: { type: string, format: date-time }
+        windowDays: { type: integer, const: 90 }
+        productCount: { type: integer, minimum: 0, maximum: 5000 }
+        basketBefore:
+          type: [string, 'null']
+          pattern: '^\d{1,24}\.\d{2}$'
+          description: Prior-spend weighted basket at earlier median prices; null with insufficient history.
+        basketNow:
+          type: [string, 'null']
+          pattern: '^\d{1,24}\.\d{2}$'
+          description: Same fixed basket repriced using receipt medians inside the 90-day window.
+        indexPercent:
+          type: [string, 'null']
+          pattern: '^-?\d{1,8}\.\d{2}$'
+        rising:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/PersonalInflationItem' }
+        falling:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/PersonalInflationItem' }
+      description: Member-scoped price changes from confirmed receipts, not official inflation statistics.
+    PersonalInflationItem:
+      type: object
+      additionalProperties: false
+      required: [productName, oldUnitPrice, newUnitPrice, oldSpendWeight, changePercent,
+                 olderPurchaseCount, windowPurchaseCount]
+      properties:
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        oldUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{2}$' }
+        newUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{2}$' }
+        oldSpendWeight: { type: string, pattern: '^\d{1,24}\.\d{2}$' }
+        changePercent: { type: string, pattern: '^-?\d{1,8}\.\d{2}$' }
+        olderPurchaseCount: { type: integer, minimum: 2, maximum: 5000 }
+        windowPurchaseCount: { type: integer, minimum: 1, maximum: 5000 }
     ShoppingList:
       type: object
       additionalProperties: false

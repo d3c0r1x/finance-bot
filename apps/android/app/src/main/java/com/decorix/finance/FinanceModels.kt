@@ -141,6 +141,29 @@ data class FinanceShoppingList(
 
 data class FinanceBlockedShoppingCandidate(val productKey: String, val productName: String, val reasonCode: String)
 
+data class FinancePersonalInflationItem(
+    val productName: String,
+    val oldUnitPrice: String,
+    val newUnitPrice: String,
+    val oldSpendWeight: String,
+    val changePercent: String,
+    val olderPurchaseCount: Int,
+    val windowPurchaseCount: Int,
+)
+
+data class FinancePersonalInflation(
+    val available: Boolean,
+    val reasonCode: String,
+    val asOf: String,
+    val windowDays: Int,
+    val productCount: Int,
+    val basketBefore: String?,
+    val basketNow: String?,
+    val indexPercent: String?,
+    val rising: List<FinancePersonalInflationItem>,
+    val falling: List<FinancePersonalInflationItem>,
+)
+
 data class FinanceTransactionDraft(
     val id: String,
     val tenantId: String,
@@ -412,6 +435,74 @@ internal object FinanceModels {
         }
         require(estimatedTotal.compareTo(totalRaw.toBigDecimal()) == 0) { "Shopping estimate does not match candidates" }
         return FinanceShoppingList(candidates, totalRaw, false, bought, muted, blocked)
+    }
+
+    fun personalInflation(json: JSONObject): FinancePersonalInflation {
+        val moneyPattern = Regex("^(?:0|[1-9]\\d{0,29})\\.\\d{2}$")
+        val signedPattern = Regex("^-?(?:0|[1-9]\\d{0,29})\\.\\d{2}$")
+        val available = json.getBoolean("available")
+        val reason = json.getString("reasonCode")
+        val asOf = json.getString("asOf")
+        val windowDays = exactInt(json, "windowDays")
+        val productCount = exactInt(json, "productCount")
+        val before = nullableString(json, "basketBefore")
+        val now = nullableString(json, "basketNow")
+        val index = nullableString(json, "indexPercent")
+        val risingJson = json.getJSONArray("rising")
+        val fallingJson = json.getJSONArray("falling")
+        requireNotNull(runCatching { Instant.parse(asOf) }.getOrNull()) { "Invalid personal inflation date" }
+        require(windowDays == 90 && productCount in 0..5000
+            && risingJson.length() <= 3 && fallingJson.length() <= 3) { "Invalid personal inflation window" }
+
+        fun decimal(raw: String, pattern: Regex, positive: Boolean): java.math.BigDecimal {
+            require(pattern.matches(raw)) { "Invalid personal inflation decimal" }
+            val amount = raw.toBigDecimalOrNull() ?: throw IllegalArgumentException("Invalid personal inflation decimal")
+            require(amount.signum() != 0 || !positive) { "Invalid personal inflation amount" }
+            require(!positive || amount.signum() > 0) { "Invalid personal inflation amount" }
+            return amount
+        }
+
+        if (!available) {
+            require(reason == "insufficient_history" && productCount == 0 && before == null && now == null
+                && index == null && risingJson.length() == 0 && fallingJson.length() == 0) {
+                "Unavailable personal inflation must not contain totals"
+            }
+            return FinancePersonalInflation(false, reason, asOf, windowDays, productCount, null, null, null,
+                emptyList(), emptyList())
+        }
+
+        require(reason == "available" && productCount >= 3 && before != null && now != null && index != null) {
+            "Available personal inflation requires totals and three products"
+        }
+        decimal(before, moneyPattern, positive = true)
+        decimal(now, moneyPattern, positive = true)
+        require(decimal(index, signedPattern, positive = false) > java.math.BigDecimal("-100.00")) {
+            "Invalid personal inflation index"
+        }
+        val names = mutableSetOf<String>()
+        fun parseItems(items: JSONArray, isRising: Boolean): List<FinancePersonalInflationItem> =
+            (0 until items.length()).map { position ->
+                val item = items.getJSONObject(position)
+                val name = item.getString("productName")
+                val oldPrice = item.getString("oldUnitPrice")
+                val newPrice = item.getString("newUnitPrice")
+                val weight = item.getString("oldSpendWeight")
+                val change = item.getString("changePercent")
+                val older = exactInt(item, "olderPurchaseCount")
+                val inWindow = exactInt(item, "windowPurchaseCount")
+                val changeAmount = decimal(change, signedPattern, positive = false)
+                require(name.isNotBlank() && name.length <= 200 && names.add(name.lowercase(java.util.Locale.ROOT))
+                    && older in 2..5000 && inWindow in 1..5000
+                    && (if (isRising) changeAmount.signum() > 0 else changeAmount.signum() < 0)) {
+                    "Invalid personal inflation item"
+                }
+                decimal(oldPrice, moneyPattern, positive = true)
+                decimal(newPrice, moneyPattern, positive = true)
+                decimal(weight, moneyPattern, positive = true)
+                FinancePersonalInflationItem(name, oldPrice, newPrice, weight, change, older, inWindow)
+            }
+        return FinancePersonalInflation(true, reason, asOf, windowDays, productCount, before, now, index,
+            parseItems(risingJson, isRising = true), parseItems(fallingJson, isRising = false))
     }
 
     fun budgetProposal(json: JSONObject) = BudgetProposal(

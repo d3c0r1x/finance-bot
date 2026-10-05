@@ -46,6 +46,7 @@ def test_basic_commands_restore_persistent_menu(monkeypatch, command):
         assert "/history" in sent[0].text
         assert "/report" in sent[0].text
         assert "/budget" in sent[0].text
+        assert "/inflation" in sent[0].text
 
 
 def test_link_command_redeems_code_for_telegram_sender_id_only(monkeypatch):
@@ -766,6 +767,57 @@ def test_shopping_bought_callback_uses_saved_product_key_and_refreshes_hidden_re
     edit = next(method for method in sent if method.__class__.__name__ == "EditMessageText")
     assert "Уже куплено" in edit.text
     assert "обычного интервала" in edit.text
+
+
+def test_personal_inflation_command_uses_linked_actor_and_labels_receipt_prices(monkeypatch):
+    sent = []
+    calls = []
+    inflation = {
+        "available": True,
+        "reasonCode": "available",
+        "asOf": "2026-10-06T12:00:00Z",
+        "windowDays": 90,
+        "productCount": 3,
+        "basketBefore": "1000.00",
+        "basketNow": "1050.00",
+        "indexPercent": "5.00",
+        "rising": [],
+        "falling": [],
+    }
+
+    class FakeCore:
+        async def get_personal_inflation(self, token):
+            calls.append(token)
+            return inflation
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(
+        message_id=960,
+        date=datetime(2026, 10, 6, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"),
+        from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/inflation",
+        entities=[MessageEntity(type="bot_command", offset=0, length=10)],
+    )
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "owner"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=960, message=message)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    assert calls == ["opaque-context"]
+    assert len(sent) == 1
+    assert sent[0].__class__.__name__ == "SendMessage"
+    assert "1 000,00" in sent[0].text
+    assert "1 050,00" in sent[0].text
+    assert "только цены из ваших чеков" in sent[0].text.lower()
 
 
 def test_debts_command_rejects_foreign_tenant_response_without_disclosing_debt(monkeypatch):

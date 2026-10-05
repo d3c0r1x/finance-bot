@@ -531,9 +531,22 @@ features:
     feature: "Личная инфляция по корзине, окно 90 дней, top rise/fall"
     target: "G inflation worker; J/P/W выдача"
     acceptance: "≥3 товара; ≥2 покупки до окна и ≥1 внутри; вес — прежние траты, не официальная инфляция"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/analytics-go/prices/inflation_test.go
+      - services/analytics-go/prices/inflation_api_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/ProductPriceHistoryClientTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ProductPriceHistoryServiceTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/presentation/tests/test_report_renderer.py
+      - apps/web/src/PersonalInflationPanel.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "F37 is complete at its feature acceptance boundary: Go `go test ./...` and `go vet ./...`; Core check and isolated PostgreSQL active-member API/BFF acceptance; Python Telegram/presentation 101 passed; contracts 52 passed/2 optional skips; Web 46/46 and production build; Android isolated-AVD instrumentation 36/36 with debug APK installed and launched. The user-facing result uses confirmed receipt prices and explicitly reports insufficient history without fabricated totals. F33 live Kafka/ClickHouse replay remains a separate NOT_RUN runtime gate."
     intentional_differences: []
   - id: F38
     feature: "Регулярные расходы/доходы, недельные/месячные серии"

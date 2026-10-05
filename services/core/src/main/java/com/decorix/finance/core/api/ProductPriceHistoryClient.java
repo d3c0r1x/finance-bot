@@ -1,5 +1,8 @@
 package com.decorix.finance.core.api;
 
+import com.decorix.finance.core.api.InflationApi.PersonalInflation;
+import com.decorix.finance.core.api.InflationApi.PersonalInflationItem;
+import com.decorix.finance.core.api.InflationApi.PersonalInflationRequest;
 import com.decorix.finance.core.api.ProductApi.PriceCompareRequest;
 import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogRequest;
@@ -15,9 +18,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.math.BigDecimal;
 import java.util.List;
 import java.math.RoundingMode;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -168,6 +173,102 @@ public class ProductPriceHistoryClient {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "Shopping analytics response is invalid", ex);
         }
+    }
+
+    public PersonalInflation personalInflation(UUID tenantId, UUID ownerUserId, Instant asOf) {
+        if (serviceUrl.isBlank() || serviceToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Price analytics service is not configured");
+        }
+        if (tenantId == null || ownerUserId == null || asOf == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Personal inflation scope is required");
+        }
+        PersonalInflationRequest request = new PersonalInflationRequest(tenantId, ownerUserId, asOf);
+        try {
+            String body = json.writeValueAsString(request);
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(serviceUrl.replaceAll("/+$", "")
+                            + "/internal/v1/analytics/personal-inflation"))
+                    .timeout(timeout)
+                    .header("Authorization", "Bearer " + serviceToken)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body)).build();
+            HttpResponse<InputStream> response = http.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] responseBody;
+            try (InputStream stream = response.body()) {
+                responseBody = stream.readNBytes(MAX_RESPONSE_BYTES + 1);
+            }
+            if (responseBody.length > MAX_RESPONSE_BYTES || response.statusCode() != 200) {
+                throw unavailableInflation();
+            }
+            PersonalInflation result = json.readValue(responseBody, PersonalInflation.class);
+            validatePersonalInflation(result, request);
+            return result;
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Personal inflation request was interrupted", ex);
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Personal inflation service is unavailable", ex);
+        } catch (IllegalArgumentException | JacksonException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Personal inflation response is incomplete", ex);
+        }
+    }
+
+    private static void validatePersonalInflation(PersonalInflation result, PersonalInflationRequest request) {
+        if (result == null || result.asOf() == null || !result.asOf().equals(request.asOf())
+                || result.windowDays() != 90 || result.productCount() < 0 || result.productCount() > 5000
+                || result.rising() == null || result.falling() == null
+                || result.rising().size() > 3 || result.falling().size() > 3) {
+            throw invalidInflationResponse();
+        }
+        if (!result.available()) {
+            if (!"insufficient_history".equals(result.reasonCode()) || result.productCount() != 0
+                    || result.basketBefore() != null || result.basketNow() != null || result.indexPercent() != null
+                    || !result.rising().isEmpty() || !result.falling().isEmpty()) {
+                throw invalidInflationResponse();
+            }
+            return;
+        }
+        if (!"available".equals(result.reasonCode()) || result.productCount() < 3
+                || !positiveMoney(result.basketBefore()) || !nonNegativeMoney(result.basketNow())
+                || !signedMoney(result.indexPercent())) {
+            throw invalidInflationResponse();
+        }
+        validateInflationItems(result.rising(), true);
+        validateInflationItems(result.falling(), false);
+    }
+
+    private static void validateInflationItems(List<PersonalInflationItem> items, boolean rising) {
+        for (PersonalInflationItem item : items) {
+            if (item == null || item.productName() == null || item.productName().isBlank()
+                    || !positiveMoney(item.oldUnitPrice()) || !positiveMoney(item.newUnitPrice())
+                    || !positiveMoney(item.oldSpendWeight()) || !signedMoney(item.changePercent())
+                    || item.olderPurchaseCount() < 2 || item.windowPurchaseCount() < 1
+                    || rising && new BigDecimal(item.changePercent()).signum() <= 0
+                    || !rising && new BigDecimal(item.changePercent()).signum() >= 0) {
+                throw invalidInflationResponse();
+            }
+        }
+    }
+
+    private static boolean signedMoney(String value) {
+        if (value == null) return false;
+        try {
+            BigDecimal amount = new BigDecimal(value);
+            return Math.max(0, amount.scale()) <= 2;
+        } catch (NumberFormatException invalid) { return false; }
+    }
+
+    private static ResponseStatusException unavailableInflation() {
+        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "Personal inflation service is unavailable");
+    }
+
+    private static ResponseStatusException invalidInflationResponse() {
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Personal inflation response is incomplete");
     }
 
     private static void validateShoppingResponse(ShoppingList result) {

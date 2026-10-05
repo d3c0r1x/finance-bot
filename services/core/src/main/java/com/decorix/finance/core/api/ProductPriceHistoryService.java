@@ -5,6 +5,7 @@ import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingCandidate;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
+import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.domain.ProductIdentityPolicy;
 import java.time.Instant;
 import java.util.List;
@@ -153,6 +154,16 @@ public class ProductPriceHistoryService {
 
     public ShoppingList unmuteShopping(UUID tenantId, UUID ownerUserId, String productKey) {
         return updateShoppingDecision(tenantId, ownerUserId, productKey, "unmute");
+    }
+
+    public PersonalInflation personalInflation(UUID tenantId, String subject) {
+        UUID userId = memberForSubject(tenantId, subject);
+        return analytics.personalInflation(tenantId, userId, Instant.now());
+    }
+
+    public PersonalInflation personalInflation(UUID tenantId, UUID ownerUserId) {
+        UUID userId = activeMember(tenantId, ownerUserId);
+        return analytics.personalInflation(tenantId, userId, Instant.now());
     }
 
     private ShoppingList shoppingForMember(UUID tenantId, UUID userId) {

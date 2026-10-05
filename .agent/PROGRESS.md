@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 00:33, Europe/Moscow.
+Updated: 2026-10-06 01:48, Europe/Moscow.
 
 ## Global plan
 
@@ -39,17 +39,18 @@ Updated: 2026-10-06 00:33, Europe/Moscow.
 | F31 | Report charts and PNG | IN PROGRESS — Web/Android/PNG category, day and limit charts verified; price/waste awaits F33/F40 | F33, F40 | pending |
 | F32 | Durable daily and weekly digest delivery | COMPLETE — PostgreSQL schedules/outbox, Core API, Python worker, Web/Android settings | F25 rendering | pending |
 | F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
-| F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | pending |
+| F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
+| F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | pending |
 
 ## Current goal
 
-- ID and outcome: F36 — bought marks, mute/unmute, visible blocks, and copy active purchase suggestions.
-- Status: COMPLETE — implementation and all feature gates are GREEN; next inspect F37 dependencies and authoritative data.
-- Acceptance: bought marks never create expenses, expire after one median interval or a newer real receipt; mutes are member-local; blocks show a reason; clipboard includes active candidates only.
-- Ruling: F32 needed no new decision: its approved ADR-016 design is complete (PostgreSQL preferences/outbox, Python Telegram delivery, preserved local-time defaults). F36 stores decisions under tenant/member RLS, preserves `user_product_decisions.confirmed` as the block source, and applies bought → blocked → muted precedence. F33 runtime replay remains a separate NOT_RUN integration gate; F31 price/waste reports remain absent until F33/F40 provide authoritative datasets.
+- ID and outcome: F37 — personal 90-day price index from the member's own receipt basket.
+- Status: COMPLETE — implementation and planned acceptance gates are GREEN; F33 live Kafka/ClickHouse replay remains a separately tracked runtime gate.
+- Acceptance: product must have at least two purchases before the 90-day window and one inside; at least three eligible products; prior spend weights each price ratio; show top three rise/fall; label as receipt prices, never official inflation; insufficient history is explicit and contains no invented zero totals.
+- Ruling: preserve v1's `services/inflation.py` and `services/purchase_history.py` behavior, including the shared Go `prices.SameProduct` identity and median unit prices. The continuation spec makes every user scenario available on Android. F33 Kafka/ClickHouse live replay remains a separately recorded runtime gate; Go service tests and scoped API acceptance can proceed against the existing projection contract.
 - User choices: F31 charts use Web/PNG now; price and optional-purchase series wait for F33/F40 data. No placeholders. Commit each fully verified goal.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `d001969` plus current F36 changes.
-- Updated at: 2026-10-06 00:33 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `d758099` plus completed F37 work, ready to commit.
+- Updated at: 2026-10-06 01:48 Europe/Moscow.
 
 ## Verification evidence
 
@@ -68,7 +69,7 @@ Updated: 2026-10-06 00:33, Europe/Moscow.
 
 ## Next action
 
-- F36 is GREEN; commit only its source, tests, migration, contract, parity, and progress files. Then inspect F37 dependencies and start its next independently testable goal.
+- F37 is GREEN and ready for its dedicated commit/push. Then start F38 by comparing recurring-expense behavior with v1 and writing deterministic RED acceptance tests.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
@@ -938,3 +939,11 @@ Updated: 2026-10-06 00:33, Europe/Moscow.
 - Goal active. Inherited from the approved `PLAN.md` and legacy: keep bought marks separate from transactions; suppress only while mark is newer than the latest receipt and younger than one median interval; persist member-local mutes; preserve confirmed “не брать” decisions with a visible reason; copy only active suggestions.
 - Planned ownership: Core/PostgreSQL validates active tenant membership and owns marks/mutes; existing `user_product_decisions.confirmed` remains the blocking source. Telegram actor actions, Web BFF with CSRF, and Android direct API all use the same Core rules.
 - Next: write deterministic policy and PostgreSQL/API tests first, observe RED, then implement API, clients, localized hidden-state explanations and clipboard behavior.
+
+## E3.25 F37 personal basket inflation — 2026-10-06 01:48 MSK
+
+- Preserved the legacy 90-day Laspeyres basket, shared `prices.SameProduct` identity, median unit prices, old-paid-amount weights, top rise/fall ordering, and receipt-only disclosure. Each product requires two distinct older receipts and one in-window receipt; fewer than three eligible products returns explicit insufficient history without totals.
+- Observed RED for missing Go algorithm/HTTP handler, Java/Core API, Python client/renderer and `/inflation`, Web panel, Android DTO/screen, and contract shape. Fixed one pre-existing dangling `try` in the Python client tests before collection.
+- GREEN: Go `go test ./...` and `go vet ./...`; Core `:services:core:check` and isolated PostgreSQL member-scope API/BFF acceptance; Python Telegram/presentation 101 passed; contracts 52 passed/2 optional skips; Web 46/46 and production build; Android clean-AVD instrumentation 36/36. Built and installed the debug APK on isolated Android 14 AVD, launched `com.decorix.finance.debug/.MainActivity`; SHA-256 `8BA2E392D0F2F7FC3198BC604622DC646CAE2CB9E0BA2B7B5CF5C89600BC5E44`. `git diff --check` passes.
+- First Android run exposed the new tab pushing existing budget/debt tabs outside the viewport. Moved the price-trend tab after established navigation; the full instrumented suite then passed. The existing user AVD and its data were not used for installation.
+- F37 is complete. F33's live Kafka/ClickHouse replay remains NOT_RUN because no configured integration endpoint is available; it is not presented as verified. Next: commit/push F37, then begin F38 recurring-income/expense detection.

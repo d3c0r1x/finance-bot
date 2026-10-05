@@ -95,7 +95,7 @@ class MainActivity : ComponentActivity() {
                         onDebtCreate = ::createDebt, onDebtPay = ::payDebt, onDebtAdjust = ::adjustDebt,
                         onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
                         onShoppingLoad = ::loadShoppingCandidates, onShoppingDecision = ::applyShoppingDecision,
-                        onShoppingCopy = ::copyShoppingList)
+                        onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation)
                 }
             }
         }
@@ -300,6 +300,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadPersonalInflation() {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        ui = ui.copy(personalInflationLoading = true, personalInflationError = null)
+        executor.execute {
+            runCatching { api.personalInflation(tenantId) }
+                .onSuccess { inflation ->
+                    if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(personalInflationLoading = false, personalInflation = inflation,
+                            personalInflationError = null)
+                    }
+                }
+                .onFailure { error ->
+                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    else if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(personalInflationLoading = false,
+                            personalInflationError = error.message ?: "Request failed")
+                    }
+                }
+        }
+    }
+
     private fun applyShoppingDecision(productKey: String, action: String) {
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
         ui = ui.copy(shoppingLoading = true, shoppingError = null)
@@ -365,6 +386,9 @@ data class FinanceUiState(
     val shoppingList: FinanceShoppingList? = null,
     val shoppingLoading: Boolean = false,
     val shoppingError: String? = null,
+    val personalInflation: FinancePersonalInflation? = null,
+    val personalInflationLoading: Boolean = false,
+    val personalInflationError: String? = null,
 )
 
 private data class FinanceWorkspaceSnapshot(
@@ -404,7 +428,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
                           onShoppingLoad: () -> Unit = {},
                           onShoppingDecision: (String, String) -> Unit = { _, _ -> },
-                          onShoppingCopy: (String) -> Unit = {}) {
+                          onShoppingCopy: (String) -> Unit = {},
+                          onPersonalInflationLoad: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -472,14 +497,18 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 Text(state.tenants.first().name, style = MaterialTheme.typography.headlineSmall)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile").forEach { screen ->
+                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile", "inflation").forEach { screen ->
                         TextButton(onClick = {
                             activeScreen = screen
                             if (screen == "shopping" && state.shoppingList == null && !state.shoppingLoading) onShoppingLoad()
+                            if (screen == "inflation" && state.personalInflation == null && !state.personalInflationLoading) {
+                                onPersonalInflationLoad()
+                            }
                         }) {
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
+                                "inflation" -> if (russian) "Динамика цен" else "Price trend"
                                 "budgets" -> if (russian) "Бюджеты" else "Budgets"
                                 "debts" -> if (russian) "Долги" else "Debts"
                                 "reports" -> if (russian) "Отчёты" else "Reports"
@@ -493,6 +522,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "overview" -> DashboardScreen(state, language)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
+                    "inflation" -> PersonalInflationScreen(Modifier.weight(1f), state, language,
+                        onRetry = onPersonalInflationLoad)
                     "budgets" -> BudgetScreen(state, language, onBudgetUpdate, onBudgetReset, onBudgetProposal, onBudgetApply)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad)
@@ -535,6 +566,74 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
         }
         if (state.busy) androidx.compose.material3.CircularProgressIndicator()
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun PersonalInflationScreen(modifier: Modifier, state: FinanceUiState, language: String, onRetry: () -> Unit) {
+    val russian = language == "ru"
+    val inflation = state.personalInflation
+    LazyColumn(modifier = modifier.testTag("personal-inflation"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (russian) "Личная динамика цен · 90 дней" else "Personal price trend · 90 days",
+                    style = MaterialTheme.typography.titleLarge)
+                Text(if (russian) "Цены только из ваших чеков, не официальная статистика."
+                    else "Receipt prices only; not official inflation statistics.")
+            }
+        }
+        when {
+            state.personalInflationLoading -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            state.personalInflationError != null -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (russian) "Динамика цен временно недоступна." else "Price trend is temporarily unavailable.")
+                    Button(onClick = onRetry) { Text(if (russian) "Повторить" else "Retry") }
+                }
+            }
+            inflation == null -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            !inflation.available -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(if (russian) "Недостаточно истории для расчёта." else "There is not enough purchase history.")
+                    Text(if (russian) "Нужно минимум 3 товара: для каждого — 2 покупки до окна и 1 внутри 90-дневного окна."
+                        else "At least 3 products are needed: each must have 2 purchases before the window and 1 within it.")
+                }
+            }
+            else -> {
+                val basketBefore = inflation.basketBefore ?: return@LazyColumn
+                val basketNow = inflation.basketNow ?: return@LazyColumn
+                val indexPercent = inflation.indexPercent ?: return@LazyColumn
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("${if (russian) "Корзина по старым ценам" else "Basket at earlier prices"}: $basketBefore ${if (russian) "₽" else "RUB"}")
+                            Text("${if (russian) "Та же корзина по новым ценам" else "Same basket at recent prices"}: $basketNow ${if (russian) "₽" else "RUB"}")
+                            Text("${if (russian) "Личный индекс" else "Personal index"}: $indexPercent% · " +
+                                if (russian) "${inflation.productCount} товара" else "${inflation.productCount} products")
+                        }
+                    }
+                }
+                item { Text(if (russian) "Сильнее подорожали" else "Largest increases", style = MaterialTheme.typography.titleMedium) }
+                if (inflation.rising.isEmpty()) item { Text(if (russian) "Нет заметных изменений." else "No notable changes.") }
+                items(inflation.rising) { product ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Text("${product.productName} · ${product.oldUnitPrice} → ${product.newUnitPrice} " +
+                            "${if (russian) "₽" else "RUB"} · ${product.changePercent}% · " +
+                            "${if (russian) "вес" else "weight"} ${product.oldSpendWeight} ${if (russian) "₽" else "RUB"}",
+                            Modifier.padding(14.dp))
+                    }
+                }
+                item { Text(if (russian) "Сильнее подешевели" else "Largest decreases", style = MaterialTheme.typography.titleMedium) }
+                if (inflation.falling.isEmpty()) item { Text(if (russian) "Нет заметных изменений." else "No notable changes.") }
+                items(inflation.falling) { product ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Text("${product.productName} · ${product.oldUnitPrice} → ${product.newUnitPrice} " +
+                            "${if (russian) "₽" else "RUB"} · ${product.changePercent}% · " +
+                            "${if (russian) "вес" else "weight"} ${product.oldSpendWeight} ${if (russian) "₽" else "RUB"}",
+                            Modifier.padding(14.dp))
+                    }
+                }
+            }
+        }
     }
 }
 

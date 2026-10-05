@@ -11,6 +11,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,57 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 class ProductPriceHistoryServiceTest {
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void personalInflationResolvesOnlyAuthenticatedActiveMemberBeforeAnalyticsCall() {
+        UUID tenantId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        String subject = "keycloak-subject";
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        TransactionTemplate transaction = mock(TransactionTemplate.class);
+        ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        when(jdbc.queryForObject(eq("SELECT set_config('app.tenant_id', ?, true)"), eq(String.class), eq(tenantId.toString())))
+                .thenReturn(tenantId.toString());
+        doAnswer(invocation -> List.of(ownerId)).when(jdbc).query(anyString(), any(RowMapper.class),
+                eq(tenantId), eq(subject));
+        var expected = new PersonalInflation(false, "insufficient_history", java.time.Instant.parse("2026-10-06T12:00:00Z"),
+                90, 0, null, null, null, List.of(), List.of());
+        when(analytics.personalInflation(eq(tenantId), eq(ownerId), any())).thenReturn(expected);
+
+        var service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+
+        assertEquals(expected, service.personalInflation(tenantId, subject));
+        verify(analytics).personalInflation(eq(tenantId), eq(ownerId), any());
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void personalInflationDoesNotQueryAnalyticsForInactiveMember() {
+        UUID tenantId = UUID.randomUUID();
+        String subject = "inactive-subject";
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        TransactionTemplate transaction = mock(TransactionTemplate.class);
+        ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        when(jdbc.queryForObject(eq("SELECT set_config('app.tenant_id', ?, true)"), eq(String.class), eq(tenantId.toString())))
+                .thenReturn(tenantId.toString());
+        doAnswer(invocation -> List.of()).when(jdbc).query(anyString(), any(RowMapper.class), eq(tenantId), eq(subject));
+        ProductPriceHistoryService service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.personalInflation(tenantId, subject));
+
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
+        verify(analytics, never()).personalInflation(any(UUID.class), any(UUID.class), any());
+    }
+
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void shoppingCandidatesResolveOnlyAuthenticatedActiveMemberBeforeAnalyticsCall() {

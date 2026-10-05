@@ -11,6 +11,8 @@ from io import BytesIO
 
 MONEY_PATTERN = re.compile(r"^\d+\.\d{2}$")
 SIGNED_MONEY_PATTERN = re.compile(r"^-?\d+\.\d{2}$")
+PERSONAL_INFLATION_MONEY_PATTERN = re.compile(r"^(?:0|[1-9]\d{0,29})\.\d{2}$")
+PERSONAL_INFLATION_PERCENT_PATTERN = re.compile(r"^-?(?:0|[1-9]\d{0,29})\.\d{2}$")
 PNG_SIZE = (960, 640)
 PRODUCT_PNG_WIDTH = 960
 
@@ -552,6 +554,125 @@ def render_shopping_candidates(shopping: Mapping[str, object]) -> str:
             lines.append(f"• {candidate['productName']} — вы отметили «не брать».")
     lines.append("Это подсказка по чекам, не учёт запасов: бот не знает, что уже есть дома.")
     return "\n".join(lines)
+
+
+def render_personal_inflation(inflation: Mapping[str, object]) -> str:
+    if not isinstance(inflation, Mapping) or type(inflation.get("available")) is not bool \
+            or inflation.get("reasonCode") not in {"available", "insufficient_history"} \
+            or type(inflation.get("windowDays")) is not int or inflation["windowDays"] != 90 \
+            or type(inflation.get("productCount")) is not int or not 0 <= inflation["productCount"] <= 5000:
+        raise ValueError("Personal inflation response is invalid")
+    as_of = inflation.get("asOf")
+    if not isinstance(as_of, str):
+        raise ValueError("Personal inflation date must be timezone-aware")
+    try:
+        parsed_as_of = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Personal inflation date must be timezone-aware") from error
+    if parsed_as_of.tzinfo is None or parsed_as_of.utcoffset() is None:
+        raise ValueError("Personal inflation date must be timezone-aware")
+    rising = inflation.get("rising")
+    falling = inflation.get("falling")
+    if not isinstance(rising, list) or not isinstance(falling, list) or len(rising) > 3 or len(falling) > 3:
+        raise ValueError("Personal inflation top lists must be bounded")
+
+    available = inflation["available"]
+    totals = (inflation.get("basketBefore"), inflation.get("basketNow"), inflation.get("indexPercent"))
+    if not available:
+        if inflation["reasonCode"] != "insufficient_history" or inflation["productCount"] != 0 \
+                or any(value is not None for value in totals) or rising or falling:
+            raise ValueError("Unavailable personal inflation must not invent totals")
+    else:
+        if inflation["reasonCode"] != "available" or inflation["productCount"] < 3 \
+                or any(not isinstance(value, str) for value in totals):
+            raise ValueError("Available personal inflation requires three products and totals")
+        before = _personal_inflation_decimal(totals[0], "basketBefore", positive=True)
+        now = _personal_inflation_decimal(totals[1], "basketNow", positive=True)
+        index = _personal_inflation_decimal(totals[2], "indexPercent", positive=False, percent=True)
+        if before <= 0 or now <= 0 or index <= Decimal("-100"):
+            raise ValueError("Personal inflation totals are outside valid ranges")
+
+    seen_names: set[str] = set()
+
+    def validate_items(items: list, *, rising_direction: bool) -> list[
+        tuple[str, Decimal, Decimal, Decimal, Decimal, int, int]
+    ]:
+        normalized = []
+        for item in items:
+            if not isinstance(item, Mapping):
+                raise ValueError("Personal inflation item must be an object")
+            name = item.get("productName")
+            older_count = item.get("olderPurchaseCount")
+            window_count = item.get("windowPurchaseCount")
+            if not isinstance(name, str) or not name.strip() or len(name) > 200 \
+                    or name.casefold() in seen_names \
+                    or type(older_count) is not int or not 2 <= older_count <= 5000 \
+                    or type(window_count) is not int or not 1 <= window_count <= 5000:
+                raise ValueError("Personal inflation item fields are invalid")
+            old_price = _personal_inflation_decimal(item.get("oldUnitPrice"), "oldUnitPrice", positive=True)
+            new_price = _personal_inflation_decimal(item.get("newUnitPrice"), "newUnitPrice", positive=True)
+            weight = _personal_inflation_decimal(item.get("oldSpendWeight"), "oldSpendWeight", positive=True)
+            change = _personal_inflation_decimal(item.get("changePercent"), "changePercent",
+                                                  positive=False, percent=True)
+            if rising_direction and change <= 0 or not rising_direction and change >= 0:
+                raise ValueError("Personal inflation item direction does not match its price change")
+            seen_names.add(name.casefold())
+            normalized.append((name, old_price, new_price, weight, change, older_count, window_count))
+        return normalized
+
+    if available:
+        rising_items = validate_items(rising, rising_direction=True)
+        falling_items = validate_items(falling, rising_direction=False)
+    else:
+        rising_items = []
+        falling_items = []
+
+    lines = [
+        "Личная динамика цен за 90 дней",
+        f"Срез на {parsed_as_of:%d.%m.%Y}.",
+        "Только цены из ваших чеков; это не официальная статистика.",
+    ]
+    if not available:
+        lines.extend(("", "Недостаточно истории для расчёта.",
+                      "Нужно минимум 3 товара: для каждого — 2 покупки до окна и 1 покупка за последние 90 дней."))
+        return "\n".join(lines)
+
+    assert isinstance(totals[0], str) and isinstance(totals[1], str) and isinstance(totals[2], str)
+    before = Decimal(totals[0])
+    now = Decimal(totals[1])
+    index = Decimal(totals[2])
+    index_display = f"{index:+.2f}".replace(".", ",")
+    lines.extend((
+        "",
+        f"Корзина по старым ценам: {_format_rub(before)} ₽",
+        f"Та же корзина по новым ценам: {_format_rub(now)} ₽",
+        f"Личный индекс: {index_display}% ({inflation['productCount']} товара)",
+    ))
+    for items, title in ((rising_items, "Сильнее подорожали"), (falling_items, "Сильнее подешевели")):
+        lines.extend(("", f"{title}:"))
+        if not items:
+            lines.append("Нет заметных изменений.")
+            continue
+        for name, old_price, new_price, weight, change, older_count, window_count in items:
+            signed_change = f"{change:+.2f}".replace(".", ",")
+            lines.append(
+                f"• {name}: {_format_rub(old_price)} → {_format_rub(new_price)} ₽ "
+                f"({signed_change}%; вес {_format_rub(weight)} ₽; покупок {older_count}+{window_count})"
+            )
+    return "\n".join(lines)
+
+
+def _personal_inflation_decimal(value: object, field: str, *, positive: bool, percent: bool = False) -> Decimal:
+    pattern = PERSONAL_INFLATION_PERCENT_PATTERN if percent else PERSONAL_INFLATION_MONEY_PATTERN
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise ValueError(f"{field} must be a two-place decimal string")
+    try:
+        amount = Decimal(value)
+    except InvalidOperation as error:
+        raise ValueError(f"{field} must be a finite decimal") from error
+    if not amount.is_finite() or positive and amount <= 0:
+        raise ValueError(f"{field} must be finite and positive")
+    return amount
 
 
 def _format_rub(amount: Decimal) -> str:

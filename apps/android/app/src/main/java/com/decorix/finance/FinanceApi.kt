@@ -150,6 +150,10 @@ class FinanceApi(context: Context) {
         execute("/api/v1/tenants/$tenantId/shopping", "GET"),
     ))
 
+    fun personalInflation(tenantId: String): FinancePersonalInflation = FinanceModels.personalInflation(JSONObject(
+        execute("/api/v1/tenants/$tenantId/analytics/personal-inflation", "GET"),
+    ))
+
     fun markShoppingBought(tenantId: String, productKey: String): FinanceShoppingList = FinanceModels.shoppingList(JSONObject(
         execute("/api/v1/tenants/$tenantId/shopping/${android.net.Uri.encode(productKey)}/bought", "POST", "{}"),
     ))

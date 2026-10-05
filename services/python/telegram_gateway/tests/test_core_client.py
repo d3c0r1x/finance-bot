@@ -563,6 +563,71 @@ def test_core_client_rejects_fabricated_product_baseline_without_history():
         raise AssertionError("product response with a fabricated baseline was accepted")
 
 
+def test_core_client_requests_scoped_personal_inflation_and_validates_no_history():
+    seen = []
+    response = {"available": False, "reasonCode": "insufficient_history", "asOf": "2026-10-06T12:00:00Z",
+                "windowDays": 90, "productCount": 0, "basketBefore": None, "basketNow": None,
+                "indexPercent": None, "rising": [], "falling": []}
+
+    async def inflation(request):
+        seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
+        return web.json_response(response)
+
+    async def exercise():
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/actions/personal-inflation", inflation)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "inflation-service-secret")
+            return await client.get_personal_inflation("opaque-actor-context")
+
+    result = asyncio.run(exercise())
+    assert result == response
+    assert seen == [("/internal/v1/telegram/actions/personal-inflation", "inflation-service-secret",
+                     {"token": "opaque-actor-context"})]
+
+
+def test_core_client_rejects_personal_inflation_with_fake_totals_or_too_few_products():
+    no_history = {"available": False, "reasonCode": "insufficient_history", "asOf": "2026-10-06T12:00:00Z",
+                  "windowDays": 90, "productCount": 0, "basketBefore": None, "basketNow": None,
+                  "indexPercent": None, "rising": [], "falling": []}
+    invalid = [dict(no_history, basketBefore="0.00"),
+               dict(no_history, available=True, reasonCode="available", productCount=2,
+                    basketBefore="100.00", basketNow="100.00", indexPercent="0.00")]
+    for body in invalid:
+        with pytest.raises(TelegramCoreError):
+            TelegramCoreClient._validated_personal_inflation(body)
+
+
+def test_core_client_validates_personal_inflation_product_scope_and_direction():
+    from services.python.telegram_gateway.core_client import TelegramCoreClient
+
+    body = {
+        "available": True,
+        "reasonCode": "available",
+        "asOf": "2026-10-06T12:00:00Z",
+        "windowDays": 90,
+        "productCount": 3,
+        "basketBefore": "1250.00",
+        "basketNow": "1275.00",
+        "indexPercent": "2.00",
+        "rising": [{"productName": "Coffee", "oldUnitPrice": "100.00", "newUnitPrice": "110.00",
+                    "oldSpendWeight": "500.00", "changePercent": "10.00",
+                    "olderPurchaseCount": 2, "windowPurchaseCount": 1}],
+        "falling": [{"productName": "Milk", "oldUnitPrice": "200.00", "newUnitPrice": "180.00",
+                     "oldSpendWeight": "700.00", "changePercent": "-10.00",
+                     "olderPurchaseCount": 3, "windowPurchaseCount": 2}],
+    }
+
+    assert TelegramCoreClient._validated_personal_inflation(body) == body
+
+    invalid = {**body, "falling": [{**body["falling"][0], "productName": "coffee"}]}
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_personal_inflation(invalid)
+    invalid = {**body, "rising": [{**body["rising"][0], "changePercent": "-10.00"}]}
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_personal_inflation(invalid)
+
+
 def product_card():
     history = [
         {"receiptId": "r1", "itemId": "i1", "purchasedAt": "2026-09-01T10:00:00Z", "merchant": "Market A",

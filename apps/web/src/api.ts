@@ -171,6 +171,15 @@ export type ShoppingList = {
   boughtCandidates: ShoppingCandidate[]; mutedCandidates: ShoppingCandidate[];
   blockedCandidates: BlockedShoppingCandidate[];
 };
+export type PersonalInflationItem = {
+  productName: string; oldUnitPrice: string; newUnitPrice: string; oldSpendWeight: string; changePercent: string;
+  olderPurchaseCount: number; windowPurchaseCount: number;
+};
+export type PersonalInflation = {
+  available: boolean; reasonCode: 'available' | 'insufficient_history'; asOf: string; windowDays: 90; productCount: number;
+  basketBefore: string | null; basketNow: string | null; indexPercent: string | null;
+  rising: PersonalInflationItem[]; falling: PersonalInflationItem[];
+};
 export type ReceiptItemPage = { items: ReceiptItem[]; page: number; totalItems: number; hasMore: boolean };
 export type ReceiptRepeatWarning = {
   itemId: string; name: string; productKey: string; verdict: string; title: string;
@@ -379,6 +388,9 @@ export const api = {
     return request<ProductCatalogResponse>(`/bff/tenants/${tenantId}/products${search ? `?query=${encodeURIComponent(search)}` : ''}`);
   },
   getShoppingCandidates: (tenantId: string) => request<ShoppingList>(`/bff/tenants/${tenantId}/shopping`),
+  getPersonalInflation: (tenantId: string) => request<PersonalInflation>(
+    `/bff/tenants/${tenantId}/analytics/personal-inflation`,
+  ),
   markShoppingBought: (tenantId: string, productKey: string) => request<ShoppingList>(
     `/bff/tenants/${tenantId}/shopping/${encodeURIComponent(productKey)}/bought`, { method: 'POST' },
   ),

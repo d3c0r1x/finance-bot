@@ -935,3 +935,30 @@ def test_receipt_job_can_persist_distinct_ocr_and_vision_readings():
     assert "(tenant_id, source_job_id, reader)" in normalized
     assert "receipt_processing_jobs_stage_check" in normalized
     assert "'vision'" in normalized
+
+
+def test_personal_inflation_is_member_scoped_and_has_an_explicit_no_history_contract():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    paths = spec["paths"]
+    schema = spec["components"]["schemas"]["PersonalInflation"]
+    for path in ("/api/v1/tenants/{tenantId}/analytics/personal-inflation",
+                 "/bff/tenants/{tenantId}/analytics/personal-inflation"):
+        operation = paths[path]["get"]
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "PersonalInflation")
+    assert paths["/bff/tenants/{tenantId}/analytics/personal-inflation"]["get"]["security"] == [
+        {"bffSession": []}]
+    telegram = paths["/internal/v1/telegram/actions/personal-inflation"]["post"]
+    assert telegram["security"] == [{"telegramServiceToken": []}]
+    assert telegram["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ResolveTelegramActorContext")
+    assert telegram["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "PersonalInflation")
+    assert schema["required"] == ["available", "reasonCode", "asOf", "windowDays", "productCount",
+                                  "basketBefore", "basketNow", "indexPercent", "rising", "falling"]
+    assert schema["properties"]["windowDays"]["const"] == 90
+    assert schema["properties"]["reasonCode"]["enum"] == ["available", "insufficient_history"]
+    assert schema["properties"]["basketBefore"]["type"] == ["string", "null"]
+    item = spec["components"]["schemas"]["PersonalInflationItem"]
+    assert item["properties"]["olderPurchaseCount"]["minimum"] == 2
+    assert item["properties"]["windowPurchaseCount"]["minimum"] == 1

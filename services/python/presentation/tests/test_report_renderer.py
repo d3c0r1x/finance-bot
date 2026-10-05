@@ -5,6 +5,7 @@ from PIL import Image
 
 from services.python.presentation.report_renderer import (
     RendererUnavailable,
+    render_personal_inflation,
     render_report,
     render_report_png,
     report_text,
@@ -170,3 +171,87 @@ def test_renderer_rejects_invalid_financial_dto_values(field, value):
     report = {**REPORT, field: value}
     with pytest.raises(ValueError):
         render_report_png(report)
+
+
+def _inflation_item(name, old, new, weight, change, older=2, window=1):
+    return {
+        "productName": name,
+        "oldUnitPrice": old,
+        "newUnitPrice": new,
+        "oldSpendWeight": weight,
+        "changePercent": change,
+        "olderPurchaseCount": older,
+        "windowPurchaseCount": window,
+    }
+
+
+def test_personal_inflation_renderer_shows_explicit_insufficient_history_without_totals():
+    dto = {
+        "available": False,
+        "reasonCode": "insufficient_history",
+        "asOf": "2026-10-06T12:00:00Z",
+        "windowDays": 90,
+        "productCount": 0,
+        "basketBefore": None,
+        "basketNow": None,
+        "indexPercent": None,
+        "rising": [],
+        "falling": [],
+    }
+
+    text = render_personal_inflation(dto)
+
+    assert "90 дней" in text
+    assert "минимум 3 товара" in text
+    assert "100.00" not in text
+    assert "не официальная статистика" in text.lower()
+
+
+def test_personal_inflation_renderer_shows_core_weighted_totals_and_top_products():
+    dto = {
+        "available": True,
+        "reasonCode": "available",
+        "asOf": "2026-10-06T12:00:00Z",
+        "windowDays": 90,
+        "productCount": 4,
+        "basketBefore": "2510.00",
+        "basketNow": "2334.00",
+        "indexPercent": "-7.01",
+        "rising": [_inflation_item("Coffee", "100.00", "110.00", "500.00", "10.00")],
+        "falling": [_inflation_item("Milk", "200.00", "180.00", "700.00", "-10.00")],
+    }
+
+    text = render_personal_inflation(dto)
+
+    assert "2 510,00" in text
+    assert "2 334,00" in text
+    assert "-7,01%" in text
+    assert "Coffee" in text and "+10,00%" in text
+    assert "Milk" in text and "-10,00%" in text
+    assert "только цены из ваших чеков" in text.lower()
+    assert "не официальная статистика" in text.lower()
+
+
+@pytest.mark.parametrize("changes", [
+    {"basketBefore": "0.00"},
+    {"productCount": 2},
+    {"rising": [_inflation_item("Coffee", "100.00", "90.00", "500.00", "-10.00")]},
+    {"falling": [_inflation_item("Milk", "200.00", "220.00", "700.00", "10.00")]},
+])
+def test_personal_inflation_renderer_rejects_inconsistent_available_dto(changes):
+    dto = {
+        "available": True,
+        "reasonCode": "available",
+        "asOf": "2026-10-06T12:00:00Z",
+        "windowDays": 90,
+        "productCount": 4,
+        "basketBefore": "2510.00",
+        "basketNow": "2334.00",
+        "indexPercent": "-7.01",
+        "rising": [_inflation_item("Coffee", "100.00", "110.00", "500.00", "10.00")],
+        "falling": [_inflation_item("Milk", "200.00", "180.00", "700.00", "-10.00")],
+    }
+    dto.update(changes)
+
+    with pytest.raises(ValueError):
+        render_personal_inflation(dto)

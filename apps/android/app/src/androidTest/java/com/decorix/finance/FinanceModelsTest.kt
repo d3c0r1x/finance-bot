@@ -206,4 +206,32 @@ class FinanceModelsTest {
         assertEquals("milk", shopping.boughtCandidates.single().productKey)
         assertEquals("confirmed_not_to_buy", shopping.blockedCandidates.single().reasonCode)
     }
+
+    @Test fun parsesPersonalInflationWithoutRecomputingCoreTotals() {
+        val inflation = FinanceModels.personalInflation(JSONObject("""
+            {"available":true,"reasonCode":"available","asOf":"2026-10-06T12:00:00Z","windowDays":90,
+             "productCount":3,"basketBefore":"1250.00","basketNow":"1275.00","indexPercent":"2.00",
+             "rising":[{"productName":"Кофе","oldUnitPrice":"100.00","newUnitPrice":"110.00",
+               "oldSpendWeight":"500.00","changePercent":"10.00","olderPurchaseCount":2,"windowPurchaseCount":1}],
+             "falling":[{"productName":"Молоко","oldUnitPrice":"200.00","newUnitPrice":"180.00",
+               "oldSpendWeight":"700.00","changePercent":"-10.00","olderPurchaseCount":3,"windowPurchaseCount":2}]}
+        """.trimIndent()))
+
+        assertEquals(true, inflation.available)
+        assertEquals("1250.00", inflation.basketBefore)
+        assertEquals("1275.00", inflation.basketNow)
+        assertEquals("2.00", inflation.indexPercent)
+        assertEquals("Кофе", inflation.rising.single().productName)
+        assertEquals("Молоко", inflation.falling.single().productName)
+        assertEquals(2, inflation.rising.single().olderPurchaseCount)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsInventedTotalsForInsufficientPersonalInflationHistory() {
+        FinanceModels.personalInflation(JSONObject("""
+            {"available":false,"reasonCode":"insufficient_history","asOf":"2026-10-06T12:00:00Z",
+             "windowDays":90,"productCount":0,"basketBefore":"0.00","basketNow":null,"indexPercent":null,
+             "rising":[],"falling":[]}
+        """.trimIndent()))
+    }
 }

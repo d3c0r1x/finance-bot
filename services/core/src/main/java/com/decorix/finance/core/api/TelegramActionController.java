@@ -27,6 +27,7 @@ import com.decorix.finance.core.api.BudgetApi.Overview;
 import com.decorix.finance.core.api.BudgetApi.BudgetProposalResponse;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
+import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import java.util.UUID;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -82,6 +83,14 @@ public class TelegramActionController {
             @RequestBody ResolveRequest request) {
         requireServiceToken(suppliedToken);
         return actions.shopping(request);
+    }
+
+    @PostMapping("/actions/personal-inflation")
+    PersonalInflation personalInflation(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.personalInflation(request);
     }
 
     @PostMapping("/shopping/{productKey}/bought")

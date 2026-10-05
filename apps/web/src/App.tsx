@@ -7,13 +7,14 @@ import { api, type BudgetAlert, type BudgetOverview, type BudgetProposal, type C
 import { ReceiptsPanel } from './ReceiptsPanel';
 import { ProductCatalogPanel } from './ProductCatalogPanel';
 import { ShoppingPanel } from './ShoppingPanel';
+import { PersonalInflationPanel } from './PersonalInflationPanel';
 import { ImportsPanel } from './ImportsPanel';
 import './styles.css';
 
 const copy = {
   ru: {
     brand: 'Finance', login: 'Войти', loginTitle: 'Финансы без шума', loginText: 'Один понятный обзор личных и семейных денег.',
-    workspace: 'Пространство', operations: 'Операции', receipts: 'Чеки', products: 'Товары', shopping: 'Покупки', imports: 'Выписки', logout: 'Выйти', onboarding: 'Создать пространство',
+    workspace: 'Пространство', operations: 'Операции', receipts: 'Чеки', products: 'Товары', shopping: 'Покупки', inflation: 'Динамика цен', imports: 'Выписки', logout: 'Выйти', onboarding: 'Создать пространство',
     repeatSetup: 'Пройти настройку заново',
     onboardingText: 'Начните с личного пространства. Семью можно добавить позже.', name: 'Название пространства',
     timezone: 'Часовой пояс', create: 'Продолжить', startSetup: 'Начать настройку', next: 'Далее', back: 'Назад',
@@ -76,7 +77,7 @@ const copy = {
   },
   en: {
     brand: 'Finance', login: 'Sign in', loginTitle: 'Money, clearly', loginText: 'One clear view of your personal and family finances.',
-    workspace: 'Workspace', operations: 'Transactions', receipts: 'Receipts', products: 'Products', shopping: 'Shopping', imports: 'Statements', logout: 'Sign out', onboarding: 'Create a workspace',
+    workspace: 'Workspace', operations: 'Transactions', receipts: 'Receipts', products: 'Products', shopping: 'Shopping', inflation: 'Price trend', imports: 'Statements', logout: 'Sign out', onboarding: 'Create a workspace',
     repeatSetup: 'Run setup again',
     onboardingText: 'Start with a personal workspace. Add family later.', name: 'Workspace name',
     timezone: 'Time zone', create: 'Continue', startSetup: 'Start setup', next: 'Next', back: 'Back',
@@ -474,6 +475,7 @@ export function App() {
         <Link className="nav-link" to="/receipts">{t.receipts}</Link>
         <Link className="nav-link" to="/products">{t.products}</Link>
         <Link className="nav-link" to="/shopping">{t.shopping}</Link>
+        <Link className="nav-link" to="/inflation">{t.inflation}</Link>
         <Link className="nav-link" to="/imports">{t.imports}</Link>
         <Link className="nav-link" to="/budgets">{t.budgets}</Link>
         <Link className="nav-link" to="/debts">{t.debts}</Link>
@@ -545,6 +547,7 @@ export function App() {
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
           <Route path="/products" element={<ProductCatalogPanel tenantId={activeTenant.tenantId} language={language} />} />
           <Route path="/shopping" element={<ShoppingPanel tenantId={activeTenant.tenantId} language={language} />} />
+          <Route path="/inflation" element={<PersonalInflationPanel tenantId={activeTenant.tenantId} language={language} />} />
           <Route path="/imports" element={<ImportsPanel tenantId={activeTenant.tenantId} language={language} />} />
           <Route path="/" element={showBudgetSetup ? <OnboardingBudgetChoice t={t}
             proposal={budgetProposal?.tenantId === activeTenant.tenantId ? budgetProposal.proposal : undefined}

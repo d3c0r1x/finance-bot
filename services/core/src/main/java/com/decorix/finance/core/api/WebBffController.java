@@ -20,6 +20,7 @@ import com.decorix.finance.core.api.ProductApi.ProductDecisionKeys;
 import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
+import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.api.ReceiptProcessingApi.ReceiptProcessingJob;
 import java.util.List;
 import java.util.Map;
@@ -511,6 +512,11 @@ public class WebBffController {
     @GetMapping("/tenants/{tenantId}/shopping")
     ShoppingList shopping(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
         return productPriceHistory.shopping(tenantId, user.getSubject());
+    }
+
+    @GetMapping("/tenants/{tenantId}/analytics/personal-inflation")
+    PersonalInflation personalInflation(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
+        return productPriceHistory.personalInflation(tenantId, user.getSubject());
     }
 
     @PostMapping("/tenants/{tenantId}/shopping/{productKey}/bought")
