@@ -1,0 +1,72 @@
+{
+  "version": "finance-ai-golden.v1",
+  "cases": [
+    {
+      "id": "budget-steady-history-v1",
+      "taskKind": "budget-proposal",
+      "context": {
+        "monthlyIncome": "100000.00",
+        "historyDays": 90,
+        "categoryCodes": ["food", "housing"],
+        "monthlyExpenseByMonth": {
+          "2026-06": {"food": "30000.00", "housing": "20000.00"},
+          "2026-07": {"food": "30000.00", "housing": "20000.00"},
+          "2026-08": {"food": "30000.00", "housing": "20000.00"}
+        },
+        "monthlyIncomeByMonth": {
+          "2026-06": "100000.00",
+          "2026-07": "100000.00",
+          "2026-08": "100000.00"
+        },
+        "currentFamilyLimits": {"food": "30000.00", "housing": "20000.00", "долги": "0.00"}
+      },
+      "expected": {"shares": {"food": "60.00", "housing": "40.00"}},
+      "tolerancePercentagePoints": "10.00"
+    },
+    {
+      "id": "transaction-expense-local-time-v1",
+      "taskKind": "transaction-draft",
+      "context": {
+        "text": "Taxi 200 rub, today at 09:00",
+        "timezone": "Europe/Moscow",
+        "now": "2026-10-01T12:00:00+03:00"
+      },
+      "expected": {
+        "type": "expense",
+        "amount": "200.00",
+        "categoryCode": "transport",
+        "subcategoryCode": null,
+        "description": "Taxi",
+        "occurredAt": "2026-10-01T09:00:00+03:00"
+      }
+    },
+    {
+      "id": "receipt-ocr-synthetic-v1",
+      "taskKind": "receipt-ocr",
+      "syntheticReceipt": {"lines": ["SAMPLE MARKET", "2026-09-01", "BREAD 1 100.00", "TOTAL 100.00"]},
+      "context": {},
+      "expected": {"tokens": ["SAMPLE", "BREAD", "TOTAL", "100.00"]}
+    },
+    {
+      "id": "receipt-vision-synthetic-v1",
+      "taskKind": "receipt-vision",
+      "syntheticReceipt": {"lines": ["SAMPLE MARKET", "2026-09-01", "BREAD 1 100.00", "TOTAL 100.00"]},
+      "context": {},
+      "expected": {
+        "store": "SAMPLE MARKET",
+        "date": "2026-09-01",
+        "total": "100.00",
+        "items": [{"name": "BREAD", "quantity": "1", "unitPrice": "100.00", "lineSum": "100.00"}]
+      }
+    },
+    {
+      "id": "merchant-classification-synthetic-v1",
+      "taskKind": "merchant-classification",
+      "context": {"merchants": ["Пятёрочка", "Яндекс Go"]},
+      "expected": {"classifications": [
+        {"merchant": "пятёрочка", "categoryCode": "еда"},
+        {"merchant": "яндекс go", "categoryCode": "транспорт"}
+      ]}
+    }
+  ]
+}

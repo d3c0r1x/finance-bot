@@ -7,6 +7,9 @@ venv/
 .gradle/
 .gradle-cache/
 **/build/
+node_modules/
+dist/
+.tools/
 
 # Питон
 __pycache__/
@@ -23,3 +26,5 @@ receipt_samples.json
 
 # Логи
 *.log
+
+apps/android/.android-user/

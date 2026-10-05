@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finance.example/contracts/merchant-classification-result.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["classifications", "modelVersion", "promptVersion"],
+  "properties": {
+    "classifications": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/classification" }
+    },
+    "modelVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "promptVersion": { "type": "string", "const": "merchant-category.v1" }
+  },
+  "$defs": {
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["merchant", "categoryCode", "confidence"],
+      "properties": {
+        "merchant": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "categoryCode": {
+          "type": "string",
+          "enum": ["еда", "транспорт", "жилье", "досуг", "одежда", "здоровье", "работа", "техника", "долги", "прочее"]
+        },
+        "confidence": { "type": "string", "pattern": "^(?:0\\.[0-9]{3}|1\\.000)$" }
+      }
+    }
+  }
+}

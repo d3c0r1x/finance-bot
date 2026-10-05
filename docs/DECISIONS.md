@@ -84,3 +84,11 @@
 Без Ollama бот не падает: траты разбираются правилами по ключевым словам, чеки
 читает Tesseract. CI прогоняет тесты вообще без Ollama — так проверка не может
 случайно «пройти», потому что на машине разработчика запущена модель.
+
+## 10. Private receipt object storage
+
+F10 storage, quarantine, scan, retry and idempotency decisions are recorded in
+[ADR-014](adr/ADR-014-private-receipt-object-storage.md). SeaweedFS is the
+self-hosted S3-compatible development service; Core uses an object-storage
+adapter so production can use managed S3-compatible storage without changing
+receipt IDs or API contracts.

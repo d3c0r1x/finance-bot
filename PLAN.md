@@ -967,7 +967,7 @@ Kafka consumer rollout поддерживает старую/новую schema �
 - [ ] F30–F32: все reports/charts/digest и scheduled delivery.
 - [ ] F33–F39: prices/catalog/search/shopping/inflation/recurring/mute.
 - [ ] F40–F46: waste/ban/model guesses/recalculation/effects/savings/goals/history/outcome delivery.
-- [ ] F47–F51: T-Банк parser, preview, commit, dedup, undo, merchant clarifications и reclassification.
+- [x] F47–F51: T-Банк parser, preview, commit, dedup, undo, merchant clarifications и reclassification.
 - [ ] F52–F58: CSV, все вкладки панели, health, local AI, evaluation, formatting, launch/docs/license.
 - [ ] У каждого Fxx есть web/Telegram проверки для соответствующих интерфейсов; неприменимое явно объяснено.
 - [ ] D01–D12 отражены в fixture expectations и reconciliation report; исправления не названы случайной потерей parity.

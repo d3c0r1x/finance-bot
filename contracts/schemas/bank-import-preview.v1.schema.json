@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finance.local/contracts/schemas/bank-import-preview.v1.schema.json",
+  "title": "Bank statement import preview v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id", "tenantId", "state", "revision", "quality", "parseVersion", "periodStart", "periodEnd",
+    "parsedExpenseTotal", "parsedIncomeTotal", "expectedExpenseTotal", "expectedIncomeTotal", "expenseTotal",
+    "incomeTotal", "refundTotal", "transferTotal", "excludedTotal", "includedCount", "excludedCount",
+    "createdCount", "duplicateCount", "rows"
+  ],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "tenantId": { "type": "string", "format": "uuid" },
+    "state": { "type": "string", "enum": ["needs_review", "ready", "committed", "reverted", "failed"] },
+    "revision": { "type": "integer", "minimum": 1 },
+    "quality": { "type": "string", "enum": ["valid", "mismatch", "unverifiable"] },
+    "parseVersion": { "type": "string", "const": "tbank-pdf.v1" },
+    "periodStart": { "type": "string", "format": "date" },
+    "periodEnd": { "type": "string", "format": "date" },
+    "parsedExpenseTotal": { "$ref": "#/$defs/amount" },
+    "parsedIncomeTotal": { "$ref": "#/$defs/amount" },
+    "expectedExpenseTotal": { "$ref": "#/$defs/nullableAmount" },
+    "expectedIncomeTotal": { "$ref": "#/$defs/nullableAmount" },
+    "expenseTotal": { "$ref": "#/$defs/amount" },
+    "incomeTotal": { "$ref": "#/$defs/amount" },
+    "refundTotal": { "$ref": "#/$defs/amount" },
+    "transferTotal": { "$ref": "#/$defs/amount" },
+    "excludedTotal": { "$ref": "#/$defs/amount" },
+    "includedCount": { "type": "integer", "minimum": 0 },
+    "excludedCount": { "type": "integer", "minimum": 0 },
+    "createdCount": { "type": "integer", "minimum": 0 },
+    "duplicateCount": { "type": "integer", "minimum": 0 },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/row" }
+    }
+  },
+  "$defs": {
+    "amount": { "type": "string", "pattern": "^(?:0|[1-9][0-9]{0,17})\\.[0-9]{2}$" },
+    "nullableAmount": {
+      "oneOf": [
+        { "$ref": "#/$defs/amount" },
+        { "type": "null" }
+      ]
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "ordinal", "operationDate", "operationTime", "signedAmount", "amount", "kind", "transactionType",
+        "included", "selectionSource", "exclusionReason", "duplicate", "duplicateOfTransactionId", "outcome",
+        "transactionId", "merchant", "description", "cardLast4", "categoryCode", "categorySource",
+        "suggestedCategoryCode", "categoryConfidence", "clarificationCandidate"
+      ],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "ordinal": { "type": "integer", "minimum": 0 },
+        "operationDate": { "type": "string", "format": "date" },
+        "operationTime": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+        "signedAmount": { "type": "string", "pattern": "^-?(?:0|[1-9][0-9]{0,17})\\.[0-9]{2}$" },
+        "amount": { "$ref": "#/$defs/amount" },
+        "kind": { "type": "string", "enum": ["purchase", "income", "refund", "fee", "transfer_out", "withdrawal", "internal"] },
+        "transactionType": { "type": ["string", "null"], "enum": ["expense", "income", "refund", "transfer", null] },
+        "included": { "type": "boolean" },
+        "selectionSource": { "type": "string", "enum": ["default", "user"] },
+        "exclusionReason": {
+          "type": ["string", "null"],
+          "enum": ["bank_fee", "external_transfer", "cash_withdrawal", "internal_transfer", "requires_review", null]
+        },
+        "duplicate": { "type": "boolean" },
+        "duplicateOfTransactionId": { "type": ["string", "null"], "format": "uuid" },
+        "outcome": { "type": "string", "enum": ["pending", "created", "duplicate", "excluded", "reverted"] },
+        "transactionId": { "type": ["string", "null"], "format": "uuid" },
+        "merchant": { "type": ["string", "null"], "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "cardLast4": { "type": ["string", "null"], "pattern": "^[0-9]{4}$" },
+        "categoryCode": {
+          "type": ["string", "null"],
+          "enum": ["еда", "транспорт", "жилье", "досуг", "одежда", "здоровье", "работа", "техника", "долги", "прочее", null]
+        },
+        "categorySource": { "type": "string", "enum": ["human", "mapping", "model", "unknown"] },
+        "suggestedCategoryCode": {
+          "type": ["string", "null"],
+          "enum": ["еда", "транспорт", "жилье", "досуг", "одежда", "здоровье", "работа", "техника", "долги", "прочее", null]
+        },
+        "categoryConfidence": { "type": ["string", "null"], "pattern": "^(?:0\\.[0-9]{3}|1\\.000)$" },
+        "clarificationCandidate": { "type": "boolean" }
+      }
+    }
+  }
+}

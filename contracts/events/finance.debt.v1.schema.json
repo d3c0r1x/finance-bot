@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finance.example.invalid/contracts/events/finance.debt.v1.schema.json",
+  "title": "Finance debt state event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "schema_version", "tenant_id", "aggregate_type", "aggregate_id", "aggregate_version", "occurred_at", "recorded_at", "producer", "payload"],
+  "properties": {
+    "event_id": {"type": "string", "format": "uuid"},
+    "event_type": {"enum": ["debt.created", "debt.payment_recorded", "debt.payment_adjusted", "debt.payment_reversed", "debt.balance_adjusted"]},
+    "schema_version": {"const": 1},
+    "tenant_id": {"type": "string", "format": "uuid"},
+    "aggregate_type": {"const": "debt"},
+    "aggregate_id": {"type": "string", "format": "uuid"},
+    "aggregate_version": {"type": "integer", "minimum": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "producer": {"const": "core"},
+    "correlation_id": {"type": "string", "maxLength": 128},
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "openingBalance", "currentBalance", "interestRate", "minimumPayment", "status", "version", "action"],
+      "properties": {
+        "name": {"type": "string", "maxLength": 120},
+        "openingBalance": {"type": "string", "pattern": "^\\d+\\.\\d{2}$"},
+        "currentBalance": {"type": "string", "pattern": "^\\d+\\.\\d{2}$"},
+        "interestRate": {"type": "string"},
+        "minimumPayment": {"type": "string", "pattern": "^\\d+\\.\\d{2}$"},
+        "status": {"enum": ["open", "closed"]},
+        "version": {"type": "integer", "minimum": 1},
+        "action": {"type": "string"}
+      }
+    }
+  }
+}

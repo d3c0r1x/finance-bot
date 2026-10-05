@@ -57,6 +57,34 @@ venv\Scripts\python.exe receipt_inventory.py --strict   # выход 1 при г
 
 В боте: **⚙️ Настройки → 🩺 Статус сервисов** — доступность Ollama, модель разбора трат, модель зрения для чеков и Tesseract.
 
+## AI Gateway: общий golden gate
+
+`services/python/intelligence/evaluation_data/golden-v1.json` содержит только
+синтетические данные для бюджета, извлечения операции, OCR и чтения чека. Изображение
+чека строится в памяти; личные фото и тексты пользователя в датасет или отчёт не
+попадают. Каждый настроенный provider оценивается на тех же cases для задач, которые
+он заявляет. В отчёт входят case ID, pass rate, latency и версии модели/prompt;
+вход и ответ модели не печатаются. Стоимость и token usage отмечаются как unknown,
+пока provider их не сообщает.
+
+Запусти из корня репозитория после настройки локального Ollama и allowlist VLM:
+
+```powershell
+$env:FINANCE_AI_POLICY = "local-only"
+$env:OLLAMA_HOST = "http://127.0.0.1:11434"
+$env:OLLAMA_MODEL = "qwen2.5:7b-instruct"
+$env:OLLAMA_VISION_MODELS = "qwen2.5vl:7b"
+python -m tools.evaluate_ai
+```
+
+Команда запускает только синтетические fixtures и завершится с кодом `0`, если
+каждая задача датасета покрыта хотя бы одним provider с pass rate не ниже порога
+(по умолчанию 100%). Код `2` означает, что часть задач не прошла или осталась без
+provider. Сетевой endpoint сначала проходит ту же fail-closed политику; для
+облачного сравнения владелец должен отдельно указать `FINANCE_AI_POLICY=cloud-opt-in`
+и настроить серверный ключ. Успешный offline unit test не заменяет этот live eval,
+а Vertex остаётся выключен до сравнительной оценки, canary и проверенного rollback.
+
 ## Автоматическая проверка на каждый пуш
 
 `.github/workflows/tests.yml` запускает `smoke_test.py`, `handlers_test.py` и `receipt_test.py` в GitHub Actions на каждый пуш, пул-реквест и вручную. В CI нет ни Ollama, ни личных образцов чеков — так и задумано: если тест случайно зависит от модели или от фото владельца, он упадёт там, а не в тишине у тебя на машине.

@@ -9,6 +9,965 @@ servers:
 security:
   - keycloakOidc: []
 paths:
+  /bff/session:
+    get:
+      operationId: getBrowserSession
+      security: []
+      responses:
+        '200':
+          description: Browser authentication state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BrowserSession' }
+  /bff/csrf:
+    get:
+      operationId: getBrowserCsrfToken
+      security: []
+      responses:
+        '200':
+          description: CSRF token for same-origin state-changing requests
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CsrfToken' }
+  /bff/me/tenants:
+    get:
+      operationId: listBrowserTenants
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Active memberships for the current browser session
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TenantMembership' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /bff/me/telegram-link:
+    post:
+      operationId: createBrowserTelegramLinkCode
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Short-lived code shown once; only its hash is stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramLinkCode' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { description: Link code issue limit reached }
+  /bff/tenants:
+    post:
+      operationId: createBrowserTenant
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTenant' }
+      responses:
+        '201':
+          description: Tenant and initial profile created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantMembership' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /bff/tenants/{tenantId}/members:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listBrowserTenantMembers
+      summary: List members available to the current browser role
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Owner/admin sees active workspace members; other roles see only themselves
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TenantMember' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /bff/tenants/{tenantId}/transactions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listBrowserTransactions
+      security:
+        - bffSession: []
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: type
+          in: query
+          schema: { type: string, enum: [expense, income, refund, debt_payment, transfer] }
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: memberId
+          in: query
+          description: Omit for the current member; owners/admins may select an active user ID or all.
+          schema:
+            oneOf:
+              - type: string
+                format: uuid
+              - type: string
+                const: all
+      responses:
+        '200':
+          description: Stable page scoped to current member or manager-selected family member(s)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createBrowserTransaction
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTransaction' }
+      responses:
+        '201':
+          description: Created once and committed with its outbox event
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /bff/tenants/{tenantId}/transaction-drafts:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createBrowserTransactionDraft
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransactionDraftText' }
+      responses:
+        '201':
+          description: AI extraction saved for review; no financial transaction was created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { description: AI output failed validation }
+        '503': { description: Local AI service is unavailable }
+  /bff/tenants/{tenantId}/imports:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createBrowserBankImport
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: T-Bank statement PDF up to 12 MiB }
+      responses:
+        '201':
+          description: Parsed statement staged for review; no transactions are created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: 'Unsupported, scanned or malformed statement PDF' }
+        '503': { description: Private statement parser is unavailable }
+  /bff/tenants/{tenantId}/imports/{importId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserBankImportPreview
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Current owner-scoped preview and revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/imports/{importId}/rows/{rowId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: rowId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: selectBrowserBankImportRow
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankImportRowSelection' }
+      responses:
+        '200':
+          description: Recomputed preview after explicit user row selection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/imports/{importId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: confirmBrowserBankImport
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankImportConfirm' }
+      responses:
+        '200':
+          description: Atomically creates transactions and records duplicates for this batch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/imports/{importId}/undo:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: undoBrowserBankImport
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Reverts only unchanged transactions created by this import
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportUndoResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Batch contains modified transactions and remains committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportUndoResult' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/receipts:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createBrowserReceipt
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReceipt' }
+      responses:
+        '201':
+          description: Created user-reviewed receipt evidence; no financial transaction was posted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /bff/tenants/{tenantId}/receipts/photo-jobs:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: uploadBrowserReceiptPhoto
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '202': { description: Private receipt photo queued for scan and OCR, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptProcessingJob' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /bff/tenants/{tenantId}/receipt-jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBrowserReceiptProcessingJob
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Owner-scoped receipt scan/OCR progress, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptProcessingJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserReceipt
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Receipt evidence draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/readings:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserReceiptOcrReading
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Owner-scoped OCR text and word evidence, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptOcrReading' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/items:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserReceiptItems
+      security:
+        - bffSession: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: Eight ordered items per page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptItemPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: addBrowserReceiptItem
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptItemInput' }
+      responses:
+        '201':
+          description: Item added to the receipt draft; cash total remains unchanged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/disputed-items:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserDisputedReceiptItems
+      security:
+        - bffSession: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: Harmful or unnecessary receipt lines without an allowed product decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptItemPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserReceiptRepeatWarnings
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Warnings from earlier confirmed receipts; the current receipt is excluded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptRepeatWarnings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/duplicate-candidates:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserReceiptDuplicateCandidates
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Same-owner receipts with matching totals created in the prior ten minutes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptDuplicateCandidates' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/duplicate-decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: decideBrowserReceiptDuplicate
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptDuplicateDecisionSelection' }
+      responses:
+        '200':
+          description: User decision stored with receipt review history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: confirmBrowserReceipt
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 128 }
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Receipt and expense transaction confirmed atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: itemId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateBrowserReceiptItem
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptItemInput' }
+      responses:
+        '200':
+          description: Item corrected while preserving cash total
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      operationId: deleteBrowserReceiptItem
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '204': { description: Item removed; receipt totals and review history updated atomically }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/sync-total:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: syncBrowserReceiptTotal
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Explicitly replace the cash total with the complete item sum
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/basket-review:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: reviewBrowserReceiptBasket
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Item verdicts and amount-free advice saved to receipt review history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '502': { description: AI output failed validation }
+        '503': { description: Local AI service is unavailable }
+  /bff/tenants/{tenantId}/receipts/{receiptId}/category:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: selectBrowserReceiptCategory
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptCategorySelection' }
+      responses:
+        '200':
+          description: User-selected receipt category stored with human provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/products/{productKey}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: productKey
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]+$' }
+    put:
+      operationId: allowBrowserProduct
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductDecisionSelection' }
+      responses:
+        '200':
+          description: User allowed this product across receipt advice
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDecision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      operationId: revokeBrowserProductDecision
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204': { description: User product decision revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /bff/tenants/{tenantId}/products:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserProductCatalog
+      security:
+        - bffSession: []
+      parameters:
+        - name: query
+          in: query
+          required: false
+          schema: { type: string, maxLength: 80, default: '' }
+      responses:
+        '200':
+          description: Member-scoped confirmed purchase catalog (three purchases) or search (one purchase)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductCatalogResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Product purchase history is temporarily unavailable }
+  /bff/tenants/{tenantId}/products/decisions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserAllowedProductDecisions
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Persisted user product decisions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDecisionKeys' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /bff/tenants/{tenantId}/products/price-history:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: itemId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserReceiptPriceHistory
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Owner-scoped confirmed receipt price history and median comparison
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriceComparison' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: Receipt item does not have a usable quantity and paid line total }
+        '503': { description: Price history is temporarily unavailable }
+  /bff/tenants/{tenantId}/transaction-drafts/{draftId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateBrowserTransactionDraft
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTransactionDraft' }
+      responses:
+        '200':
+          description: Corrected pending draft with new version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      operationId: cancelBrowserTransactionDraft
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '204': { description: Pending draft cancelled }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/transaction-drafts/{draftId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: confirmBrowserTransactionDraft
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Confirmed financial transaction; transaction and draft state commit atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/summary:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserDashboardSummary
+      security:
+        - bffSession: []
+      parameters:
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$', example: '2026-10' }
+      responses:
+        '200':
+          description: Current member monthly income and expense totals in tenant timezone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardSummary' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/tenants:
     post:
       operationId: createTenant
@@ -39,6 +998,1397 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/TenantMembership' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/me/telegram-link:
+    post:
+      operationId: createTelegramLinkCode
+      summary: Create a short-lived one-time code for the authenticated member
+      responses:
+        '200':
+          description: Code returned once; database stores only SHA-256 hash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramLinkCode' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { description: Link code issue limit reached }
+  /internal/v1/telegram/link-codes/redeem:
+    post:
+      operationId: redeemTelegramLinkCode
+      security:
+        - telegramServiceToken: []
+      description: The service credential authorizes this narrow exchange. Any userId field is ignored; code ownership determines the linked user. Telegram display name only replaces an unset workspace-default name and never overrides a user-selected name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RedeemTelegramLinkCode' }
+      responses:
+        '200':
+          description: Telegram identity linked exactly once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramLinkResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { description: Telegram identity is temporarily rate-limited }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/tenants:
+    post:
+      operationId: listTelegramActorTenants
+      security:
+        - telegramServiceToken: []
+      description: Returns only active spaces for the Telegram identity mapped by Core; caller cannot select a user. Refreshes a fallback member name from Telegram only while no user-selected name exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ListTelegramActorTenants' }
+      responses:
+        '200':
+          description: Spaces the linked actor can select
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramActorTenantList' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/actor-contexts:
+    post:
+      operationId: issueTelegramActorContext
+      security:
+        - telegramServiceToken: []
+      description: Issues a 15-minute opaque tenant context from a linked Telegram ID and active membership. Stores only its SHA-256 hash; a new selection revokes older contexts for that Telegram ID. Unknown fields such as userId are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IssueTelegramActorContext' }
+      responses:
+        '201':
+          description: Tenant-scoped actor context returned once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramActorContext' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/actor-contexts/resolve:
+    post:
+      operationId: resolveTelegramActorContext
+      security:
+        - telegramServiceToken: []
+      description: Revalidates token expiry, Telegram binding, active membership, and current role before a Telegram action.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Current actor role and permission set for the selected space
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResolvedTelegramActorContext' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/report:
+    post:
+      operationId: getTelegramFinanceReport
+      security:
+        - telegramServiceToken: []
+      description: Returns the shared finance report DTO after Core revalidates the opaque actor context and report.read permission. The request cannot select a tenant or user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramReportRequest' }
+      responses:
+        '200':
+          description: Finance report computed by Core for the actor's current tenant and selected scope
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/products/catalog:
+    post:
+      operationId: getTelegramProductCatalog
+      security:
+        - telegramServiceToken: []
+      description: Returns the current actor's private confirmed-purchase catalog after Core revalidates receipt.read. The request cannot select a user or tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramProductCatalogRequest' }
+      responses:
+        '200':
+          description: Member-scoped catalog or search
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductCatalogResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram service credential is not configured or product history is unavailable }
+  /internal/v1/telegram/summary:
+    post:
+      operationId: getTelegramDashboardSummary
+      security:
+        - telegramServiceToken: []
+      description: Loads the dashboard only after Core revalidates the opaque actor context and its report.read permission. The body does not select a user or tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Current member's dashboard scoped to the selected tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/debts:
+    post:
+      operationId: listTelegramOpenDebts
+      security:
+        - telegramServiceToken: []
+      description: Returns open debts in the current actor tenant after Core revalidates debt.read. The request does not select a member or tenant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Current tenant's open debts for an explicit debt-payment choice
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramDebtList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transactions:
+    post:
+      operationId: listTelegramRecentTransactions
+      security:
+        - telegramServiceToken: []
+      description: Returns the selected member's latest posted operations, ordered by Core creation time, after revalidating transaction.read. No tenant or user selector is accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramHistoryRequest' }
+      responses:
+        '200':
+          description: Recent operations scoped to the current actor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramHistoryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transactions/latest/void:
+    post:
+      operationId: voidTelegramLatestTransaction
+      security:
+        - telegramServiceToken: []
+      description: Voids only the current actor's latest posted operation after revalidating transaction.write.own. A stale history selection fails, and idempotency replays the original result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramVoidLatestRequest' }
+      responses:
+        '200':
+          description: Voided transaction; debt payment effects are reversed by Core
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transaction-drafts/repeat:
+    post:
+      operationId: repeatTelegramExpenseDraft
+      security:
+        - telegramServiceToken: []
+      description: Creates a durable review draft from the actor's own posted expense without calling AI. Repeated requests with the same key return the same draft; no transaction is posted before confirmation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramRepeatRequest' }
+      responses:
+        '201':
+          description: Repeat draft created with copied expense fields and current date
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transaction-drafts:
+    post:
+      operationId: createTelegramTransactionDraft
+      security:
+        - telegramServiceToken: []
+      description: Creates a durable review draft after Core revalidates transaction.write.own. The actor token selects the active tenant and member; caller-supplied userId or tenantId fields are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTelegramTransactionDraft' }
+      responses:
+        '201':
+          description: Review draft created; no transaction is posted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { description: AI output failed validation }
+        '503': { description: Telegram or AI service credential is not configured }
+  /internal/v1/telegram/transaction-drafts/{draftId}/confirm:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: confirmTelegramTransactionDraft
+      security:
+        - telegramServiceToken: []
+      description: Confirms only the owner's pending draft in the actor context tenant after revalidating transaction.write.own. Version and idempotency key prevent stale or duplicate financial writes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramDraftDecision' }
+      responses:
+        '200':
+          description: Confirmed transaction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { description: Debt payment needs an explicitly selected debt }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transaction-drafts/{draftId}/amount:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: updateTelegramTransactionDraftAmount
+      security:
+        - telegramServiceToken: []
+      description: Updates only the amount of the actor's pending draft after revalidating transaction.write.own. The server owns all other fields and checks the draft version.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramDraftAmount' }
+      responses:
+        '200':
+          description: Updated review draft with incremented version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transaction-drafts/{draftId}/read:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: getTelegramTransactionDraft
+      security:
+        - telegramServiceToken: []
+      description: Reads only the actor's own draft in the selected tenant after revalidating transaction.write.own. Allows callbacks to resume after Redis FSM expiry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Current tenant-scoped draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transaction-drafts/{draftId}/edit:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: editTelegramTransactionDraft
+      security:
+        - telegramServiceToken: []
+      description: Updates owner-selected draft fields after revalidating transaction.write.own. Core scopes by actor tenant and owner and checks the current version; caller-supplied userId or tenantId fields are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramDraftEdit' }
+      responses:
+        '200':
+          description: Updated review draft with incremented version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/transaction-drafts/{draftId}/cancel:
+    parameters:
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: cancelTelegramTransactionDraft
+      security:
+        - telegramServiceToken: []
+      description: Cancels only the owner's pending draft in the actor context tenant after revalidating transaction.write.own and checking its version.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramDraftCancel' }
+      responses:
+        '200':
+          description: Draft cancellation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelegramDraftCancelled' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '503': { description: Telegram service credential is not configured }
+  /api/v1/tenants/{tenantId}/profile/me:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getMyProfile
+      responses:
+        '200':
+          description: Current member profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateMyProfile
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMemberProfile' }
+      responses:
+        '200':
+          description: Updated member profile; change is audited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/notification-preferences:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getNotificationPreferences
+      responses:
+        '200':
+          description: Member-local daily and weekly Telegram digest preferences
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateNotificationPreferences
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"(?:0|[1-9][0-9]*)"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNotificationPreferences' }
+      responses:
+        '200':
+          description: Updated schedule with the next due instant recalculated in the member timezone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/summary:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getDashboardSummary
+      parameters:
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$', example: '2026-10' }
+      responses:
+        '200':
+          description: Current member monthly income and expense totals in tenant timezone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardSummary' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/profile/me:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserMyProfile
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Current member profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateBrowserMyProfile
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMemberProfile' }
+      responses:
+        '200':
+          description: Updated member profile; change is audited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/notification-preferences:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserNotificationPreferences
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Member-local daily and weekly Telegram digest preferences
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateBrowserNotificationPreferences
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"(?:0|[1-9][0-9]*)"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateNotificationPreferences' }
+      responses:
+        '200':
+          description: Updated member-local schedule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/reports/month:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getMonthlyReport
+      parameters:
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$' }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [personal, family], default: personal }
+      responses:
+        '200':
+          description: Monthly report in the requesting member timezone; family scope uses family budget
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/reports/period:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getPeriodReport
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [month, week, 90d, custom] }
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [personal, family], default: personal }
+      responses:
+        '200':
+          description: Month, last seven days, last 90 days, or custom inclusive date range
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/reports/family:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getFamilyReport
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [month, week, 90d, custom], default: month }
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Aggregate report across active tenant members, without transaction details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/reports/month:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserMonthlyReport
+      security: [{ bffSession: [] }]
+      parameters:
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$' }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [personal, family], default: personal }
+      responses:
+        '200':
+          description: Monthly report for the authenticated browser session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/reports/period:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserPeriodReport
+      security: [{ bffSession: [] }]
+      parameters:
+        - name: period
+          in: query
+          required: true
+          schema: { type: string, enum: [month, week, 90d, custom] }
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [personal, family], default: personal }
+      responses:
+        '200':
+          description: Browser report with the same date boundaries and aggregation as the core report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/reports/family:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserFamilyReport
+      security: [{ bffSession: [] }]
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [month, week, 90d, custom], default: month }
+        - name: month
+          in: query
+          schema: { type: string, pattern: '^\d{4}-\d{2}$' }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Browser family aggregate report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/debts:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listDebts
+      responses:
+        '200':
+          description: Shared tenant debts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DebtPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createDebt
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDebt' }
+      responses:
+        '201':
+          description: Debt created with audit and outbox event
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Debt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot create a shared debt }
+  /api/v1/tenants/{tenantId}/debts/{debtId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: debtId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getDebt
+      responses:
+        '200':
+          description: Shared tenant debt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Debt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/debts/{debtId}/balance:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: debtId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: adjustDebtBalance
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdjustDebtBalance' }
+      responses:
+        '200':
+          description: Adjusted debt balance with audit and outbox event
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Debt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot adjust a shared debt }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/debts/{debtId}/payments:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: debtId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: recordDebtPayment
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordDebtPayment' }
+      responses:
+        '200':
+          description: Payment transaction and balance reduction committed atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DebtPayment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/debts/{debtId}/forecast:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: debtId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: forecastDebtPayoff
+      responses:
+        '200':
+          description: Estimate only; forecast does not post interest to the ledger
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DebtForecast' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/budgets:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getTenantBudgets
+      responses:
+        '200':
+          description: Family limits with current member overrides and effective values
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/budget-proposals:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createBudgetProposal
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetProposalRequest' }
+      responses:
+        '201':
+          description: Pending proposal; no budget changes until explicit apply
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetProposal' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot propose family budgets }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/budget-proposals/{proposalId}/apply:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: proposalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: applyBudgetProposal
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: All family limits applied atomically after explicit user action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot apply family budgets }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '410': { description: Proposal expired }
+  /api/v1/tenants/{tenantId}/budget-proposals/history:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createHistoryBudgetProposal
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: AI proposal based on allowlisted aggregates; remains pending until explicit apply
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetProposal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot propose family budgets }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: Planned income or 30 days of posted expense history is missing }
+        '502': { description: AI response failed schema or policy validation }
+        '503': { description: AI service is unavailable or not configured }
+  /api/v1/tenants/{tenantId}/budgets/{budgetKey}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: budgetKey
+        in: path
+        required: true
+        schema: { type: string, enum: [__total__, еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+    put:
+      operationId: updateTenantBudget
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: Use version 0 to create a scope value.
+          schema: { type: string, pattern: '^"(?:0|[1-9][0-9]*)"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateBudget' }
+      responses:
+        '200':
+          description: Effective family and personal limits after update
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot change this budget scope }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/budgets/personal-overrides:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    delete:
+      operationId: resetPersonalBudgets
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Personal overrides removed; family limits become effective again
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot change this budget scope }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/budgets:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserBudgets
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Family limits with current member overrides and effective values
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/budgets/{budgetKey}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: budgetKey
+        in: path
+        required: true
+        schema: { type: string, enum: [__total__, еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+    put:
+      operationId: updateBrowserBudget
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"(?:0|[1-9][0-9]*)"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateBudget' }
+      responses:
+        '200':
+          description: Effective family and personal limits after update
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot change this budget scope }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/budgets/personal-overrides:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    delete:
+      operationId: resetBrowserPersonalBudgets
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Personal overrides removed; family limits become effective again
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot change this budget scope }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/budget-proposals:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createBrowserBudgetProposal
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetProposalRequest' }
+      responses:
+        '201':
+          description: Pending proposal; no budget changes until explicit apply
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetProposal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot propose family budgets }
+  /bff/tenants/{tenantId}/budget-proposals/{proposalId}/apply:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: proposalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: applyBrowserBudgetProposal
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Family budgets applied after explicit user action
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetOverview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot apply family budgets }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/budget-proposals/history:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createBrowserHistoryBudgetProposal
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '201':
+          description: AI proposal remains pending until explicit apply
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetProposal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot propose family budgets }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: Planned income or 30 days of posted expense history is missing }
+        '502': { description: AI response failed schema or policy validation }
+        '503': { description: AI service is unavailable or not configured }
+  /bff/tenants/{tenantId}/debts:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listBrowserDebts
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Shared tenant debts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DebtPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: createBrowserDebt
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateDebt' }
+      responses:
+        '201':
+          description: Shared debt created with audit and outbox event
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Debt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot create a shared debt }
+  /bff/tenants/{tenantId}/debts/{debtId}/payments:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: debtId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: recordBrowserDebtPayment
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordDebtPayment' }
+      responses:
+        '200':
+          description: Debt payment and transaction committed atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DebtPayment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot record a debt payment }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/debts/{debtId}/balance:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: debtId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: adjustBrowserDebtBalance
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdjustDebtBalance' }
+      responses:
+        '200':
+          description: Debt balance adjusted with audit history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Debt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Role cannot adjust a shared debt }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/debts/{debtId}/forecast:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: debtId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: forecastBrowserDebtPayoff
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Estimate only; does not post interest to ledger
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DebtForecast' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/members:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listTenantMembers
+      summary: List members available to the current tenant role
+      responses:
+        '200':
+          description: Owner/admin sees active workspace members; other roles see only themselves
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TenantMember' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/tenants/{tenantId}/imports:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createBankImport
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: T-Bank statement PDF up to 12 MiB }
+      responses:
+        '201':
+          description: Parsed statement staged for review; no transactions are created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: 'Unsupported, scanned or malformed statement PDF' }
+        '503': { description: Private statement parser is unavailable }
+  /api/v1/tenants/{tenantId}/imports/{importId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBankImportPreview
+      responses:
+        '200':
+          description: Current owner-scoped preview and revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/imports/{importId}/rows/{rowId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: rowId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: selectBankImportRow
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankImportRowSelection' }
+      responses:
+        '200':
+          description: Recomputed preview after explicit user row selection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/imports/{importId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: confirmBankImport
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankImportConfirm' }
+      responses:
+        '200':
+          description: Atomically creates transactions and records duplicates for this batch
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/imports/{importId}/undo:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: undoBankImport
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Reverts only unchanged transactions created by this import
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportUndoResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Batch contains modified transactions and remains committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankImportUndoResult' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
   /api/v1/tenants/{tenantId}/transactions:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -52,6 +2402,27 @@ paths:
         - name: pageSize
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - name: type
+          in: query
+          schema: { type: string, enum: [expense, income, refund, debt_payment, transfer] }
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 120 }
+        - name: memberId
+          in: query
+          description: Omit for the current member; owners/admins may select an active user ID or all.
+          schema:
+            oneOf:
+              - type: string
+                format: uuid
+              - type: string
+                const: all
       responses:
         '200':
           description: Stable page ordered by occurredAt and ID descending
@@ -59,6 +2430,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TransactionPage' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
     post:
       operationId: createTransaction
@@ -78,6 +2450,7 @@ paths:
               schema: { $ref: '#/components/schemas/Transaction' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/tenants/{tenantId}/transactions/{transactionId}:
@@ -97,6 +2470,600 @@ paths:
               schema: { $ref: '#/components/schemas/Transaction' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateTransaction
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          description: Transaction version previously returned by the API.
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTransaction' }
+      responses:
+        '200':
+          description: Updated transaction with atomic audit and outbox records
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/transaction-drafts:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createTransactionDraft
+      summary: Extract text into a durable user-reviewed draft without creating a transaction
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransactionDraftText' }
+      responses:
+        '201':
+          description: Draft created without changing financial history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { description: AI output failed validation }
+        '503': { description: Local AI service is unavailable }
+  /api/v1/tenants/{tenantId}/receipts:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createReceipt
+      summary: Save receipt evidence for review without creating a financial transaction
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateReceipt' }
+      responses:
+        '201':
+          description: Receipt evidence draft created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/tenants/{tenantId}/receipts/photo-jobs:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: uploadReceiptPhoto
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '202': { description: Private receipt photo queued for scan and OCR, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptProcessingJob' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/tenants/{tenantId}/receipt-jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getReceiptProcessingJob
+      responses:
+        '200': { description: Owner-scoped receipt scan/OCR progress, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptProcessingJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceipt
+      summary: Read a tenant-scoped receipt evidence draft
+      responses:
+        '200':
+          description: Receipt evidence draft
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/readings:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceiptOcrReading
+      responses:
+        '200': { description: Owner-scoped OCR text and word evidence, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptOcrReading' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/items:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceiptItems
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: Eight ordered items per page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptItemPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: addReceiptItem
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptItemInput' }
+      responses:
+        '201':
+          description: Item added to the receipt draft; cash total remains unchanged
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/disputed-items:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getDisputedReceiptItems
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: Harmful or unnecessary receipt lines without an allowed product decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptItemPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceiptRepeatWarnings
+      responses:
+        '200':
+          description: Warnings from earlier confirmed receipts; the current receipt is excluded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptRepeatWarnings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/duplicate-candidates:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceiptDuplicateCandidates
+      responses:
+        '200':
+          description: Same-owner receipts with matching totals created in the prior ten minutes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptDuplicateCandidates' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/duplicate-decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      operationId: decideReceiptDuplicate
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptDuplicateDecisionSelection' }
+      responses:
+        '200':
+          description: User decision stored with receipt review history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: confirmReceipt
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 16, maxLength: 128 }
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Receipt and expense transaction confirmed atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: itemId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateReceiptItem
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptItemInput' }
+      responses:
+        '200':
+          description: Item corrected while preserving cash total
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      operationId: deleteReceiptItem
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '204': { description: Item removed; receipt totals and review history updated atomically }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/sync-total:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: syncReceiptTotal
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Explicitly replace the cash total with the complete item sum
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/basket-review:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: reviewReceiptBasket
+      summary: Generate amount-free item advice, apply deterministic rules, and save versioned review history
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Item verdicts, advice, and provenance saved without changing receipt money
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '502': { description: AI output failed validation }
+        '503': { description: Local AI service is unavailable }
+  /api/v1/tenants/{tenantId}/receipts/{receiptId}/category:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: selectReceiptCategory
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptCategorySelection' }
+      responses:
+        '200':
+          description: User-selected receipt category stored with human provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Receipt' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/products/{productKey}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: productKey
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]+$' }
+    put:
+      operationId: allowProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductDecisionSelection' }
+      responses:
+        '200':
+          description: User allowed this product across receipt advice
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDecision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      operationId: revokeProductDecision
+      responses:
+        '204': { description: User product decision revoked }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/tenants/{tenantId}/products:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getProductCatalog
+      parameters:
+        - name: query
+          in: query
+          required: false
+          schema: { type: string, maxLength: 80, default: '' }
+      responses:
+        '200':
+          description: Member-scoped confirmed purchase catalog (three purchases) or search (one purchase)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductCatalogResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Product purchase history is temporarily unavailable }
+  /api/v1/tenants/{tenantId}/products/decisions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getAllowedProductDecisions
+      responses:
+        '200':
+          description: Persisted user product decisions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDecisionKeys' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/tenants/{tenantId}/products/price-history:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: receiptId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: itemId
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceiptPriceHistory
+      responses:
+        '200':
+          description: Owner-scoped confirmed receipt price history and median comparison
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriceComparison' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { description: Receipt item does not have a usable quantity and paid line total }
+        '503': { description: Price history is temporarily unavailable }
+  /api/v1/tenants/{tenantId}/transaction-drafts/{draftId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateTransactionDraft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTransactionDraft' }
+      responses:
+        '200':
+          description: Corrected pending draft with new version
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraft' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      operationId: cancelTransactionDraft
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '204': { description: Pending draft cancelled }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/transaction-drafts/{draftId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: draftId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: confirmTransactionDraft
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Transaction and confirmed draft state commit atomically
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
   /api/v1/tenants/{tenantId}/transactions/{transactionId}/void:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -120,14 +3087,274 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Transaction' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/transactions/{transactionId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: transactionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      operationId: updateBrowserTransaction
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateTransaction' }
+      responses:
+        '200':
+          description: Updated transaction with atomic audit and outbox records
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/transactions/{transactionId}/void:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: transactionId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: voidBrowserTransaction
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string, pattern: '^"[1-9][0-9]*"$' }
+      responses:
+        '200':
+          description: Voided transaction with atomic audit and outbox records
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transaction' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/imports/{importId}/classify:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: importId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: classifyBrowserImportMerchants
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - { name: If-Match, in: header, required: true, schema: { type: string, pattern: '^"[1-9][0-9]*"$' } }
+      responses:
+        '200': { description: Merchant hypotheses added to the preview, content: { application/json: { schema: { $ref: '#/components/schemas/BankImportPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '503': { description: Merchant classifier is unavailable }
+  /bff/tenants/{tenantId}/imports/{importId}/rows/{rowId}/category:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: importId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: rowId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: saveBrowserMerchantCategory
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - { name: If-Match, in: header, required: true, schema: { type: string, pattern: '^"[1-9][0-9]*"$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BankImportCategorySelection' } } }
+      responses:
+        '200': { description: Category and personal merchant rule saved, content: { application/json: { schema: { $ref: '#/components/schemas/BankImportPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/merchant-mappings:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listBrowserMerchantMappings
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Personal merchant rules, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantMappingList' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: saveBrowserMerchantMapping
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MerchantMappingRequest' } } }
+      responses:
+        '200': { description: Updated personal merchant rule, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantMapping' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/merchant-reclassifications/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: previewBrowserMerchantReclassification
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationPreviewRequest' } } }
+      responses:
+        '200': { description: Eligible imported transactions for explicit review, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/merchant-reclassifications/apply:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: applyBrowserMerchantReclassification
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/MerchantReclassificationIdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationApplyRequest' } } }
+      responses:
+        '200': { description: Reviewed imported transactions reclassified, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationApplyResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/imports/{importId}/classify:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: importId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: classifyImportMerchants
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string, pattern: '^"[1-9][0-9]*"$' } }
+      responses:
+        '200': { description: Merchant hypotheses added to the preview, content: { application/json: { schema: { $ref: '#/components/schemas/BankImportPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '503': { description: Merchant classifier is unavailable }
+  /api/v1/tenants/{tenantId}/imports/{importId}/rows/{rowId}/category:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: importId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: rowId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: saveMerchantCategory
+      parameters:
+        - { name: If-Match, in: header, required: true, schema: { type: string, pattern: '^"[1-9][0-9]*"$' } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BankImportCategorySelection' } } }
+      responses:
+        '200': { description: Category and personal merchant rule saved, content: { application/json: { schema: { $ref: '#/components/schemas/BankImportPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/merchant-mappings:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: listMerchantMappings
+      responses:
+        '200': { description: Personal merchant rules, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantMappingList' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: saveMerchantMapping
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MerchantMappingRequest' } } }
+      responses:
+        '200': { description: Updated personal merchant rule, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantMapping' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/merchant-reclassifications/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: previewMerchantReclassification
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationPreviewRequest' } } }
+      responses:
+        '200': { description: Eligible imported transactions for explicit review, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationPreview' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/merchant-reclassifications/apply:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: applyMerchantReclassification
+      parameters:
+        - $ref: '#/components/parameters/MerchantReclassificationIdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationApplyRequest' } } }
+      responses:
+        '200': { description: Reviewed imported transactions reclassified, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationApplyResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
 components:
   securitySchemes:
+    bffSession:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
     keycloakOidc:
       type: openIdConnect
       openIdConnectUrl: https://auth.example.invalid/realms/finance/.well-known/openid-configuration
+    telegramServiceToken:
+      type: apiKey
+      in: header
+      name: X-Finance-Service-Token
   parameters:
     TenantId:
       name: tenantId
@@ -140,6 +3367,18 @@ components:
       required: true
       description: Same tenant, actor, route and key with a different body returns 409.
       schema: { type: string, minLength: 16, maxLength: 128 }
+    MerchantReclassificationIdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Reclassification key is extended with a transaction ID for atomic per-transaction updates.
+      schema: { type: string, minLength: 16, maxLength: 80, pattern: '^[A-Za-z0-9._:-]+$' }
+    CsrfToken:
+      name: X-XSRF-TOKEN
+      in: header
+      required: true
+      description: Token returned by the same-origin browser CSRF endpoint.
+      schema: { type: string, minLength: 16 }
   responses:
     BadRequest:
       description: Invalid amount, type, category or timestamp
@@ -148,6 +3387,11 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
     Unauthorized:
       description: Missing or invalid OIDC identity
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Current tenant role does not permit this financial mutation
       content:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
@@ -167,6 +3411,20 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    BrowserSession:
+      type: object
+      additionalProperties: false
+      required: [authenticated, displayName]
+      properties:
+        authenticated: { type: boolean }
+        displayName: { type: string }
+    CsrfToken:
+      type: object
+      required: [token, headerName, parameterName]
+      properties:
+        token: { type: string }
+        headerName: { type: string, const: X-XSRF-TOKEN }
+        parameterName: { type: string }
     CreateTenant:
       type: object
       additionalProperties: false
@@ -174,15 +3432,678 @@ components:
       properties:
         displayName: { type: string, minLength: 1, maxLength: 120 }
         timezone: { type: string, minLength: 1, maxLength: 64 }
+        memberDisplayName: { type: string, minLength: 1, maxLength: 120 }
+        plannedIncome: { type: [number, 'null'], exclusiveMinimum: 0, multipleOf: 0.01 }
     TenantMembership:
       type: object
       additionalProperties: false
-      required: [tenantId, displayName, role, timezone]
+      required: [tenantId, userId, displayName, role, timezone]
       properties:
         tenantId: { type: string, format: uuid }
+        userId: { type: string, format: uuid }
         displayName: { type: string }
         role: { type: string, enum: [owner, admin, member, viewer] }
         timezone: { type: string }
+    TenantMember:
+      type: object
+      additionalProperties: false
+      required: [userId, displayName, role]
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string, maxLength: 120 }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+    UpdateMemberProfile:
+      type: object
+      additionalProperties: false
+      required: [displayName, plannedIncome, onboardingState]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        plannedIncome: { type: [number, 'null'], exclusiveMinimum: 0, multipleOf: 0.01 }
+        onboardingState: { type: string, enum: [started, complete] }
+    UpdateNotificationPreferences:
+      type: object
+      additionalProperties: false
+      required: [language, dailyEnabled, dailyLocalTime, weeklyEnabled, weeklyDayOfWeek, weeklyLocalTime,
+                 quietHoursStart, quietHoursEnd]
+      properties:
+        language: { type: string, enum: [ru, en] }
+        dailyEnabled: { type: boolean }
+        dailyLocalTime: { type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+        weeklyEnabled: { type: boolean }
+        weeklyDayOfWeek: { type: integer, minimum: 1, maximum: 7 }
+        weeklyLocalTime: { type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+        quietHoursStart: { type: [string, 'null'], pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+        quietHoursEnd: { type: [string, 'null'], pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+    NotificationPreferences:
+      type: object
+      additionalProperties: false
+      required: [timezone, telegramLinked, language, dailyEnabled, dailyLocalTime, weeklyEnabled,
+                 weeklyDayOfWeek, weeklyLocalTime, quietHoursStart, quietHoursEnd, version]
+      properties:
+        timezone: { type: string, minLength: 1, maxLength: 64 }
+        telegramLinked: { type: boolean }
+        language: { type: string, enum: [ru, en] }
+        dailyEnabled: { type: boolean }
+        dailyLocalTime: { type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+        weeklyEnabled: { type: boolean }
+        weeklyDayOfWeek: { type: integer, minimum: 1, maximum: 7 }
+        weeklyLocalTime: { type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+        quietHoursStart: { type: [string, 'null'], pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+        quietHoursEnd: { type: [string, 'null'], pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
+        version: { type: integer, minimum: 0 }
+    MemberProfile:
+      type: object
+      additionalProperties: false
+      required: [displayName, plannedIncome, onboardingState, timezone, currency]
+      properties:
+        displayName: { type: string }
+        plannedIncome: { type: [number, 'null'] }
+        onboardingState: { type: string, enum: [started, complete] }
+        timezone: { type: string }
+        currency: { type: string, const: RUB }
+    TelegramLinkCode:
+      type: object
+      additionalProperties: false
+      required: [code, expiresAt]
+      properties:
+        code: { type: string, pattern: '^[A-HJ-NP-Z2-9]{4}(?:-[A-HJ-NP-Z2-9]{4}){3}$' }
+        expiresAt: { type: string, format: date-time }
+    RedeemTelegramLinkCode:
+      type: object
+      required: [code, telegramUserId]
+      properties:
+        code: { type: string, minLength: 16, maxLength: 19 }
+        telegramUserId: { type: integer, format: int64, minimum: 1 }
+        telegramDisplayName: { type: string, minLength: 1, maxLength: 120 }
+      description: Additional fields are ignored; a caller-supplied userId never determines ownership.
+    TelegramLinkResult:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, const: linked }
+    ListTelegramActorTenants:
+      type: object
+      additionalProperties: false
+      required: [telegramUserId]
+      properties:
+        telegramUserId: { type: integer, format: int64, minimum: 1 }
+        telegramDisplayName: { type: string, minLength: 1, maxLength: 120 }
+    TelegramActorTenant:
+      type: object
+      additionalProperties: false
+      required: [tenantId, displayName, role]
+      properties:
+        tenantId: { type: string, format: uuid }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+    TelegramActorTenantList:
+      type: object
+      additionalProperties: false
+      required: [tenants]
+      properties:
+        tenants:
+          type: array
+          items: { $ref: '#/components/schemas/TelegramActorTenant' }
+    IssueTelegramActorContext:
+      type: object
+      additionalProperties: true
+      required: [telegramUserId, tenantId]
+      properties:
+        telegramUserId: { type: integer, format: int64, minimum: 1 }
+        tenantId: { type: string, format: uuid }
+      description: Extra caller fields are ignored. Core maps telegramUserId to the bound Finance user and checks membership in tenantId.
+    ResolveTelegramActorContext:
+      type: object
+      additionalProperties: false
+      required: [token]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+    TelegramReportRequest:
+      type: object
+      additionalProperties: true
+      required: [token, period, scope]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        period: { type: string, enum: [month, week, 90d, custom] }
+        month: { type: [string, 'null'], pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+        from: { type: [string, 'null'], format: date }
+        to: { type: [string, 'null'], format: date }
+        scope: { type: string, enum: [personal, family] }
+      description: Actor token determines identity and tenant. Extra caller identity or tenant fields are ignored.
+    TelegramProductCatalogRequest:
+      type: object
+      additionalProperties: false
+      required: [token, query]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        query: { type: string, maxLength: 80, default: '' }
+    TelegramHistoryRequest:
+      type: object
+      additionalProperties: false
+      required: [token, limit]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        limit: { type: integer, minimum: 1, maximum: 20, default: 8 }
+    TelegramHistoryResponse:
+      type: object
+      additionalProperties: false
+      required: [transactions]
+      properties:
+        transactions:
+          type: array
+          items: { $ref: '#/components/schemas/Transaction' }
+    TelegramRepeatRequest:
+      type: object
+      additionalProperties: true
+      required: [token, idempotencyKey, transactionId]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+        transactionId: { type: string, format: uuid }
+      description: Actor token determines identity and tenant. Extra caller fields are ignored.
+    TelegramVoidLatestRequest:
+      type: object
+      additionalProperties: true
+      required: [token, idempotencyKey, transactionId, version]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+        transactionId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+      description: Actor token determines identity and tenant. Core verifies the transaction is the latest posted operation.
+    CreateTelegramTransactionDraft:
+      type: object
+      additionalProperties: true
+      required: [token, idempotencyKey, text]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+        text: { type: string, minLength: 1, maxLength: 500 }
+      description: Actor token determines identity and tenant. Extra caller fields are ignored.
+    TelegramDraftDecision:
+      type: object
+      additionalProperties: true
+      required: [token, idempotencyKey, version]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        idempotencyKey: { type: string, minLength: 16, maxLength: 128 }
+        version: { type: integer, minimum: 1 }
+      description: The actor token determines identity and tenant. Extra caller fields are ignored.
+    TelegramDraftAmount:
+      type: object
+      additionalProperties: true
+      required: [token, version, amount]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        version: { type: integer, minimum: 1 }
+        amount: { type: string, pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$' }
+      description: The actor token determines identity and tenant. The endpoint changes amount only.
+    TelegramDraftEdit:
+      type: object
+      additionalProperties: true
+      required: [token, version, type, amount, currency, categoryCode, subcategoryCode, description, occurredAt, debtId]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        version: { type: integer, minimum: 1 }
+        type: { type: string, enum: [expense, income, debt_payment] }
+        amount: { type: string, pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$' }
+        currency: { type: string, const: RUB }
+        categoryCode: { type: string, minLength: 1, maxLength: 64 }
+        subcategoryCode: { type: [string, 'null'], maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        occurredAt: { type: string, format: date-time }
+        debtId: { type: [string, 'null'], format: uuid }
+      description: The actor token determines identity and tenant. Extra caller fields are ignored.
+    TelegramDraftCancel:
+      type: object
+      additionalProperties: true
+      required: [token, version]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        version: { type: integer, minimum: 1 }
+      description: The actor token determines identity and tenant. Extra caller fields are ignored.
+    TelegramDraftCancelled:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: { type: string, const: cancelled }
+    TelegramDebtList:
+      type: object
+      additionalProperties: false
+      required: [debts]
+      properties:
+        debts:
+          type: array
+          items: { $ref: '#/components/schemas/Debt' }
+    TelegramActorContext:
+      type: object
+      additionalProperties: false
+      required: [token, tenantId, displayName, role, permissions, expiresAt]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        tenantId: { type: string, format: uuid }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+        permissions:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        expiresAt: { type: string, format: date-time }
+    ResolvedTelegramActorContext:
+      type: object
+      additionalProperties: false
+      required: [tenantId, displayName, role, permissions, expiresAt]
+      properties:
+        tenantId: { type: string, format: uuid }
+        displayName: { type: string, minLength: 1, maxLength: 120 }
+        role: { type: string, enum: [owner, admin, member, viewer] }
+        permissions:
+          type: array
+          uniqueItems: true
+          items: { type: string }
+        expiresAt: { type: string, format: date-time }
+    CreateDebt:
+      type: object
+      additionalProperties: false
+      required: [name, openingBalance]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        openingBalance: { type: string, pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$' }
+        interestRate: { type: [string, 'null'], pattern: '^\d+(?:\.\d{1,4})?$' }
+        minimumPayment: { type: [string, 'null'], pattern: '^\d+(?:\.\d{1,2})?$' }
+    Debt:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, name, openingBalance, currentBalance, minimumPayment, status, version, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 120 }
+        openingBalance: { type: string, pattern: '^\d+\.\d{2}$' }
+        currentBalance: { type: string, pattern: '^\d+\.\d{2}$' }
+        interestRate: { type: [string, 'null'] }
+        minimumPayment: { type: string, pattern: '^\d+\.\d{2}$' }
+        status: { type: string, enum: [open, closed] }
+        version: { type: integer, minimum: 1 }
+        createdAt: { type: string, format: date-time }
+    DebtPage:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Debt' }
+    RecordDebtPayment:
+      type: object
+      additionalProperties: false
+      required: [amount, occurredAt]
+      properties:
+        amount: { type: string, pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$' }
+        occurredAt: { type: string, format: date-time }
+    AdjustDebtBalance:
+      type: object
+      additionalProperties: false
+      required: [currentBalance]
+      properties:
+        currentBalance: { type: string, pattern: '^\d{1,18}(?:\.\d{1,2})?$' }
+    DebtPayment:
+      type: object
+      additionalProperties: false
+      required: [transactionId, balanceReduction, debt]
+      properties:
+        transactionId: { type: string, format: uuid }
+        balanceReduction: { type: string, pattern: '^\d+\.\d{2}$' }
+        debt: { $ref: '#/components/schemas/Debt' }
+    DebtForecast:
+      type: object
+      additionalProperties: false
+      required: [debtId, monthsToPayoff, estimateBasis]
+      properties:
+        debtId: { type: string, format: uuid }
+        monthsToPayoff: { type: [integer, 'null'], minimum: 0, maximum: 600 }
+        estimateBasis: { type: string }
+    UpdateBudget:
+      type: object
+      additionalProperties: false
+      required: [scope, amount]
+      properties:
+        scope: { type: string, enum: [family, personal] }
+        amount: { type: string, pattern: '^\d{1,8}(?:\.\d{1,2})?$' }
+        period: { type: string, enum: [monthly, rolling7], default: monthly }
+    BudgetProposalRequest:
+      type: object
+      additionalProperties: false
+      required: [monthlyIncome]
+      properties:
+        monthlyIncome: { type: string, pattern: '^\d{1,18}(?:\.\d{1,2})?$' }
+    BudgetProposal:
+      type: object
+      additionalProperties: false
+      required: [id, monthlyIncome, totalLimit, limits, baseVersions, baseTotalVersion, status, createdAt, proposalSource, historyDays, modelVersion, promptVersion]
+      properties:
+        id: { type: string, format: uuid }
+        monthlyIncome: { type: string, pattern: '^\d+\.\d{2}$' }
+        totalLimit: { type: string, pattern: '^\d+\.\d{2}$' }
+        limits:
+          type: object
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        baseVersions:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        baseTotalVersion: { type: integer, minimum: 0 }
+        status: { type: string, enum: [pending] }
+        createdAt: { type: string, format: date-time }
+        proposalSource: { type: string, enum: [income, history_ai] }
+        historyDays: { type: integer, minimum: 0, maximum: 3660 }
+        modelVersion: { type: [string, 'null'], maxLength: 128 }
+        promptVersion: { type: [string, 'null'], maxLength: 64 }
+    BudgetOverview:
+      type: object
+      additionalProperties: false
+      required: [currency, month, familyLimits, personalOverrides, effectiveLimits, monthlySpent, limitStatus, familyVersions, personalVersions, familyTotalLimit, effectiveTotalLimit, totalMonthlySpent, totalLimitStatus, familyTotalVersion, personalTotalVersion, rolling7FoodLimit, personalRolling7FoodOverride, effectiveRolling7FoodLimit, rolling7FoodSpent, rolling7FoodLimitStatus, familyRolling7FoodVersion, personalRolling7FoodVersion, rolling7FoodStatus]
+      properties:
+        currency: { type: string, const: RUB }
+        month: { type: string, pattern: '^\d{4}-\d{2}$' }
+        familyLimits:
+          type: object
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        personalOverrides:
+          type: object
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        effectiveLimits:
+          type: object
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        monthlySpent:
+          type: object
+          additionalProperties: { type: string, pattern: '^-?\d+\.\d{2}$' }
+        limitStatus:
+          type: object
+          additionalProperties: { type: string, enum: [disabled, normal, near, exceeded] }
+        familyVersions:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        personalVersions:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        familyTotalLimit: { type: string, pattern: '^\d+\.\d{2}$' }
+        personalTotalOverride: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        effectiveTotalLimit: { type: string, pattern: '^\d+\.\d{2}$' }
+        totalMonthlySpent: { type: string, pattern: '^-?\d+\.\d{2}$' }
+        totalLimitStatus: { type: string, enum: [disabled, normal, near, exceeded] }
+        familyTotalVersion: { type: integer, minimum: 0 }
+        personalTotalVersion: { type: integer, minimum: 0 }
+        rolling7FoodLimit: { type: string, pattern: '^\d+\.\d{2}$' }
+        personalRolling7FoodOverride: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        effectiveRolling7FoodLimit: { type: string, pattern: '^\d+\.\d{2}$' }
+        rolling7FoodSpent: { type: string, pattern: '^-?\d+\.\d{2}$' }
+        rolling7FoodLimitStatus: { type: string, enum: [disabled, normal, near, exceeded] }
+        familyRolling7FoodVersion: { type: integer, minimum: 0 }
+        personalRolling7FoodVersion: { type: integer, minimum: 0 }
+        rolling7FoodStatus: { $ref: '#/components/schemas/RollingFoodStatus' }
+    RollingFoodStatus:
+      type: object
+      additionalProperties: false
+      required: [fromDate, toDate, limit, spent, remaining, limitStatus, usualWeeklySpend, historyWeeks, paceStatus, paceShare]
+      properties:
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        limit: { type: string, pattern: '^\d+\.\d{2}$' }
+        spent: { type: string, pattern: '^\d+\.\d{2}$' }
+        remaining: { type: [string, 'null'], pattern: '^-?\d+\.\d{2}$' }
+        limitStatus: { type: string, enum: [disabled, normal, near, exceeded] }
+        usualWeeklySpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        historyWeeks: { type: integer, minimum: 0, maximum: 5 }
+        paceStatus: { type: string, enum: [insufficient_history, normal, over, under] }
+        paceShare: { type: [string, 'null'], pattern: '^-?\d+\.\d{3}$' }
+    FinanceReport:
+      type: object
+      additionalProperties: false
+      required: [period, scope, fromDate, toDate, asOfDate, timezone, currency, incomeTotal, expenseTotal, debtPaymentTotal, refundTotal, transactionCount, expenseByCategory, expenseByDay, weekendSharePercent, monthlyBudgetLimit, monthlyBudgetRemaining, rolling7FoodStatus]
+      properties:
+        period: { type: string, enum: [month, week, 90d, custom] }
+        scope: { type: string, enum: [personal, family] }
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        asOfDate: { type: string, format: date }
+        timezone: { type: string, minLength: 1, maxLength: 64 }
+        currency: { type: string, const: RUB }
+        incomeTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+        expenseTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+        debtPaymentTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+        refundTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+        transactionCount: { type: integer, minimum: 0 }
+        expenseByCategory:
+          type: object
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        expenseByDay:
+          type: object
+          description: Server-computed expenses keyed by local ISO date, including empty dates as zero.
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        weekendSharePercent: { type: [integer, 'null'], minimum: 0, maximum: 100 }
+        monthlyBudgetLimit: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        monthlyBudgetRemaining: { type: [string, 'null'], pattern: '^-?\d+\.\d{2}$' }
+        rolling7FoodStatus: { $ref: '#/components/schemas/RollingFoodStatus' }
+    DashboardSummary:
+      type: object
+      additionalProperties: false
+      required: [month, currency, incomeTotal, expenseTotal, transactionCount, asOfDate, daysElapsed, daysInMonth, daysRemaining, dailyExpensePace, projectedExpenseTotal, rolling7FoodStatus, safeToSpend]
+      properties:
+        month: { type: string, pattern: '^\d{4}-\d{2}$' }
+        currency: { type: string, const: RUB }
+        incomeTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+        expenseTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+        transactionCount: { type: integer, minimum: 0 }
+        asOfDate: { type: string, format: date }
+        daysElapsed: { type: integer, minimum: 0, maximum: 31 }
+        daysInMonth: { type: integer, minimum: 28, maximum: 31 }
+        daysRemaining: { type: integer, minimum: 0, maximum: 31 }
+        dailyExpensePace: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        projectedExpenseTotal: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        rolling7FoodStatus: { $ref: '#/components/schemas/RollingFoodStatus' }
+        safeToSpend: { oneOf: [{ $ref: '#/components/schemas/SafeToSpend' }, { type: 'null' }] }
+    SafeToSpend:
+      type: object
+      additionalProperties: false
+      required: [incomeBasis, incomeBase, month, horizonDate, daysRemaining, monthlyExpenses, reserve, promisedPayments, safeTotal, safePerDay]
+      properties:
+        incomeBasis: { type: string, enum: [actual_income, planned_income] }
+        incomeBase: { type: string, pattern: '^\d+\.\d{2}$' }
+        month: { type: string, pattern: '^\d{4}-\d{2}$' }
+        horizonDate: { type: string, format: date }
+        daysRemaining: { type: integer, minimum: 1, maximum: 366 }
+        monthlyExpenses: { type: string, pattern: '^\d+\.\d{2}$' }
+        reserve: { type: string, pattern: '^\d+\.\d{2}$' }
+        promisedPayments: { type: string, pattern: '^\d+\.\d{2}$' }
+        safeTotal: { type: string, pattern: '^\d+\.\d{2}$' }
+        safePerDay: { type: string, pattern: '^\d+\.\d{2}$' }
+    BankImportRowSelection:
+      type: object
+      additionalProperties: false
+      required: [transactionType]
+      properties:
+        transactionType:
+          type: [string, 'null']
+          enum: [expense, income, refund, transfer, null]
+          description: Null restores the default include/exclude rule for this row.
+    BankImportCategorySelection:
+      type: object
+      additionalProperties: false
+      required: [categoryCode]
+      properties:
+        categoryCode:
+          type: string
+          enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее]
+    MerchantMappingRequest:
+      type: object
+      additionalProperties: false
+      required: [merchant, categoryCode]
+      properties:
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+        categoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+    MerchantMappingList:
+      type: object
+      additionalProperties: false
+      required: [mappings]
+      properties:
+        mappings:
+          type: array
+          items: { $ref: '#/components/schemas/MerchantMapping' }
+    MerchantMapping:
+      type: object
+      additionalProperties: false
+      required: [merchant, normalizedMerchant, categoryCode, decisionSource, decisionVersion, updatedAt]
+      properties:
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+        normalizedMerchant: { type: string, minLength: 1, maxLength: 200 }
+        categoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+        decisionSource: { type: string, const: human }
+        decisionVersion: { type: string, const: merchant-category.v1 }
+        updatedAt: { type: string, format: date-time }
+    MerchantReclassificationPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [merchant]
+      properties:
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+    MerchantReclassificationCandidate:
+      type: object
+      additionalProperties: false
+      required: [transactionId, version, currentCategoryCode, amount, occurredAt, description]
+      properties:
+        transactionId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        currentCategoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
+        occurredAt: { type: string, format: date-time }
+        description: { type: string, maxLength: 500 }
+    MerchantReclassificationPreview:
+      type: object
+      additionalProperties: false
+      required: [merchant, normalizedMerchant, categoryCode, candidates]
+      properties:
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+        normalizedMerchant: { type: string, minLength: 1, maxLength: 200 }
+        categoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+        candidates:
+          type: array
+          items: { $ref: '#/components/schemas/MerchantReclassificationCandidate' }
+    MerchantReclassificationCandidateSelection:
+      type: object
+      additionalProperties: false
+      required: [transactionId, version, currentCategoryCode]
+      properties:
+        transactionId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        currentCategoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+    MerchantReclassificationApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [merchant, categoryCode, candidates]
+      properties:
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+        categoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+        candidates:
+          type: array
+          minItems: 1
+          maxItems: 10000
+          items: { $ref: '#/components/schemas/MerchantReclassificationCandidateSelection' }
+    MerchantReclassificationApplyResult:
+      type: object
+      additionalProperties: false
+      required: [merchant, categoryCode, changedCount, transactionIds]
+      properties:
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+        categoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+        changedCount: { type: integer, minimum: 0, maximum: 10000 }
+        transactionIds:
+          type: array
+          maxItems: 10000
+          items: { type: string, format: uuid }
+    BankImportConfirm:
+      type: object
+      additionalProperties: false
+      required: [confirmed]
+      properties:
+        confirmed: { type: boolean, const: true }
+    BankImportUndoResult:
+      type: object
+      additionalProperties: false
+      required: [id, state, revision, revertedCount, conflicts]
+      properties:
+        id: { type: string, format: uuid }
+        state: { type: string, enum: [committed, reverted] }
+        revision: { type: integer, minimum: 1 }
+        revertedCount: { type: integer, minimum: 0 }
+        conflicts:
+          type: array
+          items: { type: string, format: uuid }
+    BankImportPreview:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, state, revision, quality, parseVersion, periodStart, periodEnd,
+        parsedExpenseTotal, parsedIncomeTotal, expectedExpenseTotal, expectedIncomeTotal, expenseTotal,
+        incomeTotal, refundTotal, transferTotal, excludedTotal, includedCount, excludedCount, createdCount,
+        duplicateCount, rows]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        state: { type: string, enum: [needs_review, ready, committed, reverted, failed] }
+        revision: { type: integer, minimum: 1 }
+        quality: { type: string, enum: [valid, mismatch, unverifiable] }
+        parseVersion: { type: string, const: tbank-pdf.v1 }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        parsedExpenseTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        parsedIncomeTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        expectedExpenseTotal: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        expectedIncomeTotal: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        expenseTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        incomeTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        refundTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        transferTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        excludedTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        includedCount: { type: integer, minimum: 0 }
+        excludedCount: { type: integer, minimum: 0 }
+        createdCount: { type: integer, minimum: 0 }
+        duplicateCount: { type: integer, minimum: 0 }
+        rows:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/BankImportRow' }
+    BankImportRow:
+      type: object
+      additionalProperties: false
+      required: [id, ordinal, operationDate, operationTime, signedAmount, amount, kind, transactionType,
+        included, selectionSource, exclusionReason, duplicate, duplicateOfTransactionId, outcome, transactionId,
+        merchant, description, cardLast4, categoryCode, categorySource, suggestedCategoryCode, categoryConfidence,
+        clarificationCandidate]
+      properties:
+        id: { type: string, format: uuid }
+        ordinal: { type: integer, minimum: 0 }
+        operationDate: { type: string, format: date }
+        operationTime: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }
+        signedAmount: { type: string, pattern: '^-?(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        amount: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        kind: { type: string, enum: [purchase, income, refund, fee, transfer_out, withdrawal, internal] }
+        transactionType: { type: [string, 'null'], enum: [expense, income, refund, transfer, null] }
+        included: { type: boolean }
+        selectionSource: { type: string, enum: [default, user] }
+        exclusionReason: { type: [string, 'null'], enum: [bank_fee, external_transfer, cash_withdrawal, internal_transfer, requires_review, null] }
+        duplicate: { type: boolean }
+        duplicateOfTransactionId: { type: [string, 'null'], format: uuid }
+        outcome: { type: string, enum: [pending, created, duplicate, excluded, reverted] }
+        transactionId: { type: [string, 'null'], format: uuid }
+        merchant: { type: [string, 'null'], maxLength: 200 }
+        description: { type: string, minLength: 1, maxLength: 2048 }
+        cardLast4: { type: [string, 'null'], pattern: '^[0-9]{4}$' }
+        categoryCode: { type: [string, 'null'], enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее, null] }
+        categorySource: { type: string, enum: [human, mapping, model, unknown] }
+        suggestedCategoryCode: { type: [string, 'null'], enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее, null] }
+        categoryConfidence: { type: [string, 'null'], pattern: '^(?:0\.[0-9]{3}|1\.000)$' }
+        clarificationCandidate: { type: boolean }
     CreateTransaction:
       type: object
       additionalProperties: false
@@ -199,12 +4120,498 @@ components:
         categoryCode: { type: string, minLength: 1, maxLength: 64 }
         subcategoryCode: { type: [string, 'null'], maxLength: 64 }
         description: { type: string, maxLength: 500 }
+        source: { type: string, minLength: 1, maxLength: 64, description: Origin label preserved with the transaction }
         occurredAt: { type: string, format: date-time }
         accountId: { type: [string, 'null'], format: uuid }
+        ownerUserId: { type: [string, 'null'], format: uuid, description: Owner/admin may assign a transaction to an active tenant member }
+    UpdateTransaction:
+      type: object
+      additionalProperties: false
+      required: [type, amount, currency, categoryCode, description, occurredAt]
+      properties:
+        type:
+          type: string
+          enum: [expense, income, refund, debt_payment, transfer]
+        amount:
+          type: string
+          pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$'
+          description: Positive decimal amount. JSON numbers and floating point are rejected.
+        currency: { type: string, const: RUB }
+        categoryCode: { type: string, minLength: 1, maxLength: 64 }
+        subcategoryCode: { type: [string, 'null'], maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        source: { type: string, minLength: 1, maxLength: 64, description: Origin label preserved with the transaction }
+        occurredAt: { type: string, format: date-time }
+        accountId: { type: [string, 'null'], format: uuid }
+        debtId: { type: [string, 'null'], format: uuid, description: Required when editing a debt payment }
+        ownerUserId: { type: [string, 'null'], format: uuid, description: Owner/admin may reassign a transaction to an active tenant member }
+    TransactionDraftText:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 500 }
+    CreateReceipt:
+      type: object
+      additionalProperties: false
+      required: [cashTotal, merchant, receiptDate, items]
+      properties:
+        documentId: { type: [string, 'null'], format: uuid }
+        cashTotal: { type: [string, 'null'], pattern: '^(?:0\\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\\.[0-9]{1,2})?)$' }
+        merchant: { type: [string, 'null'], maxLength: 200 }
+        receiptDate: { type: [string, 'null'], format: date }
+        items:
+          type: array
+          maxItems: 200
+          items: { $ref: '#/components/schemas/ReceiptItemInput' }
+    ReceiptItemInput:
+      type: object
+      additionalProperties: false
+      required: [name, quantity, unitPrice, lineSum]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        quantity: { type: [string, 'null'], pattern: '^(?=.*[1-9])(?:0|[1-9][0-9]{0,11})(?:\\.[0-9]{1,6})?$' }
+        unitPrice: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,2})?$' }
+        lineSum: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,2})?$' }
+    ReceiptCategorySelection:
+      type: object
+      additionalProperties: false
+      required: [categoryCode]
+      properties:
+        categoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+    Receipt:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, documentId, state, version, currency, cashTotal, itemsTotal, itemCount,
+                 merchant, receiptDate, selectedReader, categoryCode, categorySource, categoryAlgorithmVersion,
+                 alcoholShare, leisureShare, leisure, transactionId, duplicateDecision, duplicateOfReceiptId, items, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        documentId: { type: [string, 'null'], format: uuid }
+        state: { type: string, enum: [draft, review_required, confirmed, cancelled] }
+        version: { type: integer, minimum: 1 }
+        transactionId: { type: [string, 'null'], format: uuid }
+        currency: { type: string, const: RUB }
+        cashTotal: { type: [string, 'null'] }
+        itemsTotal: { type: [string, 'null'] }
+        merchant: { type: [string, 'null'], maxLength: 200 }
+        receiptDate: { type: [string, 'null'], format: date }
+        selectedReader: { type: [string, 'null'], enum: [ocr, vision, manual, null] }
+        categoryCode: { type: [string, 'null'], enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее, null] }
+        categorySource: { type: string, enum: [rule, model, default, unknown, human] }
+        categoryAlgorithmVersion: { type: string, minLength: 1, maxLength: 64 }
+        alcoholShare: { type: [string, 'null'] }
+        leisureShare: { type: [string, 'null'] }
+        leisure: { type: boolean }
+        duplicateDecision: { type: string, enum: [unknown, independent, duplicate] }
+        duplicateOfReceiptId: { type: [string, 'null'], format: uuid }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ReceiptItem' }
+        itemCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    ReceiptItem:
+      type: object
+      additionalProperties: false
+      required: [id, name, quantity, unitPrice, lineSum, productKey, provenance, confidence, categoryCode, verdict,
+                 advice, reviewReason, reviewAction, verdictSource, reviewProvider, reviewModelVersion,
+                 reviewPromptVersion, reviewAlgorithmVersion, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        quantity: { type: [string, 'null'], maxLength: 32 }
+        unitPrice: { type: [string, 'null'] }
+        lineSum: { type: [string, 'null'] }
+        productKey: { type: string, maxLength: 256 }
+        provenance: { type: string, enum: [ocr, vision, manual, reconciled, unresolved] }
+        confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        categoryCode: { type: [string, 'null'], maxLength: 64 }
+        verdict: { type: [string, 'null'], enum: [useful, neutral, harmful, unnecessary, null] }
+        advice: { type: [string, 'null'], maxLength: 500 }
+        reviewReason: { type: [string, 'null'], maxLength: 500 }
+        reviewAction: { type: [string, 'null'], maxLength: 500 }
+        verdictSource: { type: string, enum: [rule, model, default, unknown, human] }
+        reviewProvider: { type: [string, 'null'], maxLength: 128 }
+        reviewModelVersion: { type: [string, 'null'], maxLength: 128 }
+        reviewPromptVersion: { type: [string, 'null'], maxLength: 128 }
+        reviewAlgorithmVersion: { type: string, minLength: 1, maxLength: 64 }
+        version: { type: integer, minimum: 1 }
+    ProductDecisionSelection:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: { type: string, const: allowed }
+    ProductDecision:
+      type: object
+      additionalProperties: false
+      required: [productKey, decision, version, updatedAt]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256 }
+        decision: { type: string, enum: [allowed, confirmed] }
+        version: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    ProductDecisionKeys:
+      type: object
+      additionalProperties: false
+      required: [productKeys]
+      properties:
+        productKeys:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 256 }
+    ProductCatalogResponse:
+      type: object
+      additionalProperties: false
+      required: [mode, query, products]
+      properties:
+        mode: { type: string, enum: [catalog, search] }
+        query: { type: string, maxLength: 80 }
+        products:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ProductCatalogCard' }
+      allOf:
+        - if:
+            properties: { mode: { const: search } }
+            required: [mode]
+          then:
+            properties:
+              products: { maxItems: 5 }
+        - if:
+            properties: { mode: { const: catalog } }
+            required: [mode]
+          then:
+            properties:
+              products:
+                items:
+                  properties:
+                    purchaseCount: { minimum: 3 }
+      description: Search returns at most five cards; catalog requires three confirmed purchases and search requires one.
+    ProductCatalogCard:
+      type: object
+      additionalProperties: false
+      required: [productName, purchaseCount, usualUnitPrice, hasBaseline, baselineUnitPrice, lastUnitPrice,
+                 lastPurchasedAt, lastMerchant, cheapestUnitPrice, cheapestMerchant, totalSpent, change, relative,
+                 signal, direction, priorPurchases, chartAvailable, history]
+      properties:
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        purchaseCount: { type: integer, minimum: 1, maximum: 5000 }
+        usualUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        hasBaseline: { type: boolean }
+        baselineUnitPrice: { type: [string, 'null'], pattern: '^\d{1,30}\.\d{6}$' }
+        lastUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        lastPurchasedAt: { type: string, format: date-time }
+        lastMerchant: { type: [string, 'null'], maxLength: 200 }
+        cheapestUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        cheapestMerchant: { type: [string, 'null'], maxLength: 200 }
+        totalSpent: { type: string, pattern: '^\d{1,22}\.\d{2}$' }
+        change: { type: [string, 'null'], pattern: '^-?\d{1,30}\.\d{6}$' }
+        relative: { type: [string, 'null'], pattern: '^-?\d{1,45}\.\d{6}$' }
+        signal: { type: boolean }
+        direction: { type: [string, 'null'], enum: [up, down, null] }
+        priorPurchases: { type: integer, minimum: 0, maximum: 4999 }
+        chartAvailable: { type: boolean, description: True only when at least two real receipt points are present. }
+        history:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    PriceComparison:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, productName, hasBaseline, currentUnitPrice, baselineUnitPrice, change, relative,
+                 signal, direction, priorPurchases, history]
+      properties:
+        algorithmVersion: { type: string, const: price-projection.v1 }
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        hasBaseline: { type: boolean }
+        currentUnitPrice: { type: string, pattern: '^\d{1,24}\.\d{6}$' }
+        baselineUnitPrice:
+          type: [string, 'null']
+          pattern: '^\d{1,24}\.\d{6}$'
+          description: Median price for matching earlier purchases by this same member; null without history.
+        change:
+          type: [string, 'null']
+          pattern: '^-?\d{1,24}\.\d{6}$'
+          description: Current unit price minus the baseline; null without history.
+        relative:
+          type: [string, 'null']
+          pattern: '^-?\d{1,40}\.\d{6}$'
+          description: Fractional change from baseline; 0.125000 means 12.5 percent.
+        signal: { type: boolean, description: True only when both RUB 10 and 12 percent thresholds are met. }
+        direction:
+          type: [string, 'null']
+          enum: [up, down, null]
+          description: Significant movement direction; null when no signal exists.
+        priorPurchases:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          description: Count of matching earlier purchases for this member.
+        history:
+          type: array
+          maxItems: 5001
+          description: Matching price points in time order, followed by the current receipt item.
+          items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    PriceHistoryPoint:
+      type: object
+      additionalProperties: false
+      required: [receiptId, itemId, purchasedAt, merchant, name, unitPrice, current]
+      properties:
+        receiptId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        purchasedAt: { type: string, format: date-time }
+        merchant: { type: [string, 'null'], maxLength: 200 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        unitPrice: { type: string, pattern: '^\d{1,24}\.\d{6}$' }
+        current: { type: boolean }
+    ReceiptItemPage:
+      type: object
+      additionalProperties: false
+      required: [items, page, totalItems, hasMore]
+      properties:
+        items:
+          type: array
+          maxItems: 8
+          items: { $ref: '#/components/schemas/ReceiptItem' }
+        page: { type: integer, minimum: 1 }
+        totalItems: { type: integer, minimum: 0 }
+        hasMore: { type: boolean }
+    ReceiptOcrReading:
+      type: object
+      additionalProperties: false
+      required: [text, words, provider, modelVersion, promptVersion, confidence,
+                 ocrTotal, ocrItems, reconciliation, visionFallbackReason, ocrFallbackReason]
+      properties:
+        text: { type: string, maxLength: 1024000 }
+        words:
+          type: array
+          maxItems: 4000
+          items:
+            type: object
+            additionalProperties: false
+            required: [text, confidence, box]
+            properties:
+              text: { type: string, minLength: 1, maxLength: 256 }
+              confidence: { type: number, minimum: 0, maximum: 100 }
+              box:
+                type: object
+                additionalProperties: false
+                required: [x, y, width, height]
+                properties:
+                  x: { type: integer, minimum: 0 }
+                  y: { type: integer, minimum: 0 }
+                  width: { type: integer, minimum: 0 }
+                  height: { type: integer, minimum: 0 }
+        provider:
+          oneOf:
+            - { type: string, const: tesseract }
+            - { type: 'null' }
+        modelVersion: { type: [string, 'null'], minLength: 1, maxLength: 128 }
+        promptVersion:
+          oneOf:
+            - { type: string, const: tesseract-ocr.v2 }
+            - { type: 'null' }
+        confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        ocrTotal: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+        ocrItems:
+          type: array
+          maxItems: 80
+          items: { $ref: '#/components/schemas/ReceiptStructuredLineItem' }
+        reconciliation: { $ref: '#/components/schemas/ReceiptReconciliation' }
+        visionFallbackReason: { type: [string, 'null'], maxLength: 64 }
+        ocrFallbackReason: { type: [string, 'null'], maxLength: 64 }
+        vision:
+          oneOf:
+            - { $ref: '#/components/schemas/ReceiptVisionReading' }
+            - { type: 'null' }
+    ReceiptVisionReading:
+      type: object
+      additionalProperties: false
+      required: [store, date, total, items, provider, modelVersion, promptVersion, fallbackReason]
+      properties:
+        store: { type: [string, 'null'], maxLength: 100 }
+        date: { type: [string, 'null'], format: date }
+        total: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+        items:
+          type: array
+          maxItems: 80
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, quantity, unitPrice, lineSum]
+            properties:
+              name: { type: string, minLength: 1, maxLength: 200 }
+              quantity: { type: [string, 'null'], pattern: '^\\d{1,12}(?:\\.\\d{1,6})?$' }
+              unitPrice: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+              lineSum: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+        provider: { type: string, const: ollama }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, const: receipt-vision.v1 }
+        fallbackReason: { type: [string, 'null'], maxLength: 64 }
+    ReceiptStructuredLineItem:
+      type: object
+      additionalProperties: false
+      required: [name, quantity, unitPrice, lineSum]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        quantity: { type: [string, 'null'], pattern: '^\\d{1,12}(?:\\.\\d{1,6})?$' }
+        unitPrice: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+        lineSum: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+    ReceiptReconciliation:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, decision, selectedReader, mismatchFields, ocrItemsTotal, visionItemsTotal,
+                 allowedDifference, ocrItemsReconciled, visionItemsReconciled, itemEvidence, suggestedTopUps]
+      properties:
+        algorithmVersion: { type: string, const: receipt-reconciliation.v1 }
+        decision: { type: string, enum: [auto_selected, review_required, insufficient_data] }
+        selectedReader: { type: [string, 'null'], enum: [ocr, vision, null] }
+        mismatchFields:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [total, merchant, date, items] }
+        ocrItemsTotal: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+        visionItemsTotal: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+        allowedDifference: { type: [string, 'null'], pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+        ocrItemsReconciled: { type: boolean }
+        visionItemsReconciled: { type: boolean }
+        itemEvidence:
+          type: array
+          maxItems: 80
+          items: { $ref: '#/components/schemas/ReceiptItemEvidence' }
+        suggestedTopUps:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/ReceiptTopUpSuggestion' }
+    ReceiptItemEvidence:
+      type: object
+      additionalProperties: false
+      required: [visionOrdinal, ocrOrdinal, status]
+      properties:
+        visionOrdinal: { type: integer, minimum: 1, maximum: 80 }
+        ocrOrdinal: { type: [integer, 'null'], minimum: 1, maximum: 80 }
+        status: { type: string, enum: [corroborated, amount_disagrees, amount_unknown, reader_only] }
+    ReceiptTopUpSuggestion:
+      type: object
+      additionalProperties: false
+      required: [ocrOrdinal, name, lineSum]
+      properties:
+        ocrOrdinal: { type: integer, minimum: 1, maximum: 80 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        lineSum: { type: string, pattern: '^\\d{1,18}(?:\\.\\d{1,2})?$' }
+    ReceiptProcessingJob:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, documentId, state, stage, progressPercent, attemptCount,
+                 retryable, errorCode, receiptId, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        state: { type: string, enum: [queued, running, retryable, completed, rejected] }
+        stage: { type: string, enum: [queued, scanning, vision, ocr, draft, complete] }
+        progressPercent: { type: integer, minimum: 0, maximum: 100 }
+        attemptCount: { type: integer, minimum: 0, maximum: 5 }
+        retryable: { type: boolean }
+        errorCode: { type: [string, 'null'], maxLength: 64 }
+        receiptId: { type: [string, 'null'], format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ReceiptRepeatWarning:
+      type: object
+      additionalProperties: false
+      required: [itemId, name, productKey, verdict, title, count, lastSum, advice]
+      properties:
+        itemId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        productKey: { type: string, maxLength: 256 }
+        verdict: { type: string, enum: [harmful, unnecessary] }
+        title: { type: string, minLength: 1, maxLength: 80 }
+        count: { type: integer, minimum: 1 }
+        lastSum: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        advice: { type: [string, 'null'], maxLength: 500 }
+    ReceiptRepeatWarnings:
+      type: object
+      additionalProperties: false
+      required: [warnings]
+      properties:
+        warnings:
+          type: array
+          maxItems: 200
+          items: { $ref: '#/components/schemas/ReceiptRepeatWarning' }
+    ReceiptDuplicateDecisionSelection:
+      type: object
+      additionalProperties: false
+      required: [decision, duplicateReceiptId]
+      properties:
+        decision: { type: string, enum: [independent, duplicate] }
+        duplicateReceiptId: { type: [string, 'null'], format: uuid }
+    ReceiptDuplicateCandidate:
+      type: object
+      additionalProperties: false
+      required: [id, cashTotal, merchant, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        cashTotal: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})\.[0-9]{2}$' }
+        merchant: { type: [string, 'null'], maxLength: 200 }
+        createdAt: { type: string, format: date-time }
+    ReceiptDuplicateCandidates:
+      type: object
+      additionalProperties: false
+      required: [receiptId, decision, candidates]
+      properties:
+        receiptId: { type: string, format: uuid }
+        decision: { type: string, enum: [unknown, independent, duplicate] }
+        candidates:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/ReceiptDuplicateCandidate' }
+    UpdateTransactionDraft:
+      type: object
+      additionalProperties: false
+      required: [type, amount, currency, categoryCode, subcategoryCode, description, occurredAt, debtId]
+      properties:
+        type: { type: string, enum: [expense, income, debt_payment] }
+        amount:
+          type: string
+          pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$'
+        currency: { type: string, const: RUB }
+        categoryCode: { type: string, minLength: 1, maxLength: 64 }
+        subcategoryCode: { type: [string, 'null'], maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        occurredAt: { type: string, format: date-time }
+        debtId: { type: [string, 'null'], format: uuid }
+    TransactionDraft:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, type, amount, currency, categoryCode, subcategoryCode, description, debtId,
+                 occurredAt, state, version, provider, modelVersion, promptVersion, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        type: { type: string, enum: [expense, income, debt_payment] }
+        amount:
+          type: string
+          pattern: '^(?:0\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\.[0-9]{1,2})?)$'
+        currency: { type: string, const: RUB }
+        categoryCode: { type: string, minLength: 1, maxLength: 64 }
+        subcategoryCode: { type: [string, 'null'], maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        occurredAt: { type: string, format: date-time }
+        debtId: { type: [string, 'null'], format: uuid }
+        state: { type: string, enum: [pending, confirmed, cancelled] }
+        version: { type: integer, minimum: 1 }
+        provider: { type: string, minLength: 1, maxLength: 64 }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, minLength: 1, maxLength: 64 }
+        createdAt: { type: string, format: date-time }
     Transaction:
       type: object
       additionalProperties: false
-      required: [id, tenantId, type, amount, currency, categoryCode, description, occurredAt, status, version, createdAt]
+      required: [id, tenantId, type, amount, currency, categoryCode, description, source, occurredAt, status, version, createdAt]
       properties:
         id: { type: string, format: uuid }
         tenantId: { type: string, format: uuid }
@@ -214,11 +4621,28 @@ components:
         categoryCode: { type: string, minLength: 1, maxLength: 64 }
         subcategoryCode: { type: [string, 'null'], maxLength: 64 }
         description: { type: string, maxLength: 500 }
+        source: { type: string, minLength: 1, maxLength: 64 }
         occurredAt: { type: string, format: date-time }
         accountId: { type: [string, 'null'], format: uuid }
         status: { type: string, enum: [posted, voided] }
         version: { type: integer, minimum: 1 }
         createdAt: { type: string, format: date-time }
+        memberName: { type: [string, 'null'], maxLength: 120 }
+        debtId: { type: [string, 'null'], format: uuid }
+        ownerUserId: { type: [string, 'null'], format: uuid }
+        budgetAlerts:
+          type: array
+          maxItems: 2
+          items: { $ref: '#/components/schemas/BudgetAlert' }
+    BudgetAlert:
+      type: object
+      additionalProperties: false
+      required: [budgetKey, threshold, limit, spent]
+      properties:
+        budgetKey: { type: string, minLength: 1, maxLength: 64, description: "__total__ represents the effective monthly total limit." }
+        threshold: { type: string, enum: [near, exceeded] }
+        limit: { type: string, pattern: '^\d+\.\d{2}$' }
+        spent: { type: string, pattern: '^\d+\.\d{2}$' }
     TransactionPage:
       type: object
       additionalProperties: false

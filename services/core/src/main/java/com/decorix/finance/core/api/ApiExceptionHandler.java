@@ -18,7 +18,9 @@ public class ApiExceptionHandler {
         HttpStatus status = HttpStatus.valueOf(exception.getStatusCode().value());
         String title = exception.getReason() == null ? status.getReasonPhrase() : exception.getReason();
         Problem problem = new Problem("about:blank", title, status.value(),
-                status.name().toLowerCase(Locale.ROOT), UUID.randomUUID().toString());
+                exception instanceof BankImportParseException parseException
+                        ? parseException.parserCode() : status.name().toLowerCase(Locale.ROOT),
+                UUID.randomUUID().toString());
         return ResponseEntity.status(status)
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_PROBLEM_JSON_VALUE)
                 .body(problem);

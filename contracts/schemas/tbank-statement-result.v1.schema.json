@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://finance.local/contracts/schemas/tbank-statement-result.v1.schema.json",
+  "title": "T-Bank statement parser result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operations",
+    "parsedExpenseTotal",
+    "parsedIncomeTotal",
+    "expectedExpenseTotal",
+    "expectedIncomeTotal",
+    "quality",
+    "periodStart",
+    "periodEnd",
+    "parseVersion"
+  ],
+  "properties": {
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "parsedExpenseTotal": { "$ref": "#/$defs/amount" },
+    "parsedIncomeTotal": { "$ref": "#/$defs/amount" },
+    "expectedExpenseTotal": { "$ref": "#/$defs/nullableAmount" },
+    "expectedIncomeTotal": { "$ref": "#/$defs/nullableAmount" },
+    "quality": { "type": "string", "enum": ["valid", "mismatch", "unverifiable"] },
+    "periodStart": { "$ref": "#/$defs/date" },
+    "periodEnd": { "$ref": "#/$defs/date" },
+    "parseVersion": { "type": "string", "const": "tbank-pdf.v1" }
+  },
+  "$defs": {
+    "amount": { "type": "string", "pattern": "^(?:0|[1-9][0-9]{0,17})\\.[0-9]{2}$" },
+    "signedAmount": { "type": "string", "pattern": "^-?(?:0|[1-9][0-9]{0,17})\\.[0-9]{2}$" },
+    "nullableAmount": {
+      "oneOf": [
+        { "$ref": "#/$defs/amount" },
+        { "type": "null" }
+      ]
+    },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operationDate",
+        "operationTime",
+        "signedAmount",
+        "currency",
+        "kind",
+        "merchant",
+        "description",
+        "cardLast4"
+      ],
+      "properties": {
+        "operationDate": { "$ref": "#/$defs/date" },
+        "operationTime": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+        "signedAmount": { "$ref": "#/$defs/signedAmount" },
+        "currency": { "type": "string", "const": "RUB" },
+        "kind": {
+          "type": "string",
+          "enum": ["purchase", "refund", "income", "transfer_out", "internal", "withdrawal", "fee"]
+        },
+        "merchant": { "oneOf": [{ "type": "string", "minLength": 1, "maxLength": 200 }, { "type": "null" }] },
+        "description": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "cardLast4": { "oneOf": [{ "type": "string", "pattern": "^[0-9]{4}$" }, { "type": "null" }] }
+      }
+    }
+  }
+}

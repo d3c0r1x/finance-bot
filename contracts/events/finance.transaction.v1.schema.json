@@ -29,8 +29,11 @@
         "currency": {"const": "RUB"},
         "category_code": {"type": "string", "maxLength": 64},
         "description": {"type": "string", "maxLength": 500},
+        "source": {"type": "string", "minLength": 1, "maxLength": 64},
         "status": {"enum": ["posted", "voided"]},
-        "financial_occurred_at": {"type": "string", "format": "date-time"}
+        "financial_occurred_at": {"type": "string", "format": "date-time"},
+        "debt_id": {"type": "string", "format": "uuid"},
+        "debt_balance_effect": {"type": "string", "pattern": "^\\d+\\.\\d{2}$"}
       }
     }
   }

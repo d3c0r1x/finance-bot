@@ -1,0 +1,801 @@
+openapi: 3.1.0
+info:
+  title: Finance Intelligence Internal API
+  version: 1.0.0
+  description: Private service contract. Never expose these operations to browser or Android clients.
+paths:
+  /healthz:
+    get:
+      operationId: intelligenceHealth
+      responses:
+        '200':
+          description: Process is ready to receive internal requests
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, const: ok }
+  /internal/v1/prices/compare:
+    post:
+      operationId: compareConfirmedReceiptPrice
+      security:
+        - serviceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PriceCompareRequest' }
+      responses:
+        '200':
+          description: Owner-scoped prior median and exact receipt-price history
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PriceComparison' }
+        '400': { description: Request is malformed or contains unknown fields }
+        '401': { description: Internal service token is missing or invalid }
+        '422': { description: Confirmed receipt item lacks a usable paid quantity or line sum }
+        '503': { description: Price history is temporarily unavailable }
+  /internal/v1/products/catalog:
+    post:
+      operationId: listMemberReceiptProducts
+      security:
+        - serviceBearer: []
+      description: Reads only confirmed purchase points for the supplied tenant and already Core-resolved member ID. Blank query returns products with at least three purchases; search returns matches from one purchase.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductCatalogRequest' }
+      responses:
+        '200':
+          description: Bounded purchase catalog or search with actual history and cheapest observed merchant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductCatalogResponse' }
+        '400': { description: Request is malformed or query exceeds 80 characters }
+        '401': { description: Internal service token is missing or invalid }
+        '503': { description: Product purchase history is temporarily unavailable }
+  /internal/v1/budget-proposals:
+    post:
+      operationId: createHistoryBudgetShares
+      security:
+        - serviceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BudgetProposalContext' }
+      parameters:
+        - { $ref: '#/components/parameters/AiTaskKind' }
+        - { $ref: '#/components/parameters/AiInputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiOutputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiDeadline' }
+        - { $ref: '#/components/parameters/AiExecutionPolicy' }
+        - { $ref: '#/components/parameters/AiCorrelationId' }
+        - { $ref: '#/components/parameters/AiRequiredCapabilities' }
+      responses:
+        '200':
+          description: Validated category shares and model provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BudgetProposalAdvice' }
+        '400': { description: Request is not an allowlisted aggregate context }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the body limit }
+        '403': { description: Effective AI policy denies the configured provider }
+        '409': { description: Request was cancelled or correlation ID conflicts }
+        '422': { description: Provider lacks a requested capability }
+        '429': { description: Inference capacity is full }
+        '502': { description: Model output is invalid }
+        '503': { description: Inference provider is unavailable }
+        '504': { description: Request deadline expired }
+  /internal/v1/transaction-drafts:
+    post:
+      operationId: extractTextTransactionDraft
+      security:
+        - serviceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransactionDraftContext' }
+      parameters:
+        - { $ref: '#/components/parameters/AiTaskKind' }
+        - { $ref: '#/components/parameters/AiInputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiOutputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiDeadline' }
+        - { $ref: '#/components/parameters/AiExecutionPolicy' }
+        - { $ref: '#/components/parameters/AiCorrelationId' }
+        - { $ref: '#/components/parameters/AiRequiredCapabilities' }
+      responses:
+        '200':
+          description: Bounded extraction for user review; does not create a financial record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransactionDraftAdvice' }
+        '400': { description: Context is invalid or contains fields outside the allowlist }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the body limit }
+        '403': { description: Effective AI policy denies the configured provider }
+        '409': { description: Request was cancelled or correlation ID conflicts }
+        '422': { description: Provider lacks a requested capability }
+        '429': { description: Inference capacity is full }
+        '502': { description: Model output is invalid }
+        '503': { description: Inference provider is unavailable }
+        '504': { description: Request deadline expired }
+  /internal/v1/receipts/ocr:
+    post:
+      operationId: extractReceiptTextLocally
+      security:
+        - serviceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptOcrContext' }
+      parameters:
+        - { $ref: '#/components/parameters/AiTaskKind' }
+        - { $ref: '#/components/parameters/AiInputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiOutputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiDeadline' }
+        - { $ref: '#/components/parameters/AiExecutionPolicy' }
+        - { $ref: '#/components/parameters/AiCorrelationId' }
+        - { $ref: '#/components/parameters/AiRequiredCapabilities' }
+      responses:
+        '200':
+          description: Local OCR text and word coordinates with Tesseract provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptOcrAdvice' }
+        '400': { description: Image data or request envelope is invalid }
+        '401': { description: Internal service token is missing or invalid }
+        '403': { description: Effective AI policy denies the selected provider }
+        '409': { description: Request was cancelled or correlation ID conflicts }
+        '413': { description: Encoded image exceeds the body limit }
+        '422': { description: Provider lacks a requested capability }
+        '429': { description: Inference or OCR capacity is full }
+        '502': { description: OCR provider output is invalid }
+        '503': { description: Tesseract binary or language data is unavailable }
+        '504': { description: Request deadline or Tesseract timeout expired }
+  /internal/v1/receipts/vision:
+    post:
+      operationId: readReceiptWithAllowlistedVisionModel
+      security:
+        - serviceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptOcrContext' }
+      parameters:
+        - { $ref: '#/components/parameters/AiTaskKind' }
+        - { $ref: '#/components/parameters/AiInputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiOutputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiDeadline' }
+        - { $ref: '#/components/parameters/AiExecutionPolicy' }
+        - { $ref: '#/components/parameters/AiCorrelationId' }
+        - { $ref: '#/components/parameters/AiRequiredCapabilities' }
+      responses:
+        '200':
+          description: Validated receipt reading draft with allowlisted model provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptVisionAdvice' }
+        '400': { description: Image data or request envelope is invalid }
+        '401': { description: Internal service token is missing or invalid }
+        '403': { description: Effective AI policy denies the selected provider }
+        '409': { description: Request was cancelled or correlation ID conflicts }
+        '413': { description: Encoded image exceeds the body limit }
+        '422': { description: No allowlisted provider supports vision and structured output }
+        '429': { description: Inference capacity is full }
+        '502': { description: Vision output is invalid }
+        '503': { description: Vision provider is unavailable }
+        '504': { description: Request deadline expired }
+  /internal/v1/receipts/basket-review:
+    post:
+      operationId: suggestReceiptBasketReview
+      security:
+        - serviceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptBasketContext' }
+      parameters:
+        - { $ref: '#/components/parameters/AiTaskKind' }
+        - { $ref: '#/components/parameters/AiInputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiOutputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiDeadline' }
+        - { $ref: '#/components/parameters/AiExecutionPolicy' }
+        - { $ref: '#/components/parameters/AiCorrelationId' }
+        - { $ref: '#/components/parameters/AiRequiredCapabilities' }
+      responses:
+        '200':
+          description: Amount-free per-line suggestion with model provenance; Java applies deterministic safeguards
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptBasketAdvice' }
+        '400': { description: Context or request envelope is invalid }
+        '401': { description: Internal service token is missing or invalid }
+        '403': { description: Effective AI policy denies the selected provider }
+        '409': { description: Request was cancelled or correlation ID conflicts }
+        '413': { description: Request exceeds the body limit }
+        '422': { description: Provider lacks text and structured output }
+        '429': { description: Inference capacity is full }
+        '502': { description: Model output is invalid }
+        '503': { description: Inference provider is unavailable }
+        '504': { description: Request deadline expired }
+  /internal/v1/merchant-classifications:
+    post:
+      operationId: classifyMerchantsInBatch
+      security:
+        - serviceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MerchantClassificationContext' }
+      parameters:
+        - { $ref: '#/components/parameters/AiTaskKind' }
+        - { $ref: '#/components/parameters/AiInputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiOutputSchemaVersion' }
+        - { $ref: '#/components/parameters/AiDeadline' }
+        - { $ref: '#/components/parameters/AiExecutionPolicy' }
+        - { $ref: '#/components/parameters/AiCorrelationId' }
+        - { $ref: '#/components/parameters/AiRequiredCapabilities' }
+      responses:
+        '200':
+          description: Validated category hypotheses for at most 50 merchant names, with provider provenance
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MerchantClassificationAdvice' }
+        '400': { description: Context or request envelope is invalid }
+        '401': { description: Internal service token is missing or invalid }
+        '403': { description: Effective AI policy denies the selected provider }
+        '409': { description: Request was cancelled or correlation ID conflicts }
+        '413': { description: Request exceeds the body limit }
+        '422': { description: Provider lacks text and structured output }
+        '429': { description: Inference capacity is full }
+        '502': { description: Model output is invalid }
+        '503': { description: Inference provider is unavailable }
+        '504': { description: Request deadline expired }
+  /internal/v1/jobs/{correlationId}/cancel:
+    post:
+      operationId: cancelIntelligenceJob
+      security:
+        - serviceBearer: []
+      parameters:
+        - name: correlationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Cancellation was accepted for an active request
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status]
+                properties:
+                  status: { type: string, const: cancellation_requested }
+        '401': { description: Internal service token is missing or invalid }
+        '404': { description: No active request has this correlation ID }
+components:
+  parameters:
+    AiTaskKind:
+      name: X-Finance-Task-Kind
+      in: header
+      required: true
+      schema: { type: string, enum: [budget-proposal, transaction-draft, receipt-ocr, receipt-vision, merchant-classification] }
+    AiInputSchemaVersion:
+      name: X-Finance-Input-Schema-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [budget-proposal-context.v1, transaction-draft-context.v1, receipt-ocr-context.v1,
+               receipt-vision-context.v1, merchant-classification-context.v1]
+    AiOutputSchemaVersion:
+      name: X-Finance-Output-Schema-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [budget-proposal-advice.v1, transaction-draft-advice.v1, receipt-ocr-result.v1,
+               receipt-vision-result.v1, merchant-classification-result.v1]
+    AiDeadline:
+      name: X-Finance-Deadline-Unix-Ms
+      in: header
+      required: true
+      schema: { type: integer, format: int64, minimum: 1 }
+    AiExecutionPolicy:
+      name: X-Finance-AI-Policy
+      in: header
+      required: true
+      schema: { type: string, enum: [local-only, cloud-opt-in] }
+    AiCorrelationId:
+      name: X-Finance-Correlation-ID
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+    AiRequiredCapabilities:
+      name: X-Finance-Required-Capabilities
+      in: header
+      required: true
+      description: Comma-separated capabilities required from selected model
+      schema: { type: string, minLength: 1, example: 'text,structured_output' }
+  securitySchemes:
+    serviceBearer:
+      type: http
+      scheme: bearer
+  schemas:
+    MerchantClassificationContext:
+      type: object
+      additionalProperties: false
+      required: [merchants]
+      properties:
+        merchants:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 200 }
+    MerchantClassificationAdvice:
+      type: object
+      additionalProperties: false
+      required: [provider, classifications, modelVersion, promptVersion, taskKind, inputSchemaVersion,
+                 outputSchemaVersion, correlationId, executionPolicy, requiredCapabilities, capabilities,
+                 latencyMs, usage, fallbackReason, provenance]
+      properties:
+        provider: { type: string, minLength: 1, maxLength: 64 }
+        classifications:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: '#/components/schemas/MerchantClassification' }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, const: merchant-category.v1 }
+        taskKind: { type: string, const: merchant-classification }
+        inputSchemaVersion: { type: string, const: merchant-classification-context.v1 }
+        outputSchemaVersion: { type: string, const: merchant-classification-result.v1 }
+        correlationId: { type: string, format: uuid }
+        executionPolicy: { type: string, enum: [local-only, cloud-opt-in] }
+        requiredCapabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output, vision] }
+        latencyMs: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/AiUsage' }
+        fallbackReason: { type: [string, 'null'] }
+        provenance: { $ref: '#/components/schemas/AiProvenance' }
+    MerchantClassification:
+      type: object
+      additionalProperties: false
+      required: [merchant, categoryCode, confidence]
+      properties:
+        merchant: { type: string, minLength: 1, maxLength: 200 }
+        categoryCode: { type: string, enum: [еда, транспорт, жилье, досуг, одежда, здоровье, работа, техника, долги, прочее] }
+        confidence: { type: string, pattern: '^(?:0\\.[0-9]{3}|1\\.000)$' }
+    PriceCompareRequest:
+      type: object
+      additionalProperties: false
+      required: [tenantId, ownerUserId, receiptId, itemId, name, quantity, lineSum, currency, purchasedAt]
+      properties:
+        tenantId: { type: string, format: uuid }
+        ownerUserId: { type: string, format: uuid }
+        receiptId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        quantity: { type: string, pattern: '^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$' }
+        lineSum: { type: string, pattern: '^(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,2})?$' }
+        currency: { type: string, const: RUB }
+        purchasedAt: { type: string, format: date-time }
+    ProductCatalogRequest:
+      type: object
+      additionalProperties: false
+      required: [tenantId, ownerUserId, query]
+      properties:
+        tenantId: { type: string, format: uuid }
+        ownerUserId: { type: string, format: uuid }
+        query: { type: string, maxLength: 80 }
+    ProductCatalogResponse:
+      type: object
+      additionalProperties: false
+      required: [mode, query, products]
+      properties:
+        mode: { type: string, enum: [catalog, search] }
+        query: { type: string, maxLength: 80 }
+        products:
+          type: array
+          maxItems: 10
+          items: { $ref: '#/components/schemas/ProductCatalogCard' }
+      allOf:
+        - if:
+            properties: { mode: { const: search } }
+            required: [mode]
+          then:
+            properties:
+              products: { maxItems: 5 }
+        - if:
+            properties: { mode: { const: catalog } }
+            required: [mode]
+          then:
+            properties:
+              products:
+                items:
+                  properties:
+                    purchaseCount: { minimum: 3 }
+      description: Search returns at most five cards; catalog requires three confirmed purchases and search requires one.
+    ProductCatalogCard:
+      type: object
+      additionalProperties: false
+      required: [productName, purchaseCount, usualUnitPrice, hasBaseline, baselineUnitPrice, lastUnitPrice,
+                 lastPurchasedAt, lastMerchant, cheapestUnitPrice, cheapestMerchant, totalSpent, change, relative,
+                 signal, direction, priorPurchases, chartAvailable, history]
+      properties:
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        purchaseCount: { type: integer, minimum: 1, maximum: 5000 }
+        usualUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        hasBaseline: { type: boolean }
+        baselineUnitPrice: { type: [string, 'null'], pattern: '^\d{1,30}\.\d{6}$' }
+        lastUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        lastPurchasedAt: { type: string, format: date-time }
+        lastMerchant: { type: [string, 'null'], maxLength: 200 }
+        cheapestUnitPrice: { type: string, pattern: '^\d{1,30}\.\d{6}$' }
+        cheapestMerchant: { type: [string, 'null'], maxLength: 200 }
+        totalSpent: { type: string, pattern: '^\d{1,22}\.\d{2}$' }
+        change: { type: [string, 'null'], pattern: '^-?\d{1,30}\.\d{6}$' }
+        relative: { type: [string, 'null'], pattern: '^-?\d{1,45}\.\d{6}$' }
+        signal: { type: boolean }
+        direction: { type: [string, 'null'], enum: [up, down, null] }
+        priorPurchases: { type: integer, minimum: 0, maximum: 4999 }
+        chartAvailable: { type: boolean, description: True only when at least two real receipt points are present. }
+        history:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    PriceComparison:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, productName, hasBaseline, currentUnitPrice, baselineUnitPrice, change, relative,
+                 signal, direction, priorPurchases, history]
+      properties:
+        algorithmVersion: { type: string, const: price-projection.v1 }
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        hasBaseline: { type: boolean }
+        currentUnitPrice: { type: string, pattern: '^\d{1,24}\.\d{6}$' }
+        baselineUnitPrice:
+          type: [string, 'null']
+          pattern: '^\d{1,24}\.\d{6}$'
+          description: Median price for matching earlier purchases by this same member; null without history.
+        change:
+          type: [string, 'null']
+          pattern: '^-?\d{1,24}\.\d{6}$'
+          description: Current unit price minus the baseline; null without history.
+        relative:
+          type: [string, 'null']
+          pattern: '^-?\d{1,40}\.\d{6}$'
+          description: Fractional change from baseline; 0.125000 means 12.5 percent.
+        signal: { type: boolean, description: True only when both RUB 10 and 12 percent thresholds are met. }
+        direction:
+          type: [string, 'null']
+          enum: [up, down, null]
+          description: Significant movement direction; null when no signal exists.
+        priorPurchases:
+          type: integer
+          minimum: 0
+          maximum: 5000
+          description: Count of matching earlier purchases for this member.
+        history:
+          type: array
+          maxItems: 5001
+          description: Matching price points in time order, followed by the current receipt item.
+          items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    PriceHistoryPoint:
+      type: object
+      additionalProperties: false
+      required: [receiptId, itemId, purchasedAt, merchant, name, unitPrice, current]
+      properties:
+        receiptId: { type: string, format: uuid }
+        itemId: { type: string, format: uuid }
+        purchasedAt: { type: string, format: date-time }
+        merchant: { type: [string, 'null'], maxLength: 200 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        unitPrice: { type: string, pattern: '^\d{1,24}\.\d{6}$' }
+        current: { type: boolean }
+    MoneyAmount:
+      type: string
+      pattern: '^\d{1,18}(?:\.\d{1,2})?$'
+    MonthlyExpenseByCategory:
+      type: object
+      additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
+    BudgetProposalContext:
+      type: object
+      additionalProperties: false
+      required: [monthlyIncome, historyDays, categoryCodes, monthlyExpenseByMonth,
+                 monthlyIncomeByMonth, currentFamilyLimits]
+      properties:
+        monthlyIncome: { $ref: '#/components/schemas/MoneyAmount' }
+        historyDays: { type: integer, minimum: 30, maximum: 3660 }
+        categoryCodes:
+          type: array
+          minItems: 1
+          maxItems: 32
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 64 }
+        monthlyExpenseByMonth:
+          type: object
+          maxProperties: 4
+          propertyNames: { pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          additionalProperties: { $ref: '#/components/schemas/MonthlyExpenseByCategory' }
+        monthlyIncomeByMonth:
+          type: object
+          maxProperties: 4
+          propertyNames: { pattern: '^\d{4}-(0[1-9]|1[0-2])$' }
+          additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
+        currentFamilyLimits:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
+    BudgetProposalAdvice:
+      type: object
+      additionalProperties: false
+      required: [provider, shares, modelVersion, promptVersion, taskKind, inputSchemaVersion,
+                 outputSchemaVersion, correlationId, executionPolicy, requiredCapabilities,
+                 capabilities, latencyMs, usage, fallbackReason, provenance]
+      properties:
+        provider: { type: string, minLength: 1, maxLength: 64 }
+        shares:
+          type: object
+          minProperties: 1
+          maxProperties: 32
+          additionalProperties: { type: string, pattern: '^\d{1,3}(?:\.\d{1,2})?$' }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, minLength: 1, maxLength: 64 }
+        taskKind: { type: string, const: budget-proposal }
+        inputSchemaVersion: { type: string, const: budget-proposal-context.v1 }
+        outputSchemaVersion: { type: string, const: budget-proposal-advice.v1 }
+        correlationId: { type: string, format: uuid }
+        executionPolicy: { type: string, enum: [local-only, cloud-opt-in] }
+        requiredCapabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output, vision, embeddings, tool_calling, streaming] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output, vision, embeddings, tool_calling, streaming] }
+        latencyMs: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/AiUsage' }
+        fallbackReason: { type: [string, 'null'] }
+        provenance: { $ref: '#/components/schemas/AiProvenance' }
+    TransactionDraftContext:
+      type: object
+      additionalProperties: false
+      required: [text, timezone, now]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 500 }
+        timezone: { type: string, minLength: 1, maxLength: 64 }
+        now: { type: string, format: date-time }
+    ReceiptOcrContext:
+      type: object
+      additionalProperties: false
+      required: [imageBase64]
+      properties:
+        imageBase64:
+          type: string
+          minLength: 1
+          maxLength: 16777216
+          pattern: '^[A-Za-z0-9+/]*={0,2}$'
+    ReceiptBasketContext:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 80
+          items:
+            type: object
+            additionalProperties: false
+            required: [ordinal, name]
+            properties:
+              ordinal: { type: integer, minimum: 1, maximum: 80 }
+              name: { type: string, minLength: 1, maxLength: 200 }
+    TransactionDraftAdvice:
+      type: object
+      additionalProperties: false
+      required: [provider, type, amount, categoryCode, subcategoryCode, description, occurredAt, modelVersion,
+                 promptVersion, taskKind, inputSchemaVersion, outputSchemaVersion, correlationId,
+                 executionPolicy, requiredCapabilities, capabilities, latencyMs, usage, fallbackReason, provenance]
+      properties:
+        provider: { type: string, minLength: 1, maxLength: 64 }
+        type: { type: string, enum: [expense, income, debt_payment] }
+        amount: { $ref: '#/components/schemas/MoneyAmount' }
+        categoryCode: { type: string, minLength: 1, maxLength: 64 }
+        subcategoryCode: { type: [string, 'null'], maxLength: 64 }
+        description: { type: string, maxLength: 500 }
+        occurredAt: { type: string, format: date-time }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, minLength: 1, maxLength: 64 }
+        taskKind: { type: string, const: transaction-draft }
+        inputSchemaVersion: { type: string, const: transaction-draft-context.v1 }
+        outputSchemaVersion: { type: string, const: transaction-draft-advice.v1 }
+        correlationId: { type: string, format: uuid }
+        executionPolicy: { type: string, enum: [local-only, cloud-opt-in] }
+        requiredCapabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output, vision, embeddings, tool_calling, streaming] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output, vision, embeddings, tool_calling, streaming] }
+        latencyMs: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/AiUsage' }
+        fallbackReason: { type: [string, 'null'] }
+        provenance: { $ref: '#/components/schemas/AiProvenance' }
+    AiUsage:
+      type: object
+      additionalProperties: false
+      required: [inputTokens, outputTokens, cost]
+      properties:
+        inputTokens: { type: [integer, 'null'], minimum: 0 }
+        outputTokens: { type: [integer, 'null'], minimum: 0 }
+        cost: { type: [number, 'null'], minimum: 0 }
+    AiProvenance:
+      type: object
+      additionalProperties: false
+      required: [provider, modelVersion, promptVersion, executionPolicy]
+      properties:
+        provider: { type: string, minLength: 1, maxLength: 64 }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, minLength: 1, maxLength: 64 }
+        executionPolicy: { type: string, enum: [local-only, cloud-opt-in] }
+    ReceiptOcrAdvice:
+      type: object
+      additionalProperties: false
+      required: [provider, text, words, total, items, modelVersion, promptVersion, taskKind, inputSchemaVersion,
+                 outputSchemaVersion, correlationId, executionPolicy, requiredCapabilities,
+                 capabilities, latencyMs, usage, fallbackReason, provenance]
+      properties:
+        provider: { type: string, const: tesseract }
+        text: { type: string, maxLength: 1024000 }
+        words:
+          type: array
+          maxItems: 4000
+          items: { $ref: '#/components/schemas/OcrWord' }
+        total: { type: [string, 'null'], pattern: '^\d{1,18}(?:\.\d{1,2})?$' }
+        items:
+          type: array
+          maxItems: 80
+          items: { $ref: '#/components/schemas/ReceiptVisionItem' }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, const: tesseract-ocr.v2 }
+        taskKind: { type: string, const: receipt-ocr }
+        inputSchemaVersion: { type: string, const: receipt-ocr-context.v1 }
+        outputSchemaVersion: { type: string, const: receipt-ocr-result.v1 }
+        correlationId: { type: string, format: uuid }
+        executionPolicy: { type: string, enum: [local-only, cloud-opt-in] }
+        requiredCapabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text] }
+        latencyMs: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/AiUsage' }
+        fallbackReason: { type: [string, 'null'] }
+        provenance: { $ref: '#/components/schemas/AiProvenance' }
+    OcrWord:
+      type: object
+      additionalProperties: false
+      required: [text, confidence, box]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 256 }
+        confidence: { type: number, minimum: 0, maximum: 100 }
+        box:
+          type: object
+          additionalProperties: false
+          required: [x, y, width, height]
+          properties:
+            x: { type: integer, minimum: 0 }
+            y: { type: integer, minimum: 0 }
+            width: { type: integer, minimum: 0 }
+            height: { type: integer, minimum: 0 }
+    ReceiptVisionAdvice:
+      type: object
+      additionalProperties: false
+      required: [provider, store, date, total, items, modelVersion, promptVersion, taskKind,
+                 inputSchemaVersion, outputSchemaVersion, correlationId, executionPolicy,
+                 requiredCapabilities, capabilities, latencyMs, usage, fallbackReason, provenance]
+      properties:
+        provider: { type: string, const: ollama }
+        store: { type: [string, 'null'], maxLength: 100 }
+        date: { type: [string, 'null'], format: date }
+        total: { type: [string, 'null'], pattern: '^\d{1,18}(?:\.\d{1,2})?$' }
+        items:
+          type: array
+          maxItems: 80
+          items: { $ref: '#/components/schemas/ReceiptVisionItem' }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, const: receipt-vision.v1 }
+        taskKind: { type: string, const: receipt-vision }
+        inputSchemaVersion: { type: string, const: receipt-vision-context.v1 }
+        outputSchemaVersion: { type: string, const: receipt-vision-result.v1 }
+        correlationId: { type: string, format: uuid }
+        executionPolicy: { type: string, enum: [local-only, cloud-opt-in] }
+        requiredCapabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [vision, structured_output] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output, vision] }
+        latencyMs: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/AiUsage' }
+        fallbackReason: { type: [string, 'null'] }
+        provenance: { $ref: '#/components/schemas/AiProvenance' }
+    ReceiptBasketAdvice:
+      type: object
+      additionalProperties: false
+      required: [provider, items, modelVersion, promptVersion, taskKind, inputSchemaVersion, outputSchemaVersion,
+                 correlationId, executionPolicy, requiredCapabilities, capabilities, latencyMs, usage,
+                 fallbackReason, provenance]
+      properties:
+        provider: { type: string, minLength: 1, maxLength: 64 }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 80
+          items: { $ref: '#/components/schemas/ReceiptBasketItemSuggestion' }
+        modelVersion: { type: string, minLength: 1, maxLength: 128 }
+        promptVersion: { type: string, const: receipt-basket.v1 }
+        taskKind: { type: string, const: receipt-basket-review }
+        inputSchemaVersion: { type: string, const: receipt-basket-context.v1 }
+        outputSchemaVersion: { type: string, const: receipt-basket-review.v1 }
+        correlationId: { type: string, format: uuid }
+        executionPolicy: { type: string, enum: [local-only, cloud-opt-in] }
+        requiredCapabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output] }
+        capabilities:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [text, structured_output, vision] }
+        latencyMs: { type: integer, minimum: 0 }
+        usage: { $ref: '#/components/schemas/AiUsage' }
+        fallbackReason: { type: [string, 'null'] }
+        provenance: { $ref: '#/components/schemas/AiProvenance' }
+    ReceiptBasketItemSuggestion:
+      type: object
+      additionalProperties: false
+      required: [ordinal, verdict, reason, action]
+      properties:
+        ordinal: { type: integer, minimum: 1, maximum: 80 }
+        verdict: { type: string, enum: [useful, neutral, harmful, unnecessary] }
+        reason: { type: string, maxLength: 500 }
+        action: { type: string, maxLength: 500 }
+    ReceiptVisionItem:
+      type: object
+      additionalProperties: false
+      required: [name, quantity, unitPrice, lineSum]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        quantity: { type: [string, 'null'], pattern: '^\d{1,12}(?:\.\d{1,6})?$' }
+        unitPrice: { type: [string, 'null'], pattern: '^\d{1,18}(?:\.\d{1,2})?$' }
+        lineSum: { type: [string, 'null'], pattern: '^\d{1,18}(?:\.\d{1,2})?$' }

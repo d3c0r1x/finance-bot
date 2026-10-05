@@ -5,273 +5,491 @@ features:
     feature: "Запуск, меню, `/start`, `/menu`, `/help`; `bot.py`, `handlers/main_menu.py`"
     target: "P Telegram gateway; J dashboard; W главная"
     acceptance: "Все команды отвечают; нижнее меню возвращается после операций; старую menu button можно заменить"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+    evidence:
+      - "F01 command/menu acceptance is complete: /start, /menu, /help and the persistent Меню button return the keyboard; registered /link, /add, /history and /report flows are covered by the gateway command suite. Successful operation keyboards remain usable, while Core-bound actions require a selected actor context. Full Python/services/contracts, Web UI and Java Core checks pass. Live Telegram/Redis/TLS deployment remains a separate operational gate."
     intentional_differences: []
   - id: F02
     feature: "Whitelist и роли из `config.py`, `utils/filters.py`"
     target: "J identity/membership; P проверяет привязку перед каждым сценарием"
     acceptance: "Незнакомый пользователь не читает финансовые данные; legacy owner/partner перенесены"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TelegramLinkCodeTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TelegramServiceCredentialTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TelegramActorContextPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/python/telegram_gateway/tests/test_webhook.py
+      - services/python/telegram_gateway/tests/test_commands.py
+    evidence:
+      - "F02 acceptance is complete: one-time OIDC link codes are hashed, short-lived, single-use, rate-limited, and redeemed only for the authenticated user chosen by Core. Actor tokens are stored as hashes and every action rechecks Telegram binding, active user, active tenant membership, current role, and permission; unknown and cross-tenant Telegram IDs are denied. Owner retains shared-write permissions; legacy partner maps to member/own-write permissions. PostgreSQL acceptance now links a partner member through the OIDC code and verifies the scoped context, with no userId disclosure or transaction.write.any. Policy, credential, link-code, and Core database suites pass. Live Telegram/Keycloak rollout and legacy database import remain separate deployment/migration gates."
     intentional_differences: []
   - id: F03
     feature: "Onboarding: имя, доход, пропуск, назад, бюджет, повторная настройка; `handlers/onboarding.py`"
     target: "J profile/onboarding; P/W пошаговая форма"
     acceptance: "Повторная настройка не удаляет транзакции; пользователь с историей не считается новым"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+    evidence:
+      - "Web onboarding now has welcome, identity, optional-income and explicit budget-choice steps. Back navigation preserves workspace/member values; the 70%-of-income proposal is never applied without a user action. Existing users can rerun setup through their member profile without creating a tenant. Web tests prove profile-only PATCH, unchanged transaction history, optional income, back navigation and apply/keep choices; PostgreSQL acceptance proves profile edits retain posted operations and tenant membership. Full web suite passes 22 tests; TypeScript and Vite production build pass; Java Core check passes 123 tests. Android onboarding/profile flows have emulator coverage under F59."
     intentional_differences: []
   - id: F04
     feature: "Имя из Telegram, своё имя, план дохода, статус onboarding; `services/profile.py`"
     target: "J user profile + tenant member profile"
     acceptance: "Собственное имя не затёрто синхронизацией Telegram"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+    evidence:
+      - "Member profile is distinct from workspace name and includes planned income, onboarding state, timezone, and currency. Source provenance distinguishes user-selected names from workspace defaults; Telegram may fill or refresh only an unchosen fallback. Link redemption and /start or /menu refresh use the verified linked user, and profile edits permanently protect the user's chosen name. PostgreSQL API acceptance covers initial sync, explicit-name protection, later sync after a profile edit, and preserved profile fields. Full Java Core check passes 126 tests; Python/contracts pass 143 with 3 provider-dependent skips. Live Telegram/Keycloak deployment remains an operational gate, not a parity gap."
     intentional_differences: []
   - id: F05
     feature: "Свободный текст расхода/дохода/платежа; `ai/llm.py`, `handlers/expenses.py`"
     target: "P extraction/AI, J validation и подтверждение draft"
     acceptance: "«Такси 2 тыс», «1,5к», «2 000», запятая, неверный JSON, отключённая модель"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/intelligence/tests/test_transaction_drafts.py
+      - services/python/intelligence/tests/test_app.py
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionDraftAdvisorTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/telegram_gateway/tests/test_commands.py
+    evidence:
+      - "Java draft creation invokes the Python gateway, validates model output, and stores provider/model/prompt provenance. Russian amounts normalize `2 тыс`, `1,5к`, `2 000`, and decimal-comma forms without rounding; malformed JSON and an unavailable/disabled model fail safely. RU/EN Android and Telegram `/add` submit free text with stable idempotency and render a review draft. Expense, income, and debt-payment drafts remain pending until explicit confirmation; PostgreSQL acceptance proves no transaction exists before confirmation and stale edits fail safely. Focused Python tests pass 33/33 and the PostgreSQL confirmation scenario passes. Receipt-photo OCR and broader legacy Telegram flows are tracked under F10-F18 and F01/E4."
     intentional_differences: []
   - id: F06
     feature: "Карточка подтверждения, сумма, категория, подкатегория, быстрые суммы, отмена"
     target: "J drafts; P keyboards; W transaction form"
     acceptance: "До подтверждения нет финансовой записи; устаревшая кнопка безопасна"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/telegram_gateway/tests/test_commands.py
+    evidence:
+      - "Versioned draft API supports correction, confirmation and cancellation with If-Match; stale mutations fail safely and confirmation is idempotent. RU/EN Android and Telegram show model provenance and require explicit confirmation. Telegram edits amount, category, subcategory, description and date; quick amounts update only amount. Android exposes the same editable review fields, quick amounts, cancel and confirm actions. Web provides editable review and cancel. PostgreSQL proves pre-confirm zero writes and stale-version rejection. Verification: Java Core has 126 passing tests; web App suite 17/17; Telegram command suite 14/14; Android connected instrumentation 20/20 with the debug APK installed on the emulator. Live Telegram delivery remains an E4 operational gate."
     intentional_differences: []
   - id: F07
     feature: "Добавление дохода и источника операции"
     target: "J transactions; P/W ввод"
     acceptance: "Доход не попадает в расходы/лимиты; сохраняются description/source/date"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/intelligence/tests/test_transaction_drafts.py
+    evidence:
+      - "Manual and Telegram income retain the source in description, persist source=text_ai for AI extraction, and preserve the local transaction date. The Telegram review card labels the source and requires explicit confirmation. PostgreSQL acceptance proves incomeTotal rises while expenseTotal and budget spend stay zero. Python services/contracts pass 145 tests with 1 integration-only skip; Java Core check passes 123 tests, including the PostgreSQL income/source/date case."
     intentional_differences: []
   - id: F08
     feature: "История последних операций, повтор траты, отмена последней; `main_menu.py`"
     target: "J repeat/reverse; P/W history"
     acceptance: "Повтор создаёт новую запись один раз; отмена ограничена доступной пользователю операцией"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - apps/web/src/App.test.tsx
+    evidence:
+      - "Core returns the current member's latest posted history, creates an AI-free repeat draft with copied expense fields and idempotent keys, then marks confirmed repeats with source=repeat. Telegram /history exposes repeat and latest-only undo; Core checks id/version against the newest posted row and delegates void compensation. Python command/client tests and live PostgreSQL acceptance pass; full Python/contracts pass 144 with 1 skip and full Java Core check passes 122 tests."
     intentional_differences: []
   - id: F09
     feature: "Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"
     target: "J transactions API; W таблица"
     acceptance: "Все доступные поля и фильтры перенесены; правка долга выполняет корректную компенсацию"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "RU/EN web now creates, edits, repeats and voids all supported transaction types; filters by member, period, type and search; preserves category, subcategory, description, source and member-local date; owner/admin may assign or reassign only active members. Debt-payment edits reverse the prior balance effect and apply the new payment atomically; void compensates it. PostgreSQL acceptance covers family access and assignment permissions, debt compensation and stale versions. Web App tests pass 21/21; TypeScript/Vite build and OpenAPI contract suite pass; full Java Core check passes with PostgreSQL enabled. Live Keycloak browser/API remains tracked under E2/F59."
     intentional_differences: []
   - id: F10
     feature: "Фото чека, прогресс, draft; `expenses.py`"
     target: "J receipt job; P OCR worker; W upload/review"
     acceptance: "Длительный job показывает статус; повтор update не создаёт второй job"
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ReceiptImageValidatorTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/FileSystemReceiptObjectStorageTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/S3ReceiptObjectStorageTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ClamAvReceiptScannerTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ReceiptOcrClientTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ReceiptStorageIntegrationTest.java
+      - apps/web/src/ReceiptsPanel.test.tsx
+      - tools/contracts/test_contracts.py
+      - .github/workflows/receipt-storage.yml
+    evidence:
+      - "Core validates JPEG/PNG uploads, stores private quarantine objects, scans with ClamAV, runs a durable leased OCR job, saves one owner-scoped review draft and OCR evidence, and never posts a transaction. RU/EN Web tests cover upload, bounded progress polling and opening OCR review. Full local checks pass: Core 177 tests (0 failures, 2 container-gated skips), Python/contracts 211 passed/3 skipped, Web 34/34 plus production build, legacy smoke/handler/receipt scripts pass. Authenticated SeaweedFS S3 and real ClamAV EICAR integration tests are wired in receipt-storage.yml but have not run because this host has neither Docker nor Podman; F10 stays in progress pending that gate."
     intentional_differences: []
   - id: F11
     feature: "Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
     target: "P Vision adapter и resource scheduler"
     acceptance: "Локальная/удалённая модель, fallback, timeout, недоступная VRAM; видна фактическая модель"
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/python/intelligence/tests/test_vision.py
+      - services/python/intelligence/tests/test_model_scheduler.py
+      - services/python/intelligence/tests/test_app.py
+      - services/core/src/test/java/com/decorix/finance/core/api/ReceiptVisionClientTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ReceiptOcrClientTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ReceiptsPanel.test.tsx
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "The ordered Ollama Vision pool accepts at most three allowlisted tags, retains the model that answered, and fails over within the configured execution policy. A process-wide single-slot scheduler bounds Ollama residency; timeout, cancellation and slot release are tested. The adapter normalizes EXIF, strips metadata, bounds image size, validates exact JSON and retries one invalid response with a fixed repair prompt. Core preserves typed Vision-to-local-OCR and OCR-to-Vision fallback reasons; PostgreSQL tests prove either reader can produce only an unposted review draft. RU/EN Web shows model provenance/failover. Full Core/PostgreSQL check passes 183 tests (0 failures, 2 container-gated skips), Python/contracts 219 passed/3 skipped, Web 34/34 and production build. No local Ollama endpoint/model is configured, so live model quality remains unverified and F11 stays in progress."
     intentional_differences: []
   - id: F12
     feature: "Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
     target: "P OCR pipeline"
     acceptance: "Синтетические обычные/узкие/наклонные чеки; стабильный порядок параллельных результатов"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/intelligence/tests/test_tesseract.py
+      - services/python/intelligence/tests/test_receipt_ocr_pipeline.py
+      - services/python/intelligence/tests/test_app.py
+    evidence:
+      - "Local Tesseract uses bounded Pillow/OpenCV crop, grayscale, upscale, Otsu threshold, deskew and denoise variants; at most two variants run concurrently and results remain in declared order. The best reading is selected by text confidence and repeated numeric columns; boxes map back to source-image coordinates. Split decimal/thousands tokens are repaired only when geometry is close. Missing item values are reread from a crop in the inferred total column with a numeric whitelist. Synthetic ordinary and narrow receipts, a 4-degree tilted receipt, column clustering, split numbers, targeted reread and stable parallel order are tested. The installed local Tesseract passed ordinary and tilted-narrow synthetic OCR."
     intentional_differences: []
   - id: F13
     feature: "Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
     target: "P extraction reconciliation; J финальная денежная валидация"
     acceptance: "Одна OCR-строка не подтверждает два товара; расхождения и происхождение видны"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptReconciliationPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ReceiptServiceTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+    evidence:
+      - "Tesseract extracts only coordinate-backed OCR item rows and labeled totals; Java compares OCR and Vision with exact decimal arithmetic and one-to-one row use. A unique top-up of at most three unused OCR rows is exposed only for an unambiguous Vision gap, with ordinals and values retained; ambiguity stays review-required and creates no transaction. PostgreSQL worker/API acceptance proves both readings and suggestions remain owner-scoped and unposted. RU/EN Web shows mismatch, provenance, evidence and top-ups. Full Core check passes 188 tests (0 failures, 2 container-gated skips), Python/contracts 221 passed/3 skipped, Web 34/34 plus production build; diff whitespace check passes."
     intentional_differences: []
   - id: F14
     feature: "Защита магазина/даты от выдумывания, fallback категории"
     target: "P evidence extraction; J category policy"
     acceptance: "Отсутствующее значение остаётся unknown; исходное чтение доступно для проверки"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/intelligence/tests/test_vision.py
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptCategoryPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ReceiptsPanel.test.tsx
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Vision store/date/total remain unverified reading evidence; the OCR text and reading provenance stay owner-visible. PostgreSQL acceptance supplies non-null Vision claims while proving draft merchant/date/cash total and category remain unknown until user verification. The RU/EN review labels Vision fields unverified and shows its date; absent category evidence stays null/unknown and missing item amounts do not trigger a rule. Full Core, Python/contracts, Web and production build pass."
     intentional_differences: []
   - id: F15
     feature: "Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
     target: "J receipt draft/items; P/W review editor"
     acceptance: "Любая позиция доступна; кассовый итог не меняется незаметно; явное действие sync total"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptReconciliationPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ReceiptsPanel.test.tsx
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Versioned receipt item add, edit and delete keep cash total unchanged. PostgreSQL acceptance exercises nine rows across pages of eight, adds a tenth row, edits and deletes with version checks, then changes the cash total only through explicit sync. RU Web tests cover add/delete, sync and page navigation; full Web tests/build and Core/PostgreSQL gates pass."
     intentional_differences: []
   - id: F16
     feature: "Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
     target: "J duplicate candidates + идемпотентность"
     acceptance: "Два независимых чека на одинаковую сумму можно подтвердить; повтор запроса не дублирует запись"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptDuplicatePolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ReceiptsPanel.test.tsx
+      - tools/contracts/test_core_migration.py
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Owner-scoped API lists prior same-owner receipts with the same total in the preceding ten minutes. Versioned duplicate/independent decisions are reversible and audited; a suspected duplicate cannot be confirmed, while two same-amount receipts marked independent produce distinct transactions. Receipt creation and confirmation idempotency keys replay without duplicate records. PostgreSQL API, policy, CSRF BFF, contract and RU/EN Web tests pass."
     intentional_differences: []
   - id: F17
     feature: "Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"
     target: "J versioned category policy; P извлекает признаки"
     acceptance: "Границы 10% алкоголя / 25% досуговых позиций зафиксированы fixtures; ручной выбор сохраняется"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptCategoryPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - tools/contracts/test_core_migration.py
+      - tools/contracts/test_contracts.py
+      - apps/web/src/ReceiptsPanel.test.tsx
+    evidence:
+      - "The Java category policy covers exact 10% alcohol and 25% leisure thresholds, unknown amounts, and manual override. PostgreSQL acceptance persists rule-derived shares and human selection with version checks; RU/EN Web displays category provenance and accepts manual choice. Focused PostgreSQL, policy, Web and prior full contract/build gates pass."
     intentional_differences: []
   - id: F18
     feature: "Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"
     target: "P генерирует предложение; J применяет каталог правил и сохраняет версию"
     acceptance: "Нет выдуманных денежных итогов; `rule/model/default/unknown` различаются"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/intelligence/tests/test_receipt_basket_review.py
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptBasketPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ReceiptBasketAdvisorTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - tools/contracts/test_contracts.py
+      - apps/web/src/ReceiptsPanel.test.tsx
+    evidence:
+      - "Python accepts bounded ordinal/name-only context and strict amount-free model output. Java applies deterministic safety rules, removes repeated advice only across different products, defaults missing/invalid model opinions safely, and preserves rule/model/default sources by item ID. PostgreSQL acceptance proves the AI request contains no total or line sums, rule precedence wins over the model, totals do not change, and advice is audited/versioned. RU/EN Web, Python, Java, contract and PostgreSQL tests pass."
     intentional_differences: []
   - id: F19
     feature: "Сохранение verdict/advice/verdict_source по позициям"
     target: "J receipt reviews с item ID"
     acceptance: "Советы не съезжают при одинаковых названиях; неизвестное старое происхождение не объявляется rule"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptBasketPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - tools/contracts/test_core_migration.py
+      - tools/contracts/test_contracts.py
+      - apps/web/src/ReceiptsPanel.test.tsx
+    evidence:
+      - "PostgreSQL acceptance reviews two identical product names with distinct ordinal advice and amounts, verifies each response stays attached to its receipt item UUID, and confirms each audit snapshot records the same item ID and reason. A legacy row with verdict neutral and source/algorithm unknown remains unknown in the owner API and is never relabeled rule. Full Core check (190 tests, 0 failures, 2 container-gated skips), Python migration/contracts (44 passed, 2 skipped), and RU/EN receipt Web tests (7 passed) pass."
     intentional_differences: []
   - id: F20
     feature: "«Не согласен» с вердиктом, пагинация спорных строк"
     target: "J user decisions; P/W controls"
     acceptance: "Товар исключён из необязательного; решение отменяемо и действует везде одинаково"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ProductIdentityPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - tools/contracts/test_core_migration.py
+      - tools/contracts/test_contracts.py
+      - apps/web/src/ReceiptsPanel.test.tsx
+    evidence:
+      - "V17 stores tenant/user-scoped product decisions and append-only events. PostgreSQL proves duplicate names share a normalized key, disputed rows page in groups of eight, an allowed key hides matching rows, and revoke restores them. The same decision table suppresses repeat-waste warnings. RU/EN Web allows and revokes products. Focused PostgreSQL/unit tests, 44 Python migration/contracts tests (2 skipped), 7 Web receipt tests, and the full Core check pass."
     intentional_differences: []
   - id: F21
     feature: "Повторные предупреждения о необязательном товаре; `services/advice.py`"
     target: "G history features; J policy/presentation DTO"
     acceptance: "Новый чек не находит сам себя в прошлой истории; разрешённый товар не предупреждается"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ProductIdentityPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptRepeatWarningPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - tools/contracts/test_contracts.py
+      - apps/web/src/ReceiptsPanel.test.tsx
+    evidence:
+      - "Java ports legacy token-overlap and SequenceMatcher-style signature similarity. Owner/BFF repeat-warning API scans only prior confirmed receipts, excludes current receipt, filters allowed keys, and streams history with a bounded JDBC fetch size. PostgreSQL proves prior-only results and zero warnings after the matching product is allowed. RU Web shows warning count, last amount and advice. Unit, PostgreSQL, migration/contract and Web tests pass."
     intentional_differences: []
   - id: F22
     feature: "Семейные и личные месячные лимиты, общий лимит, reset"
     target: "J budgets с наследованием"
     acceptance: "Личный override только своей категории; reset возвращает семейный, family report использует family limit"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Java monthly family/personal/category/total endpoints track separate versions and reset personal overrides; RU/EN Web, Android and Telegram expose family/personal edits and reset. Telegram mutations resolve opaque actor scope, require budget.write, use optimistic versions and idempotency keys, and cannot select another tenant. Family reporting keeps the family limit. PostgreSQL Telegram update/reset integration passes; gateway client/command tests pass."
     intentional_differences: []
   - id: F23
     feature: "Бюджет по доходу: 70%, округление; AI-предложение при ≥30 днях"
     target: "J proposal policy; P AI proposal"
     acceptance: "Предложение не применяется без действия человека; контекст содержит только разрешённые данные"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/BudgetProposalPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/python/tests/test_budget_proposals.py
+      - services/python/telegram_gateway/tests/test_budget_proposals.py
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+    evidence:
+      - "Java policy and PostgreSQL verify 70% of income, safe exact rounding, debt exclusion, the 30-day history gate, tenant isolation, pending state, explicit apply, and stale-base rejection. Telegram uses opaque actor context and an author/tenant-bound apply button. Python privacy/normalization and gateway tests pass (11); live synthetic budget golden case passes 1/1 at 100% on local Ollama qwen2.5:7b-instruct."
     intentional_differences: []
   - id: F24
     feature: "Алерты 90%/100%, остаток, прогноз месяца, темп"
     target: "J точные текущие суммы и budget policy"
     acceptance: "0 означает отключённый лимит; долг не считается обычным расходом; корректны декабрь/февраль"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/BudgetAlertPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/domain/MonthlyPacePolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+    evidence:
+      - "Core snapshots monthly expense totals under a tenant/member transaction lock and returns one-time category and total 90%/100% crossings in the idempotent create response. PostgreSQL acceptance proves category near/exceeded/no-repeat, total near/exceeded with a disabled category limit, and no alert after thresholds were already crossed. Debt payments and refunds stay outside ordinary expense alerts."
+      - "Member-timezone pace and projection tests cover December, leap February, elapsed/future periods and zero/low spend. Web, Android and Telegram present server-computed threshold alerts in RU/EN. PASS full Core check: 194 tests, 0 failures, 2 unrelated SeaweedFS/ClamAV integration skips; PostgreSQL API suite: 80 tests, 0 failures/skips; Python/contracts: 223 passed, 3 optional skips; Web: 35/35 plus production build; Android emulator: 23/23. Installed debug APK SHA-256 BED3716A17E748CBFFE2AF2E86D6B117C736C72FC348A7DE507D9A711B3B564F."
     intentional_differences: []
   - id: F25
     feature: "Недельный food limit и скользящие 7 дней; `services/forecast.py`"
     target: "J food budget; G исторический темп"
     acceptance: "Лимит работает без длинной истории; одинаковые значения в dashboard, digest и report"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/RollingFoodBudgetPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/presentation/tests/test_report_renderer.py
+      - services/python/telegram_gateway/tests/test_commands.py
+    evidence:
+      - "Java exposes one rolling-food status DTO from budgets, dashboard and reports; Web, Android, Python reports, Telegram report captions, and scheduled digests display Core amounts through the shared `rolling_food_lines` renderer. Insufficient history never invents a baseline; disabled limits omit remaining amount. Python report/digest/worker/Telegram command regression: 71 passed; contracts: 46 passed, 2 skipped; full Core: 200 passed, 2 skipped; Web: 36 passed; Android instrumentation: 26 passed."
     intentional_differences: []
   - id: F26
     feature: "«Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"
     target: "J cash planning; G recurring projection"
     acceptance: "Просроченная зарплата не горизонт; без данных нет выдуманного числа; подписки учитываются до горизонта включительно"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/CashPlanningPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/domain/RecurringProjectionPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+    evidence:
+      - "Java calculates cash guidance synchronously from current posted member transactions, so it has no stale recurring projection cache. It uses actual income or planned fallback, reserves 10%, omits guidance without a usable plan, ignores missed paydays, and includes repeated charges through the payday (inclusive) or month end. A new PostgreSQL test inserts three current salary and subscription occurrences, then proves the immediately requested dashboard uses fresh values and charges due exactly on payday. Web, Android, and Telegram render the same Core DTO. Full Core: 201 passed, 2 integration skips; Web 36/36; Android instrumentation 26/26; Telegram command/client coverage included in 71 passing targeted tests."
     intentional_differences: []
   - id: F27
     feature: "Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
     target: "J debts; P/W screens"
     acceptance: "Платёж и изменение долга атомарны; повторное сообщение не уменьшает долг дважды"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/python/telegram_gateway/tests/test_commands.py
+    evidence:
+      - "Java debt endpoints create debts, apply idempotent payments atomically and close zero-balance debts; PostgreSQL acceptance covers duplicate payment and exact balance effect. Web supports create, payment, adjustment and forecast; Android exposes debt cards and actions. Telegram `/debts` now displays only Core-scoped tenant balances, paid progress, rate, minimum payment and total; `/add` lists active Core-scoped debts and requires explicit confirmation. Verification: Core check with PostgreSQL 134/134, Telegram gateway 46/46, Web App 26/26/build and Android connected instrumentation 20/20. Full Android F01-F58 mapping remains under F59."
     intentional_differences: []
   - id: F28
     feature: "Правка остатка долга через панель, возврат при отмене платежа"
     target: "J debt adjustment/reversal"
     acceptance: "Сохраняется audit; отменяется фактическое изменение, включая погашение сверх остатка"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+    evidence:
+      - "Versioned Java balance adjustments append audit records; voiding debt-payment transactions restores the applied principal effect, including capped overpayment behavior. Web and Android expose balance correction. Full Java Core check executed all PostgreSQL acceptance cases: 134/134, zero failures/errors/skips; Web and Android acceptance/build gates pass."
     intentional_differences: []
   - id: F29
     feature: "Прогноз погашения с процентами; `services/analytics.py`"
     target: "J debt calculator"
     acceptance: "0 при закрытом долге; null при недостаточном платеже/горизонте >600 месяцев; оценка подписана"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/DebtForecastTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+    evidence:
+      - "Java payoff estimate accounts for interest without posting it to balances, returns zero for closed debts and null when payment is insufficient or the horizon exceeds 600 months. Web and Android display the estimate basis. Forecast unit, PostgreSQL endpoint acceptance, Web debt-flow test and Android connected suite pass; full Java Core check passes 134/134."
     intentional_differences: []
   - id: F30
     feature: "Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"
     target: "J reporting API; G длинные выборки"
     acceptance: "Фильтры/границы дат идентичны для web/Telegram; доходы и debt payments отделены"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/python/presentation/tests/test_report_renderer.py
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Java and Telegram share ReportService/FinanceReport: PostgreSQL acceptance verifies actor-scoped personal/family periods, inclusive dates, and rejects forged tenant/subject; report metrics keep income, expense, refund, debt payments and weekend share separate. Telegram /report accepts month, week, 90d and custom dates, and renders the shared DTO as PNG with text fallback. Web period/scope tests and production build pass; Android report controls are covered by the connected UI suite."
     intentional_differences: []
   - id: F31
     feature: "Графики категорий, лимитов, дней, цен, необязательного"
     target: "W charts; P PNG renderer из готового DTO"
     acceptance: "Данные одни; при недоступном renderer остаётся текст; экспорт PNG читаем"
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - services/python/presentation/tests/test_report_renderer.py
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "The user-approved F31 slice is verified: Core-owned period/category/day/limit data drives RU/EN Web and Android charts plus Telegram PNG; zero-spend dates stay present, overrun bars cap at 100% while exact negative remaining stays visible, and PNG failure falls back to text. No price or optional-purchase placeholders exist. Current regression evidence: Core 201 passed/2 integration skips, Web 36/36 plus TypeScript, Android emulator 26/26, Python report/digest/worker/Telegram command 71/71, and contracts 46 passed/2 skipped. F31 remains in progress only for price and optional-purchase series, which wait for authoritative F33/F40 data."
     intentional_differences: []
   - id: F32
     feature: "Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
     target: "J durable schedules/outbox; P доставка"
     acceptance: "Настраиваемое местное время; retries; один логический выпуск; нет сводки с фиктивными нулями"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/main/resources/db/migration/V30__notification_preferences_and_digest_outbox.sql
+      - services/core/src/main/resources/db/migration/V31__notification_worker_member_scan.sql
+      - services/core/src/test/java/com/decorix/finance/core/api/NotificationScheduleTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/python/telegram_gateway/tests/test_digest.py
+      - services/python/telegram_gateway/tests/test_digest_worker.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - apps/web/src/App.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+    evidence:
+      - "PostgreSQL stores versioned member preferences, unique local-date intents, leases, and delivery attempts. Core materializes local daily/weekly occurrences, honors quiet hours, coalesces overdue windows, leases with SKIP LOCKED, and returns only its report DTO. Python renders RU/EN, suppresses no-data reports, classifies permanent/retryable Telegram failures, and acknowledges bounded attempts. Web and Android expose language, local times, weekday, enable switches, and paired quiet hours with version checks. Defaults remain daily 21:00 and Sunday 19:00 in the member timezone. ADR-016 records at-least-once handling of ambiguous Telegram acknowledgements. Verification: Core 200 passed/2 skipped; Android emulator instrumentation 26/26; Web 36/36 and TypeScript; Telegram renderer/worker/client/commands 71/71; migration/OpenAPI contracts 46 passed/2 skipped; debug APK built and installed on a clean emulator."
     intentional_differences: []
   - id: F33
     feature: "Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
     target: "G price projection; J query API"
     acceptance: "Новый чек не входит в собственную baseline; разные упаковки/бренды не сливаются автоматически"
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/analytics-go/prices/projection_test.go
+      - services/analytics-go/prices/kafka_worker_test.go
+      - services/analytics-go/cmd/receipt-price-projector/config_test.go
+      - services/analytics-go/cmd/receipt-price-projector/integration_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Go `price-projection.v1` computes exact unit prices, prior-only medians and bounded up/down signals; it excludes the current receipt, future points, conflicting known brands/packages and cross-member history. Core writes `receipt.confirmed` to the transactional outbox and exposes owner/member-authorized price history through Core and BFF. The Go Kafka group writes to ClickHouse before synchronous offset commit, retries boundedly, and sends invalid event metadata to DLQ without financial payload. Public and internal schemas consistently define median, change, fractional relative value (0.125000 means 12.5 percent), signal and history. Web lazily loads this Core result only for confirmed receipt items and plots real purchase points; no-history response shows current price without invented baseline or chart. F34 adds member-scoped catalog/search, Web route and Telegram `/price` PNG over this history API. Its acceptance is complete; the F33 Kafka/ClickHouse replay remains a separate NOT_RUN runtime gate because endpoints are unavailable. Docker, Podman and WSL are absent; the CI integration job has not run remotely. F31 report price/waste series remain absent until F33/F40 authoritative datasets are ready."
     intentional_differences: []
   - id: F34
     feature: "Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
     target: "G product projection; P/W catalog"
     acceptance: "Поиск доступен и для одной покупки; график при ≥2; каталог и поиск имеют разные пороги"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/analytics-go/prices/catalog_test.go
+      - services/analytics-go/prices/catalog_api_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/ProductPriceHistoryServiceTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ProductPriceHistoryClientTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TelegramProductCatalogTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ProductCatalogPanel.test.tsx
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/presentation/tests/test_product_catalog_renderer.py
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Go implements exact member-scoped catalog/search over confirmed price history; blank-query catalog threshold is 3 purchases, search threshold is 1, and chart requires 2 actual purchase points. Core resolves active membership for Web and authenticated Telegram actor, Web exposes `/products`, and Telegram `/price` renders actual history to PNG. One purchase has no fabricated baseline or chart; cheapest merchant means cheapest observed historical purchase. GREEN: Go suite/vet/Linux build; Core check plus `productCatalogUsesAuthenticatedMemberScope` against an isolated PostgreSQL 18.6 database; Web 40/40 + production build; Python presentation/Telegram 84 passed; contracts 48 passed/2 optional skipped; `git diff --check`. F34 acceptance is complete. F33 live ClickHouse replay remains a separate integration gate."
     intentional_differences: []
   - id: F35
     feature: "Покупки по ритму, медиана интервалов, стоимость списка"
@@ -373,41 +591,66 @@ features:
     feature: "PDF Т-Банка: операции, даты, merchant/card, сверка итогов"
     target: "P document import; J staging/validation"
     acceptance: "Valid/mismatch/unverifiable различаются; неверный формат и PDF без текста объяснены"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/document_import/tests/test_tbank_pdf.py
+      - services/python/intelligence/tests/test_app.py
+      - contracts/schemas/tbank-statement-result.v1.schema.json
+    evidence:
+      - "A versioned in-memory PDF parser preserves signed Decimal operations, date/time, merchant/card, totals and valid/mismatch/unverifiable status. Core validates the strict parser contract and tenant-scoped staging; full parser/Python contracts pass. A generated Cyrillic T-Bank PDF parses through the authenticated HTTP endpoint with HTTP 200 and valid reconciliation."
     intentional_differences: []
   - id: F48
     feature: "Preview импорта, подтверждение, покупки/доходы/refund, skipped"
     target: "J import policy; W/P preview"
     acceptance: "Видны включённые/пропущенные типы и суммы; комиссии не исчезают под неверной подписью"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/BankImportPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ImportsPanel.test.tsx
+    evidence:
+      - "Core stages tenant-scoped rows, keeps parser quality unchanged, exposes signed included/excluded rows, supports explicit type overrides, and confirms a versioned batch. RU/EN Web tests cover reconciliation, fees, user selection, confirmation, duplicates and undo; all 30 Web tests and production build pass."
     intentional_differences: []
   - id: F49
     feature: "Дедупликация импорта, bulk insert, undo именно партии"
     target: "J import batches/idempotency"
     acceptance: "Повтор файла/перекрывающаяся выписка/повтор refund; undo не затрагивает чужие/поздние записи"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/core/src/main/resources/db/migration/V24__bank_import_batch_commit.sql
+      - services/core/src/main/resources/db/migration/V25__defer_bank_import_transaction_link.sql
+    evidence:
+      - "JDBC batch insertion writes imported transactions, audit records and transaction.created outbox events atomically. Tenant-scoped SHA-256 fingerprints use the full normalized description and occurrence number, preserving identical purchases and refunds. PostgreSQL tests cover replay, overlap, refund dedupe, CSRF, undo of only batch rows, and all-or-nothing conflict reporting. Core check passes."
     intentional_differences: []
   - id: F50
     feature: "Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"
     target: "J merchant mappings; P classification; W/P clarification"
     acceptance: "Личные соответствия переживают рестарт; уточнения по умолчанию до 6, порог 300 RUB"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - "services/core/src/test/java/com/decorix/finance/core/domain/MerchantCategoryPolicyTest.java"
+      - "services/core/src/test/java/com/decorix/finance/core/api/MerchantMappingServiceTest.java"
+      - "services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java#merchantHypothesesAreCachedUntilAUserRuleOverridesThemAndApplyOnImport"
+      - "services/python/intelligence/tests/test_merchant_classification.py"
+      - "services/python/intelligence/tests/test_app.py"
+      - "apps/web/src/ImportsPanel.test.tsx"
+      - "tools/contracts/test_contracts.py"
+    evidence:
+      - "Core check passes 153/153 with PostgreSQL 18.6 and no skips. The PostgreSQL API test verifies merchant-only AI input, 90-day cache reuse, personal-rule precedence, durable mapping readback and imported category. Python/contracts pass 208 with 3 optional database skips; Web passes 31/31 and production build."
     intentional_differences: []
   - id: F51
     feature: "Уточнение магазина меняет ранее импортированные подходящие записи"
     target: "J preview/apply reclassification"
     acceptance: "Список затрагиваемых ID проверяется по tenant/user; не менять ручные правки молча"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ImportsPanel.test.tsx
+      - tools/contracts/test_contracts.py
+      - tools/contracts/test_core_migration.py
+    evidence:
+      - "F51 Core preview/apply scopes candidates to the importing tenant member and only committed, created bank-import expenses without explicit row category corrections or transaction edits. Apply checks the exact reviewed IDs, versions, categories and current mapping under transaction-scoped merchant locks shared with mapping saves and imports; stale changes reject atomically. Successful changes use the normal transaction update path, versions, audit and outbox, with safe retries. RU/EN Web requires a separate preview and Apply; BFF preview/apply enforce CSRF. PostgreSQL tests cover exact reviewed lists, stale manual edits, explicit import category, other-member isolation, idempotency, outbox and import-lock serialization. PASS Core 159/159, Python/contracts 209 passed with 3 optional skips, Web 32/32 and production build."
     intentional_differences: []
   - id: F52
     feature: "CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
@@ -469,15 +712,24 @@ features:
     feature: Android Kotlin Compose client parity F01-F58 RU/EN
     target: apps/android + Java Core API
     acceptance: Every F01-F58 flow has Android behavior or approved N/A; emulator install and E2E pass
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+    evidence:
+      - "Android connected instrumentation passes 20/20 on FinanceCodex(AVD) - 14. The debug package `com.decorix.finance.debug` is installed on the emulator. APK SHA-256: 589AA444F8AB0A4446C211C320CEFFFB0FB0D7C6103296C6DB18017EED13AA98. RU/EN onboarding, profile, draft editing/cancel/confirm, budgets, debts, reports and charts have emulator coverage. F01-F58 feature-by-feature coverage and real Core/OIDC end-to-end acceptance remain incomplete."
     intentional_differences: []
   - id: F60
     feature: Python AI Gateway capability routing and Vertex AI adapter seam
     target: services/python/intelligence
     acceptance: local-only fail-closed; provider/prompt provenance; shared evals; adapter switch without business-code changes
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/python/intelligence/tests/test_gateway.py
+      - services/python/intelligence/tests/test_tesseract.py
+      - services/python/intelligence/tests/test_vision.py
+      - services/python/intelligence/tests/test_evaluation.py
+      - services/python/intelligence/tests/test_app.py
+    evidence:
+      - "Local-only policy, capability routing, Tesseract, Vision and shared synthetic evaluations pass offline; live model comparison and Vertex canary are pending."
     intentional_differences: []
