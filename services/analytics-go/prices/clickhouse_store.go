@@ -180,6 +180,11 @@ func (store *ClickHouseHTTPStore) History(ctx context.Context, tenantID, ownerID
 		if err := validatePricePoint(point); err != nil {
 			return nil, fmt.Errorf("ClickHouse returned invalid price history row: %w", err)
 		}
+		canonicalUnit, err := UnitPrice(point.LineSum, point.Quantity)
+		if err != nil {
+			return nil, fmt.Errorf("ClickHouse returned invalid paid line: %w", err)
+		}
+		point.UnitPrice = canonicalUnit
 		if point.TenantID != tenantID || point.OwnerID != ownerID {
 			return nil, errors.New("ClickHouse returned a price row outside the requested tenant/member scope")
 		}
@@ -259,12 +264,8 @@ func validatePricePoint(point PricePoint) error {
 	if _, err := time.Parse(time.DateOnly, point.ReceiptDate); err != nil {
 		return errors.New("price point has invalid receipt date")
 	}
-	expectedUnit, err := UnitPrice(point.LineSum, point.Quantity)
-	if err != nil {
+	if _, err := canonicalUnitPrice(point.LineSum, point.Quantity, point.UnitPrice); err != nil {
 		return fmt.Errorf("price point has invalid paid line: %w", err)
-	}
-	if point.UnitPrice != expectedUnit {
-		return errors.New("price point unit price does not match its paid line")
 	}
 	return nil
 }

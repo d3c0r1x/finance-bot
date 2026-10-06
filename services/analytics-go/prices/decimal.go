@@ -11,8 +11,9 @@ import (
 const priceScale = 6
 
 var (
-	lineSumPattern  = regexp.MustCompile(`^(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,2})?$`)
-	quantityPattern = regexp.MustCompile(`^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$`)
+	lineSumPattern   = regexp.MustCompile(`^(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,2})?$`)
+	quantityPattern  = regexp.MustCompile(`^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$`)
+	unitPricePattern = regexp.MustCompile(`^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,6})?$`)
 )
 
 func UnitPrice(lineSum, quantity string) (string, error) {
@@ -25,6 +26,22 @@ func UnitPrice(lineSum, quantity string) (string, error) {
 		return "", err
 	}
 	return formatFixed(new(big.Rat).Quo(sum, qty), priceScale), nil
+}
+
+func canonicalUnitPrice(lineSum, quantity, unitPrice string) (string, error) {
+	expected, err := UnitPrice(lineSum, quantity)
+	if err != nil {
+		return "", err
+	}
+	actualValue, err := parsePositive(unitPrice, unitPricePattern, "unit price")
+	if err != nil {
+		return "", err
+	}
+	expectedValue, ok := new(big.Rat).SetString(expected)
+	if !ok || actualValue.Cmp(expectedValue) != 0 {
+		return "", errors.New("unit price does not match its paid line")
+	}
+	return expected, nil
 }
 
 func parsePositive(value string, pattern *regexp.Regexp, field string) (*big.Rat, error) {

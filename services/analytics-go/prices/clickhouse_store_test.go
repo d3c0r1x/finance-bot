@@ -121,6 +121,27 @@ func TestClickHouseStoreReadsDeduplicatedHistoryWithTenantAndOwnerFilters(t *tes
 	}
 }
 
+func TestClickHouseStoreHistoryNormalizesDecimalScale(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"tenant_id":"00000000-0000-4000-8000-000000000002","owner_user_id":"00000000-0000-4000-8000-000000000004","receipt_id":"00000000-0000-4000-8000-000000000003","transaction_id":"00000000-0000-4000-8000-000000000005","item_id":"00000000-0000-4000-8000-000000000006","event_id":"00000000-0000-4000-8000-000000000001","aggregate_version":2,"receipt_date":"2026-10-01","purchased_at":"2026-10-01 09:00:00.000000","recorded_at":"2026-10-01 09:00:01.000000","merchant":"Market","name":"Tea 500g","quantity":"2","line_sum":"50","unit_price":"25"}`+"\n")
+	}))
+	defer server.Close()
+	store, err := NewClickHouseHTTPStore(ClickHouseHTTPConfig{
+		Endpoint: server.URL, Database: "finance_analytics", Username: "analytics_reader", Password: "test-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	points, err := store.History(context.Background(), "00000000-0000-4000-8000-000000000002",
+		"00000000-0000-4000-8000-000000000004", time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 1 || points[0].UnitPrice != "25.000000" {
+		t.Fatalf("History() unit price = %+v, want normalized 25.000000", points)
+	}
+}
+
 func TestClickHouseStoreRejectsPlaintextRemoteAndOutOfScopeRows(t *testing.T) {
 	if _, err := NewClickHouseHTTPStore(ClickHouseHTTPConfig{
 		Endpoint: "http://analytics.internal:8123", Database: "finance_analytics",
