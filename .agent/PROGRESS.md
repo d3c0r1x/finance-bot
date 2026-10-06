@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 05:11, Europe/Moscow.
+Updated: 2026-10-06 05:18, Europe/Moscow.
 
 ## Global plan
 
@@ -43,21 +43,21 @@ Updated: 2026-10-06 05:11, Europe/Moscow.
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 | F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
 | F39 | Mute and restore recurring series | COMPLETE — local gates and GitHub rerun pass | F38 | b1e64c4 + 2de08d9 |
-| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1 verified locally; Core and clients remain | F39 | pending |
-| F40.1 | Versioned Go advice-spend algorithm and internal API | VERIFYING — local gates green; GitHub regression pending | F39 | pending |
-| F40.2 | Core member-scoped receipt facts and report API integration | PLANNED | F40.1 | pending |
+| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1 complete; Core and clients remain | F39 | pending |
+| F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
+| F40.2 | Core member-scoped receipt facts and report API integration | ANALYSIS — define SQL scope and outage behavior before RED | F40.1 | pending |
 | F40.3 | Web, Android and Telegram optional-spend presentation | PLANNED | F40.2 | pending |
 
 ## Current goal
 
-- ID and outcome: F40.1 — versioned Go algorithm/API for optional-spend report facts.
-- Status: VERIFYING — unit, contract, vet and build gates pass locally; commit and GitHub regression remain.
-- Acceptance: reviewed total includes only persisted non-null verdicts; optional total includes harmful/unnecessary rows except owner-allowed products; null verdict never becomes neutral; unknown source stays `unknown`; corrected items remain visible; local-day series, exact amounts, completeness and deterministic input version match golden fixture.
+- ID and outcome: F40.2 — supply correctly scoped confirmed receipt facts through the Core report DTO.
+- Status: ANALYSIS — F40.1 is green and pushed; define Core data selection and analytics outage behavior before tests.
+- Acceptance: use the report's exact date window and timezone; include only confirmed receipts joined to posted expense transactions; personal scope selects the requester, family scope applies each receipt owner's allow decision; retain null verdicts and nullable amounts honestly; cap handoff at Go's 50,000 rows; analytics failure or overflow leaves the finance report usable with an explicit unavailable result; no external call holds a database transaction open.
 - F40 boundary: Core resolves report window, tenant/member scope, confirmed receipt lines and per-owner allowed decisions. Go aggregates; Web, Android and Telegram render shared Core DTO. Missing line amounts produce unavailable partial data, never fabricated totals. F31 later renders the real daily optional-spend series.
 - Design: reuse report window/timezone and per-member `user_product_decisions`; send bounded authorized facts to stateless Go advice analytics; keep approved financial data in PostgreSQL.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `a7de34f`.
-- Updated at: 2026-10-06 05:11 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `f3da7a0`.
+- Updated at: 2026-10-06 05:18 Europe/Moscow.
 
 ## Verification evidence
 
@@ -79,6 +79,7 @@ Updated: 2026-10-06 05:11, Europe/Moscow.
 | F40.1 observed RED | Go `go test ./advice -count=1` | tests + golden fixture, HEAD `a7de34f` | FAIL as expected | Compiler reports missing `WasteRequest`, `WasteLine`, `WasteAlgorithmVersion`, and `BuildWasteReport`; behavior is not implemented. |
 | F40.1 Go algorithm/API | `go test ./... -count=1`; `go vet ./...`; build `./cmd/analytics-api` | F40.1 working tree | PASS | Exact money, denominator, corrections, provenance, day series, required-field validation; Go package regression clean. |
 | F40.1 contract | `.venv\\Scripts\\python.exe -m pytest tools/contracts/test_contracts.py -q` | F40.1 working tree | PASS, 41 passed | OpenAPI operation and strict golden fixture schemas validate. Pytest cache warning is permission-only. |
+| F40.1 GitHub regression | Actions `37403107898`, `37403107896`, `37403107903` | commit `f3da7a0` | PASS | Go/contracts, Core PostgreSQL/contracts, and general bot test workflows all completed successfully. |
 
 ## Failures and attempts
 
@@ -90,7 +91,7 @@ Updated: 2026-10-06 05:11, Europe/Moscow.
 
 ## Next action
 
-- Commit and push F40.1; verify GitHub Go/contracts regression, then begin Core member-scoped integration (F40.2).
+- Write RED PostgreSQL/API tests for F40.2 scope, owner-specific decisions, nullable evidence, request cap and analytics outage; then implement Core aggregation outside the DB transaction.
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
 
@@ -134,6 +135,12 @@ Updated: 2026-10-06 05:11, Europe/Moscow.
 - Added deterministic input hash, local-day zero-filled series, exact large sums, half-even share rounding, top optional items/repeats/corrections, bounded inputs and strict required/unknown/null JSON field checks.
 - Extra RED tests found and fixed required-field acceptance, missing repeat product keys, and Unicode character/byte limit mismatch.
 - GREEN: full analytics Go suite, `go vet ./...`, API build, and contracts `41 passed`. `git diff --check` passed. Local gates complete; commit/push and remote regression are next.
+
+## E3.36 F40.1 pushed and CI GREEN — 2026-10-06 05:18 MSK
+
+- Commit `f3da7a0` pushed to `origin/feat/saas-rewrite`.
+- GitHub run `37403107898` passed contracts and Go tests/vet; `37403107896` passed Core PostgreSQL plus contracts; `37403107903` passed the general Telegram/bot tests.
+- F40.1 is complete. F40 remains open; F40.2 begins with Core query scope, owner-level allow overlay, bounded handoff and report availability on analytics failure.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 

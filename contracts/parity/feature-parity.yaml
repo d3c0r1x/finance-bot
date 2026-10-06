@@ -597,14 +597,14 @@ features:
   - id: F40
     feature: "Сумма/доля необязательного, источники verdict, исправленные позиции"
     target: "G advice analytics; J decisions overlay"
-    acceptance: "Знаменатель — разобранные позиции; неизвестные verdict не превращаются в neutral evidence"
+    acceptance: "Знаменатель — позиции с сохранённым verdict; null не становится neutral evidence; owner-level allow исправление видно отдельно"
     status: in_progress
     tests:
       - services/analytics-go/advice/waste_test.go
       - services/analytics-go/advice/waste_api_test.go
       - tools/contracts/test_contracts.py
     evidence:
-      - "F40.1 implements the versioned Go advice-waste.v1 algorithm and authenticated internal API. Exact reviewed/optional totals, verdict/source provenance, owner-allowed correction visibility, deterministic input hash, local-day series, missing-amount behavior and strict request validation have golden/unit/contract coverage. Local gates: full analytics Go tests, go vet, analytics-api build, contracts 41 passed. Core fact selection and Web/Android/Telegram presentation remain open."
+      - "F40.1 implements the versioned Go advice-waste.v1 algorithm and authenticated internal API. Exact reviewed/optional totals, verdict/source provenance, owner-allowed correction visibility, deterministic input hash, local-day series, missing-amount behavior and strict request validation have golden/unit/contract coverage. Local gates: full analytics Go tests, go vet, analytics-api build, contracts 41 passed. GitHub runs 37403107898, 37403107896 and 37403107903 passed. Core fact selection and Web/Android/Telegram presentation remain open."
     intentional_differences: []
   - id: F41
     feature: "«Не брать», отдельные догадки модели, подтверждение/разрешение"
