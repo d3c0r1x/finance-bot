@@ -1813,6 +1813,132 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void recalculationPreviewIsExplicitAndDoesNotChangeReceiptOrTransactionAmounts() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        UUID itemId = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            UUID transactionId = addReportTransaction(ownerId, subject, "expense", "123.45", "food",
+                    "2026-10-01T10:00:00Z");
+            return addConfirmedReceiptItem(ownerId, subject, transactionId, "Макароны перья", "123.45",
+                    "unnecessary", "model", 1);
+        });
+
+        var previewResponse = mvc.perform(post("/api/v1/tenants/" + tenantId + "/review-recalculations/preview").with(auth)
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").exists())
+                .andExpect(jsonPath("$.algorithmVersion").value("receipt-basket.v1"))
+                .andExpect(jsonPath("$.checked").value(1))
+                .andExpect(jsonPath("$.changes.length()").value(1))
+                .andExpect(jsonPath("$.changes[0].beforeVerdict").value("unnecessary"))
+                .andExpect(jsonPath("$.changes[0].afterVerdict").value("neutral"))
+                .andExpect(jsonPath("$.changes[0].beforeSource").value("model"))
+                .andExpect(jsonPath("$.changes[0].afterSource").value("rule"))
+                .andExpect(jsonPath("$.changes[0].lineSum").value("123.45"))
+                .andReturn();
+        UUID runId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
+                previewResponse.getResponse().getContentAsString(), "$.runId"));
+
+        Map<String, Object> beforeApply = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForMap("""
+                    SELECT ri.verdict, ri.verdict_source, ri.line_sum, r.cash_total, t.amount
+                    FROM receipt_items ri JOIN receipts r ON r.tenant_id = ri.tenant_id AND r.id = ri.receipt_id
+                    JOIN transactions t ON t.tenant_id = r.tenant_id AND t.id = r.transaction_id
+                    WHERE ri.tenant_id = ? AND ri.id = ?
+                    """, tenantId, itemId);
+        });
+        org.junit.jupiter.api.Assertions.assertEquals("unnecessary", beforeApply.get("verdict"));
+        org.junit.jupiter.api.Assertions.assertEquals("model", beforeApply.get("verdict_source"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("123.45"), beforeApply.get("line_sum"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("123.45"), beforeApply.get("cash_total"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("123.45"), beforeApply.get("amount"));
+
+        mvc.perform(post("/api/v1/tenants/" + tenantId + "/review-recalculations/apply").with(auth)
+                        .contentType("application/json").content("{\"runId\":\"" + runId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runId").value(runId.toString()))
+                .andExpect(jsonPath("$.state").value("applied"))
+                .andExpect(jsonPath("$.appliedCount").value(1));
+        mvc.perform(post("/api/v1/tenants/" + tenantId + "/review-recalculations/apply").with(auth)
+                        .contentType("application/json").content("{\"runId\":\"" + runId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("applied"))
+                .andExpect(jsonPath("$.appliedCount").value(1));
+
+        Map<String, Object> afterApply = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForMap("""
+                    SELECT ri.verdict, ri.verdict_source, ri.line_sum, r.cash_total, t.amount
+                    FROM receipt_items ri JOIN receipts r ON r.tenant_id = ri.tenant_id AND r.id = ri.receipt_id
+                    JOIN transactions t ON t.tenant_id = r.tenant_id AND t.id = r.transaction_id
+                    WHERE ri.tenant_id = ? AND ri.id = ?
+                    """, tenantId, itemId);
+        });
+        org.junit.jupiter.api.Assertions.assertEquals("neutral", afterApply.get("verdict"));
+        org.junit.jupiter.api.Assertions.assertEquals("rule", afterApply.get("verdict_source"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("123.45"), afterApply.get("line_sum"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("123.45"), afterApply.get("cash_total"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("123.45"), afterApply.get("amount"));
+        Integer audits = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT count(*) FROM receipt_reviews "
+                    + "WHERE tenant_id = ? AND receipt_item_id = ? AND action = 'receipt.verdicts_recalculated'",
+                    Integer.class, tenantId, itemId);
+        });
+        org.junit.jupiter.api.Assertions.assertEquals(1, audits);
+    }
+
+    @Test
+    void recalculationApplyRejectsStaleReceiptLineWithoutPartialWrites() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        UUID itemId = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            UUID transactionId = addReportTransaction(ownerId, subject, "expense", "45.00", "food",
+                    "2026-10-02T10:00:00Z");
+            return addConfirmedReceiptItem(ownerId, subject, transactionId, "Энергетик", "45.00",
+                    "neutral", "model", 1);
+        });
+        var preview = mvc.perform(post("/api/v1/tenants/" + tenantId + "/review-recalculations/preview").with(auth)
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        UUID runId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
+                preview.getResponse().getContentAsString(), "$.runId"));
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE receipt_items SET advice = 'human edit', version = version + 1 "
+                    + "WHERE tenant_id = ? AND id = ?", tenantId, itemId);
+        });
+
+        mvc.perform(post("/api/v1/tenants/" + tenantId + "/review-recalculations/apply").with(auth)
+                        .contentType("application/json").content("{\"runId\":\"" + runId + "\"}"))
+                .andExpect(status().isPreconditionFailed());
+        Map<String, Object> persisted = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForMap("""
+                    SELECT ri.verdict, ri.verdict_source, ri.advice, ri.line_sum, r.cash_total, t.amount,
+                           (SELECT state FROM recalculation_runs WHERE tenant_id = ? AND id = ?) AS run_state,
+                           (SELECT count(*) FROM receipt_reviews WHERE tenant_id = ? AND receipt_item_id = ?) AS audit_count
+                    FROM receipt_items ri JOIN receipts r ON r.tenant_id = ri.tenant_id AND r.id = ri.receipt_id
+                    JOIN transactions t ON t.tenant_id = r.tenant_id AND t.id = r.transaction_id
+                    WHERE ri.tenant_id = ? AND ri.id = ?
+                    """, tenantId, runId, tenantId, itemId, tenantId, itemId);
+        });
+        org.junit.jupiter.api.Assertions.assertEquals("neutral", persisted.get("verdict"));
+        org.junit.jupiter.api.Assertions.assertEquals("model", persisted.get("verdict_source"));
+        org.junit.jupiter.api.Assertions.assertEquals("human edit", persisted.get("advice"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("45.00"), persisted.get("line_sum"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("45.00"), persisted.get("cash_total"));
+        org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("45.00"), persisted.get("amount"));
+        org.junit.jupiter.api.Assertions.assertEquals("previewed", persisted.get("run_state"));
+        org.junit.jupiter.api.Assertions.assertEquals(0L, ((Number) persisted.get("audit_count")).longValue());
+    }
+
+    @Test
     void optionalSpendReportStopsBeforeAnalyticsWhenReceiptLineLimitIsExceeded() throws Exception {
         var auth = jwt().jwt(token -> token.subject(subject));
         transactions.executeWithoutResult(status -> {

@@ -3528,6 +3528,33 @@ paths:
               schema: { $ref: '#/components/schemas/AdviceEvidenceReport' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/review-recalculations/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: previewReceiptVerdictRecalculation
+      description: Explicitly creates a member-scoped preview; no receipt verdict changes until apply.
+      responses:
+        '200': { description: Preview of saved receipt verdict changes, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationPreview' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: Receipt history exceeds the recalculation bound }
+  /api/v1/tenants/{tenantId}/review-recalculations/apply:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: applyReceiptVerdictRecalculation
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationApplyRequest' } } }
+      responses:
+        '200': { description: Applied preview and durable change report; repeated calls are idempotent, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationApplyResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
   /api/v1/tenants/{tenantId}/products/price-history:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -3809,6 +3836,38 @@ paths:
         content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationApplyRequest' } } }
       responses:
         '200': { description: Reviewed imported transactions reclassified, content: { application/json: { schema: { $ref: '#/components/schemas/MerchantReclassificationApplyResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /bff/tenants/{tenantId}/review-recalculations/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: previewBrowserReceiptVerdictRecalculation
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200': { description: Preview only; receipt data remains unchanged, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationPreview' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: Receipt history exceeds the recalculation bound }
+  /bff/tenants/{tenantId}/review-recalculations/apply:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: applyBrowserReceiptVerdictRecalculation
+      security: [{ bffSession: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationApplyRequest' } } }
+      responses:
+        '200': { description: Applied preview and durable change report; repeated calls are idempotent, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationApplyResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -4655,6 +4714,60 @@ components:
           type: array
           maxItems: 10000
           items: { type: string, format: uuid }
+    ReceiptRecalculationPreview:
+      type: object
+      additionalProperties: false
+      required: [runId, algorithmVersion, state, checked, updateCount, changedCount, changes]
+      properties:
+        runId: { type: string, format: uuid }
+        algorithmVersion: { type: string, const: receipt-basket.v1 }
+        state: { type: string, const: previewed }
+        checked: { type: integer, minimum: 0, maximum: 50000 }
+        updateCount: { type: integer, minimum: 0, maximum: 50000 }
+        changedCount: { type: integer, minimum: 0, maximum: 50000 }
+        changes:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/ReceiptRecalculationChange' }
+    ReceiptRecalculationApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [runId]
+      properties:
+        runId: { type: string, format: uuid }
+    ReceiptRecalculationApplyResult:
+      type: object
+      additionalProperties: false
+      required: [runId, algorithmVersion, state, appliedCount, changedCount, changes]
+      properties:
+        runId: { type: string, format: uuid }
+        algorithmVersion: { type: string, const: receipt-basket.v1 }
+        state: { type: string, const: applied }
+        appliedCount: { type: integer, minimum: 0, maximum: 50000 }
+        changedCount: { type: integer, minimum: 0, maximum: 50000 }
+        changes:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/ReceiptRecalculationChange' }
+    ReceiptRecalculationChange:
+      type: object
+      additionalProperties: false
+      required: [itemId, name, lineSum, itemVersion, beforeVerdict, beforeReason, beforeAction, beforeSource,
+                 afterVerdict, afterReason, afterAction, afterSource, changed]
+      properties:
+        itemId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        lineSum: { type: [string, 'null'], pattern: '^\\d+\\.\\d{2}$' }
+        itemVersion: { type: integer, minimum: 1 }
+        beforeVerdict: { type: [string, 'null'], enum: [useful, neutral, harmful, unnecessary, null] }
+        beforeReason: { type: [string, 'null'], maxLength: 500 }
+        beforeAction: { type: [string, 'null'], maxLength: 500 }
+        beforeSource: { type: [string, 'null'], enum: [rule, model, default, unknown, human, null] }
+        afterVerdict: { type: string, enum: [useful, neutral, harmful, unnecessary] }
+        afterReason: { type: [string, 'null'], maxLength: 500 }
+        afterAction: { type: [string, 'null'], maxLength: 500 }
+        afterSource: { type: string, const: rule }
+        changed: { type: boolean }
     BankImportConfirm:
       type: object
       additionalProperties: false

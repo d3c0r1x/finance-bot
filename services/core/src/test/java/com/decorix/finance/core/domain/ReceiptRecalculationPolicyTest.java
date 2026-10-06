@@ -2,6 +2,7 @@ package com.decorix.finance.core.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.math.BigDecimal;
@@ -67,5 +68,17 @@ class ReceiptRecalculationPolicyTest {
         var persisted = new ReceiptRecalculationPolicy.Line(chipsId, "Чипсы Lays 120г", new BigDecimal("77.10"),
                 "harmful", "снек, много калорий", "сравнить цену за 100 г и взять одну пачку", "rule");
         assertTrue(ReceiptRecalculationPolicy.preview(List.of(persisted)).updates().isEmpty());
+    }
+
+    @Test
+    void previewKeepsUnknownHistoricalLineAmountUnknown() {
+        UUID itemId = UUID.randomUUID();
+        var line = new ReceiptRecalculationPolicy.Line(itemId, "Энергетик", null,
+                "neutral", "", "", "model");
+
+        var plan = ReceiptRecalculationPolicy.preview(List.of(line));
+
+        assertEquals(1, plan.updates().size());
+        assertNull(plan.updates().get(0).lineSum());
     }
 }

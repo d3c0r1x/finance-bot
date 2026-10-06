@@ -21,7 +21,7 @@ public final class ReceiptRecalculationPolicy {
         List<Update> updates = new ArrayList<>();
         for (Line line : lines) {
             if (line == null || line.itemId() == null || line.name() == null || line.name().isBlank()
-                    || line.lineSum() == null || line.lineSum().signum() < 0) {
+                    || (line.lineSum() != null && line.lineSum().signum() < 0)) {
                 throw new IllegalArgumentException("receipt recalculation line is invalid");
             }
             String source = line.verdictSource() == null ? "" : line.verdictSource().trim().toLowerCase(Locale.ROOT);

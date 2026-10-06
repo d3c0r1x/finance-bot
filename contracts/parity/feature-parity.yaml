@@ -638,8 +638,9 @@ features:
     status: in_progress
     tests:
       - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptRecalculationPolicyTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
     evidence:
-      - "F42.1 Java preview policy is locally GREEN: it recalculates only model/default-source lines covered by current deterministic rules, preserves exact receipt line amounts, reports old/new verdict and source, skips human/rule/unknown sources, and leaves uncovered model opinions untouched. Persistence, explicit API preview/apply and durable change report remain incomplete."
+      - "F42.1 policy is pushed as 6f80afc. F42.2 adds RLS-protected durable preview snapshots, explicit member-scoped API/BFF preview and apply, stale-preview 412, idempotent retry, unchanged receipt totals and review audit. Targeted PostgreSQL acceptance and full Core check pass locally; contract validation awaits GitHub CI. Client controls and batch/change-history parity remain."
     intentional_differences: []
   - id: F43
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"

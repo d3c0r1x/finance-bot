@@ -1,0 +1,301 @@
+package com.decorix.finance.core.api;
+
+import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyRequest;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyResult;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.Change;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.Preview;
+import com.decorix.finance.core.domain.ReceiptBasketPolicy;
+import com.decorix.finance.core.domain.ReceiptRecalculationPolicy;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+
+@Service
+public class ReceiptRecalculationService {
+    private static final int MAX_ITEMS = 50_000;
+    private final JdbcTemplate jdbc;
+    private final TransactionTemplate transaction;
+    private final ObjectMapper json;
+
+    public ReceiptRecalculationService(JdbcTemplate jdbc, TransactionTemplate transaction, ObjectMapper json) {
+        this.jdbc = jdbc;
+        this.transaction = transaction;
+        this.json = json;
+    }
+
+    public Preview preview(UUID tenantId, String subject) {
+        return transaction.execute(status -> {
+            Actor actor = actor(tenantId, subject);
+            List<StoredLine> lines = jdbc.query("""
+                    SELECT r.id AS receipt_id, ri.id AS item_id, ri.name, ri.line_sum, ri.verdict,
+                           ri.review_reason, ri.review_action, ri.verdict_source, ri.version
+                    FROM receipts r
+                    JOIN transactions t ON t.tenant_id = r.tenant_id AND t.id = r.transaction_id
+                    JOIN receipt_items ri ON ri.tenant_id = r.tenant_id AND ri.receipt_id = r.id
+                    WHERE r.tenant_id = ? AND r.owner_user_id = ? AND r.state = 'confirmed'
+                      AND t.status = 'posted' AND t.type = 'expense'
+                    ORDER BY t.occurred_at, r.id, ri.ordinal, ri.id
+                    LIMIT 50001
+                    """, (rs, row) -> new StoredLine(rs.getObject("receipt_id", UUID.class),
+                    rs.getObject("item_id", UUID.class), rs.getString("name"), rs.getBigDecimal("line_sum"),
+                    rs.getString("verdict"), rs.getString("review_reason"), rs.getString("review_action"),
+                    rs.getString("verdict_source"), rs.getLong("version")), tenantId, actor.userId());
+            if (lines.size() > MAX_ITEMS) {
+                throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Receipt history is too large to recalculate");
+            }
+
+            List<ReceiptRecalculationPolicy.Line> input = lines.stream().map(line ->
+                    new ReceiptRecalculationPolicy.Line(line.itemId(), line.name(), line.lineSum(), line.verdict(),
+                            line.reason(), line.action(), line.source())).toList();
+            ReceiptRecalculationPolicy.Plan plan;
+            try {
+                plan = ReceiptRecalculationPolicy.preview(input);
+            } catch (IllegalArgumentException invalid) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Receipt history contains invalid review data", invalid);
+            }
+            Map<UUID, StoredLine> storedById = new LinkedHashMap<>();
+            lines.forEach(line -> storedById.put(line.itemId(), line));
+            UUID runId = UUID.randomUUID();
+            int changedCount = (int) plan.updates().stream().filter(ReceiptRecalculationPolicy.Update::changed).count();
+            jdbc.update("""
+                    INSERT INTO recalculation_runs
+                      (id, tenant_id, owner_user_id, initiated_by_subject, algorithm_version, checked_count,
+                       update_count, changed_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, runId, tenantId, actor.userId(), subject, ReceiptBasketPolicy.ALGORITHM_VERSION,
+                    plan.checked(), plan.updates().size(), changedCount);
+
+            List<Change> changes = new ArrayList<>(plan.updates().size());
+            for (ReceiptRecalculationPolicy.Update update : plan.updates()) {
+                StoredLine stored = storedById.get(update.itemId());
+                Map<String, Object> before = itemState(stored.name(), stored.lineSum(), update.beforeVerdict(),
+                        update.beforeReason(), update.beforeAction(), update.beforeSource());
+                Map<String, Object> after = itemState(stored.name(), stored.lineSum(), update.afterVerdict(),
+                        update.afterReason(), update.afterAction(), update.afterSource());
+                jdbc.update("""
+                        INSERT INTO recalculation_changes
+                          (tenant_id, run_id, receipt_id, receipt_item_id, expected_item_version, line_sum,
+                           before_state, after_state, changed)
+                        VALUES (?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb), ?)
+                        """, tenantId, runId, stored.receiptId(), stored.itemId(), stored.version(),
+                        stored.lineSum(), serialize(before), serialize(after), update.changed());
+                changes.add(toChange(update, stored.version()));
+            }
+            return new Preview(runId, ReceiptBasketPolicy.ALGORITHM_VERSION, "previewed", plan.checked(),
+                    plan.updates().size(), changedCount, List.copyOf(changes));
+        });
+    }
+
+    public ApplyResult apply(UUID tenantId, String subject, ApplyRequest request) {
+        if (request == null || request.runId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A recalculation run is required");
+        }
+        return transaction.execute(status -> {
+            Actor actor = actor(tenantId, subject);
+            List<Run> runs = jdbc.query("""
+                    SELECT id, algorithm_version, state, update_count, changed_count
+                    FROM recalculation_runs
+                    WHERE tenant_id = ? AND owner_user_id = ? AND id = ?
+                    FOR UPDATE
+                    """, (rs, row) -> new Run(rs.getObject("id", UUID.class), rs.getString("algorithm_version"),
+                    rs.getString("state"), rs.getInt("update_count"), rs.getInt("changed_count")),
+                    tenantId, actor.userId(), request.runId());
+            if (runs.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recalculation run not found");
+            Run run = runs.get(0);
+            List<Change> changes = loadChanges(tenantId, run.id());
+            if ("applied".equals(run.state())) {
+                return new ApplyResult(run.id(), run.algorithmVersion(), run.state(), run.updateCount(),
+                        run.changedCount(), changes);
+            }
+
+            List<CurrentChange> current = jdbc.query("""
+                    SELECT c.receipt_id, c.receipt_item_id, c.expected_item_version, c.line_sum::text AS line_sum,
+                           c.before_state ->> 'name' AS name,
+                           c.before_state ->> 'verdict' AS before_verdict,
+                           c.before_state ->> 'reason' AS before_reason,
+                           c.before_state ->> 'action' AS before_action,
+                           c.before_state ->> 'source' AS before_source,
+                           c.after_state ->> 'verdict' AS after_verdict,
+                           c.after_state ->> 'reason' AS after_reason,
+                           c.after_state ->> 'action' AS after_action,
+                           c.after_state ->> 'source' AS after_source,
+                           c.changed, ri.version AS current_version, ri.line_sum::text AS current_line_sum,
+                           ri.verdict AS current_verdict, ri.review_reason AS current_reason,
+                           ri.review_action AS current_action, ri.verdict_source AS current_source
+                    FROM recalculation_changes c
+                    JOIN receipt_items ri ON ri.tenant_id = c.tenant_id AND ri.id = c.receipt_item_id
+                                          AND ri.receipt_id = c.receipt_id
+                    WHERE c.tenant_id = ? AND c.run_id = ?
+                    ORDER BY c.receipt_item_id
+                    FOR UPDATE OF c, ri
+                    """, (rs, row) -> new CurrentChange(rs.getObject("receipt_id", UUID.class),
+                    rs.getObject("receipt_item_id", UUID.class), rs.getLong("expected_item_version"),
+                    rs.getString("line_sum"), rs.getString("name"), rs.getString("before_verdict"),
+                    rs.getString("before_reason"), rs.getString("before_action"), rs.getString("before_source"),
+                    rs.getString("after_verdict"), rs.getString("after_reason"), rs.getString("after_action"),
+                    rs.getString("after_source"), rs.getBoolean("changed"), rs.getLong("current_version"),
+                    rs.getString("current_line_sum"), rs.getString("current_verdict"), rs.getString("current_reason"),
+                    rs.getString("current_action"), rs.getString("current_source")), tenantId, run.id());
+            for (CurrentChange change : current) {
+                if (!matchesPreview(change)) {
+                    throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
+                            "Receipt history changed; create a new recalculation preview");
+                }
+            }
+
+            for (CurrentChange change : current) {
+                String advice = adviceText(change.afterReason(), change.afterAction());
+                int updated = jdbc.update("""
+                        UPDATE receipt_items SET verdict = ?, advice = ?, review_reason = ?, review_action = ?,
+                          verdict_source = 'rule', review_provider = NULL, review_model_version = NULL,
+                          review_prompt_version = NULL, review_algorithm_version = ?,
+                          version = version + 1, updated_at = now()
+                        WHERE tenant_id = ? AND receipt_id = ? AND id = ? AND version = ?
+                        """, change.afterVerdict(), advice, emptyToNull(change.afterReason()),
+                        emptyToNull(change.afterAction()), run.algorithmVersion(), tenantId, change.receiptId(),
+                        change.itemId(), change.expectedVersion());
+                if (updated != 1) {
+                    throw new ResponseStatusException(HttpStatus.PRECONDITION_FAILED,
+                            "Receipt history changed; create a new recalculation preview");
+                }
+                Map<String, Object> before = itemState(change.name(), decimalOrNull(change.lineSum()),
+                        change.beforeVerdict(), change.beforeReason(), change.beforeAction(), change.beforeSource());
+                Map<String, Object> after = itemState(change.name(), decimalOrNull(change.lineSum()),
+                        change.afterVerdict(), change.afterReason(), change.afterAction(), change.afterSource());
+                Map<String, Object> runBefore = Map.of("runId", run.id().toString(), "state", "previewed");
+                Map<String, Object> runAfter = Map.of("runId", run.id().toString(), "state", "applied");
+                jdbc.update("""
+                        INSERT INTO receipt_reviews
+                          (tenant_id, receipt_id, receipt_item_id, item_snapshot, actor_subject, action,
+                           before_state, after_state, verdict_source, algorithm_version)
+                        VALUES (?, ?, ?, CAST(? AS jsonb), ?, 'receipt.verdicts_recalculated',
+                                CAST(? AS jsonb), CAST(? AS jsonb), 'rule', ?)
+                        """, tenantId, change.receiptId(), change.itemId(),
+                        serialize(Map.of("before", before, "after", after)), subject,
+                        serialize(runBefore), serialize(runAfter), run.algorithmVersion());
+            }
+            jdbc.update("UPDATE recalculation_runs SET state = 'applied', applied_at = now() "
+                    + "WHERE tenant_id = ? AND id = ? AND state = 'previewed'", tenantId, run.id());
+            return new ApplyResult(run.id(), run.algorithmVersion(), "applied", run.updateCount(),
+                    run.changedCount(), changes);
+        });
+    }
+
+    private List<Change> loadChanges(UUID tenantId, UUID runId) {
+        return jdbc.query("""
+                SELECT receipt_item_id, expected_item_version, line_sum::text AS line_sum,
+                       before_state ->> 'name' AS name,
+                       before_state ->> 'verdict' AS before_verdict,
+                       before_state ->> 'reason' AS before_reason,
+                       before_state ->> 'action' AS before_action,
+                       before_state ->> 'source' AS before_source,
+                       after_state ->> 'verdict' AS after_verdict,
+                       after_state ->> 'reason' AS after_reason,
+                       after_state ->> 'action' AS after_action,
+                       after_state ->> 'source' AS after_source, changed
+                FROM recalculation_changes WHERE tenant_id = ? AND run_id = ? ORDER BY receipt_item_id
+                """, (rs, row) -> new Change(rs.getObject("receipt_item_id", UUID.class), rs.getString("name"),
+                rs.getString("line_sum"), rs.getLong("expected_item_version"), rs.getString("before_verdict"),
+                rs.getString("before_reason"), rs.getString("before_action"), rs.getString("before_source"),
+                rs.getString("after_verdict"), rs.getString("after_reason"), rs.getString("after_action"),
+                rs.getString("after_source"), rs.getBoolean("changed")), tenantId, runId);
+    }
+
+    private Actor actor(UUID tenantId, String subject) {
+        if (tenantId == null || subject == null || subject.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+        jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+        jdbc.queryForObject("SELECT set_config('app.subject', ?, true)", String.class, subject);
+        List<Actor> actors = jdbc.query("""
+                SELECT user_id, role FROM memberships
+                WHERE tenant_id = ? AND subject = ? AND status = 'active'
+                """, (rs, row) -> new Actor(rs.getObject("user_id", UUID.class), rs.getString("role")),
+                tenantId, subject);
+        if (actors.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        Actor actor = actors.get(0);
+        if ("viewer".equals(actor.role())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Viewer access is read-only");
+        }
+        return actor;
+    }
+
+    private static Change toChange(ReceiptRecalculationPolicy.Update update, long version) {
+        return new Change(update.itemId(), update.name(), update.lineSum() == null ? null : update.lineSum().toPlainString(),
+                version, update.beforeVerdict(), update.beforeReason(), update.beforeAction(), update.beforeSource(),
+                update.afterVerdict(), update.afterReason(), update.afterAction(), update.afterSource(), update.changed());
+    }
+
+    private static Map<String, Object> itemState(String name, BigDecimal lineSum, String verdict, String reason,
+                                                  String action, String source) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("name", name);
+        state.put("lineSum", lineSum == null ? null : lineSum.toPlainString());
+        state.put("verdict", verdict);
+        state.put("reason", reason);
+        state.put("action", action);
+        state.put("source", source);
+        return state;
+    }
+
+    private static boolean matchesPreview(CurrentChange change) {
+        return change.currentVersion() == change.expectedVersion()
+                && sameDecimal(change.currentLineSum(), change.lineSum())
+                && same(change.currentVerdict(), change.beforeVerdict())
+                && same(change.currentReason(), change.beforeReason())
+                && same(change.currentAction(), change.beforeAction())
+                && same(change.currentSource(), change.beforeSource());
+    }
+
+    private static boolean same(String left, String right) {
+        return (left == null ? "" : left).equals(right == null ? "" : right);
+    }
+
+    private static boolean sameDecimal(String left, String right) {
+        if (left == null || right == null) return left == null && right == null;
+        return new BigDecimal(left).compareTo(new BigDecimal(right)) == 0;
+    }
+
+    private static BigDecimal decimalOrNull(String value) {
+        return value == null ? null : new BigDecimal(value);
+    }
+
+    private static String adviceText(String reason, String action) {
+        if (reason == null || reason.isBlank()) return emptyToNull(action);
+        if (action == null || action.isBlank()) return reason;
+        String value = reason + " — " + action;
+        return value.length() <= 500 ? value : value.substring(0, 500);
+    }
+
+    private static String emptyToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
+    }
+
+    private String serialize(Object value) {
+        try {
+            return json.writeValueAsString(value);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Could not serialize receipt recalculation snapshot", exception);
+        }
+    }
+
+    private record Actor(UUID userId, String role) {}
+    private record Run(UUID id, String algorithmVersion, String state, int updateCount, int changedCount) {}
+    private record StoredLine(UUID receiptId, UUID itemId, String name, BigDecimal lineSum, String verdict,
+                              String reason, String action, String source, long version) {}
+    private record CurrentChange(UUID receiptId, UUID itemId, long expectedVersion, String lineSum, String name,
+                                 String beforeVerdict, String beforeReason, String beforeAction, String beforeSource,
+                                 String afterVerdict, String afterReason, String afterAction, String afterSource,
+                                 boolean changed, long currentVersion, String currentLineSum, String currentVerdict,
+                                 String currentReason, String currentAction, String currentSource) {}
+}

@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 23:08, Europe/Moscow.
+Updated: 2026-10-06 23:46, Europe/Moscow.
 
 ## Global plan
 
@@ -58,20 +58,20 @@ Updated: 2026-10-06 23:08, Europe/Moscow.
 | F41.3b1 | Actor-scoped Telegram list and decision routes | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 7089a63 |
 | F41.3b2 | Telegram command, renderer and callbacks | COMPLETE — local and four GitHub workflows GREEN | F41.3b1 | 41ace8f |
 | F41.3c | Android list and human controls | COMMITTED — 50/50 instrumentation and APK launch; GitHub run not found | F41.2b | ccfcf6a |
-| F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — deterministic Java preview policy complete; persistence/API remain | F41 | pending |
-| F42.1 | Deterministic preview policy for eligible receipt lines | COMMIT_PENDING — targeted and full Core check pass | F42 | pending |
+| F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — Core preview/apply and durable audit complete; client actions and batch history remain | F41 | pending |
+| F42.1 | Deterministic preview policy for eligible receipt lines | COMPLETE — local Core regression passed | F42 | 6f80afc |
+| F42.2 | Persist preview, apply safely, audit and report changes through Core API | COMMIT_PENDING — focused PostgreSQL and full Core checks pass; contracts awaiting CI | F42.1 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F42.1 — deterministic Java preview policy for old receipt verdict recalculation.
-- Status: COMMIT_PENDING — observed RED for missing policy; targeted test and full Core check now pass.
-- Acceptance: only model/default sources with current deterministic-rule coverage enter preview; old/new verdict and source remain inspectable; receipt line amounts remain unchanged; human/rule/unknown and uncovered model rows remain untouched.
-- Data boundary: pure domain policy only; no database writes, API or public route yet.
-- User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `0654738`; F42.1 and MVP plan tracked changes remain.
-- Updated at: 2026-10-06 23:08 Europe/Moscow.
-
+- ID and outcome: F42.2 — persist receipt verdict previews and apply them with stale-state protection and audit.
+- Status: COMMIT_PENDING — observed RED for missing route; PostgreSQL acceptance and full Core check GREEN.
+- Acceptance: preview makes no financial writes; apply changes only eligible receipt verdict fields; preserves receipt/transaction totals; stores before/after snapshot; stale state returns 412 without partial writes; retry is idempotent; tenant/member scope enforced.
+- Changed files: Core recalculation API/service/controller, migration V35, OpenAPI schemas/routes, PostgreSQL acceptance tests, nullable historical line sum handling, parity and this progress log.
+- User choices: maintain F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, no placeholder financial data. Personal MVP takes priority; V2 remains deferred.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `6f80afc` plus uncommitted F42.2 changes.
+- Updated at: 2026-10-06 23:46 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -184,7 +184,7 @@ Updated: 2026-10-06 23:08, Europe/Moscow.
 
 ## Next action
 
-- Commit F42.1 after staged diff review, then begin F42 persistence/API acceptance tests.
+- Stage only F42.2-owned files, inspect staged diff, commit and push; then implement F42 user-facing recalculation controls and batch/change-history parity.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
@@ -1198,3 +1198,12 @@ Updated: 2026-10-06 23:08, Europe/Moscow.
 - The policy reports old/new verdict, advice and source with exact stored line amount; it skips human/rule/unknown sources, retains uncovered model opinions, and is idempotent after an item becomes rule-backed. Persistence/API does not exist yet, so F42 remains IN PROGRESS.
 - M2 environment audit is complete but runtime remains BLOCKED: durable PostgreSQL and Keycloak are absent; current PostgreSQL listener is temporary test infrastructure; Tailscale Funnel is unconfigured. Public ingress remains closed until auth and durable storage work.
 - Next: commit this independently tested policy slice, then write PostgreSQL acceptance for explicit preview/apply, audit snapshots, stale-version handling, and unchanged receipt totals before implementation.
+
+## E4.62 F42.2 durable preview and apply API — 2026-10-06 23:46 MSK
+
+- Observed RED: PostgreSQL acceptance returned 404 for the absent preview route. Added acceptance for preview-only behavior, apply/idempotence, unchanged totals, durable audit, and stale item rejection with no partial write.
+- Added V35 RLS-protected recalculation runs and snapshots. Core API scopes run to active tenant member, restricts viewers, stores exact before/after line state, rejects stale versions/state with 412, changes only receipt review fields, records `receipt.verdicts_recalculated`, and makes repeated apply idempotent.
+- Historical receipt line sum may be null; preview preserves null without inventing a value. OpenAPI declares API and CSRF-protected BFF routes.
+- GREEN: targeted PostgreSQL recalculation tests passed; full `:services:core:check --no-daemon` passed, 241 tests, 0 failures, 2 skipped. `git diff --check` passed. Contract pytest NOT_RUN: local Python environment has no pytest/PyYAML/jsonschema; CI contract gate remains required.
+- F42.1 commit `6f80afc` is pushed. F42.2 commit pending review. M2 runtime remains BLOCKED; test PostgreSQL is temporary Codex infrastructure and public ingress remains closed.
+- Next: stage only F42.2-owned files, inspect staged diff, commit and push; then add user-facing preview/apply flow and remaining F42 batch/change-history behavior.
