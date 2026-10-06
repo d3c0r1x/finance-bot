@@ -3,6 +3,9 @@ package com.decorix.finance.core.api;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.api.InflationApi.PersonalInflationItem;
 import com.decorix.finance.core.api.InflationApi.PersonalInflationRequest;
+import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
+import com.decorix.finance.core.api.RecurringApi.RecurringRequest;
+import com.decorix.finance.core.api.RecurringApi.RecurringSeries;
 import com.decorix.finance.core.api.ProductApi.PriceCompareRequest;
 import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogRequest;
@@ -19,8 +22,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.math.RoundingMode;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -215,6 +224,129 @@ public class ProductPriceHistoryClient {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                     "Personal inflation response is incomplete", ex);
         }
+    }
+
+    public RecurringProjection recurring(UUID tenantId, UUID ownerUserId, Instant asOf, String timeZone) {
+        if (serviceUrl.isBlank() || serviceToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Recurring analytics service is not configured");
+        }
+        if (tenantId == null || ownerUserId == null || asOf == null || timeZone == null || timeZone.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Recurring analytics scope is required");
+        }
+        RecurringRequest request = new RecurringRequest(tenantId.toString(), ownerUserId.toString(), asOf, timeZone);
+        try {
+            String body = json.writeValueAsString(request);
+            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(serviceUrl.replaceAll("/+$", "")
+                            + "/internal/v1/analytics/recurring"))
+                    .timeout(timeout).header("Authorization", "Bearer " + serviceToken)
+                    .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+            HttpResponse<InputStream> response = http.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] responseBody;
+            try (InputStream stream = response.body()) { responseBody = stream.readNBytes(MAX_RESPONSE_BYTES + 1); }
+            if (responseBody.length > MAX_RESPONSE_BYTES || response.statusCode() != 200) throw unavailableRecurring();
+            RecurringProjection result = json.readValue(responseBody, RecurringProjection.class);
+            validateRecurring(result, request);
+            return result;
+        } catch (ResponseStatusException ex) {
+            throw ex;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Recurring analytics request was interrupted", ex);
+        } catch (IOException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Recurring analytics service is unavailable", ex);
+        } catch (IllegalArgumentException | JacksonException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Recurring analytics response is invalid", ex);
+        }
+    }
+
+    private static void validateRecurring(RecurringProjection result, RecurringRequest request) {
+        ZoneId zone = ZoneId.of(request.timeZone());
+        LocalDate today = request.asOf().atZone(zone).toLocalDate();
+        if (result == null || !"recurring.v1".equals(result.algorithmVersion()) || !"complete".equals(result.completeness())
+                || !request.timeZone().equals(result.timeZone()) || result.asOf() == null
+                || !result.asOf().atZone(zone).toLocalDate().equals(today)
+                || !result.asOf().atZone(zone).toLocalTime().equals(java.time.LocalTime.MIDNIGHT)
+                || result.expenseSeries() == null || result.incomeSeries() == null || result.dueSoon() == null
+                || result.overdue() == null || result.monthlyExpenseEstimates() == null
+                || result.expenseSeries().size() > 5000 || result.incomeSeries().size() > 5000
+                || result.dueSoon().size() > 5000 || result.overdue().size() > 5000) {
+            throw invalidRecurringResponse();
+        }
+        Set<String> ids = new HashSet<>();
+        result.expenseSeries().forEach(series -> validateRecurringSeries(series, "expense", ids, today));
+        result.incomeSeries().forEach(series -> validateRecurringSeries(series, "income", ids, today));
+        List<RecurringSeries> expectedSoon = result.expenseSeries().stream()
+                .filter(series -> series.daysUntil() >= 0 && series.daysUntil() <= 3).toList();
+        List<RecurringSeries> expectedOverdue = result.expenseSeries().stream()
+                .filter(series -> series.daysUntil() < 0).toList();
+        if (!expectedSoon.stream().map(RecurringSeries::id).toList().equals(result.dueSoon().stream().map(RecurringSeries::id).toList())
+                || !expectedOverdue.stream().map(RecurringSeries::id).collect(java.util.stream.Collectors.toSet())
+                        .equals(result.overdue().stream().map(RecurringSeries::id).collect(java.util.stream.Collectors.toSet()))) {
+            throw invalidRecurringResponse();
+        }
+        result.dueSoon().forEach(series -> validateRecurringSeries(series, "expense", new HashSet<>(), today));
+        result.overdue().forEach(series -> validateRecurringSeries(series, "expense", new HashSet<>(), today));
+        RecurringSeries expectedIncome = result.incomeSeries().stream().filter(series -> series.daysUntil() >= 0)
+                .min(java.util.Comparator.comparingInt(RecurringSeries::daysUntil)).orElse(null);
+        if (!java.util.Objects.equals(expectedIncome == null ? null : expectedIncome.id(),
+                result.nextIncome() == null ? null : result.nextIncome().id())) throw invalidRecurringResponse();
+        Map<String, BigDecimal> expectedMonthly = new java.util.HashMap<>();
+        result.expenseSeries().forEach(series -> {
+            BigDecimal average = new BigDecimal(series.amount());
+            BigDecimal monthly = series.periodDays() >= 25 && series.periodDays() <= 35 ? average
+                    : average.multiply(BigDecimal.valueOf(30)).divide(BigDecimal.valueOf(series.periodDays()), 12, RoundingMode.HALF_UP);
+            expectedMonthly.merge(series.currency(), monthly, BigDecimal::add);
+        });
+        Map<String, String> actualMonthly = result.monthlyExpenseEstimates();
+        if (actualMonthly.size() != expectedMonthly.size()) throw invalidRecurringResponse();
+        expectedMonthly.forEach((currency, amount) -> {
+            String actual = actualMonthly.get(currency);
+            if (!nonNegativeMoney(actual) || new BigDecimal(actual).compareTo(amount.setScale(2, RoundingMode.HALF_UP)) != 0) {
+                throw invalidRecurringResponse();
+            }
+        });
+        if (expectedMonthly.size() == 1) {
+            if (!positiveOrZeroMoney(result.monthlyExpenseEstimate()) || !actualMonthly.containsValue(result.monthlyExpenseEstimate())) {
+                throw invalidRecurringResponse();
+            }
+        } else if (result.monthlyExpenseEstimate() != null) throw invalidRecurringResponse();
+        if (expectedMonthly.isEmpty() && result.monthlyExpenseEstimate() != null) throw invalidRecurringResponse();
+    }
+
+    private static void validateRecurringSeries(RecurringSeries series, String type, Set<String> ids, LocalDate today) {
+        if (series == null || series.id() == null || !series.id().matches("[0-9a-f]{32}") || !ids.add(series.id())
+                || series.key() == null || series.key().isBlank() || series.name() == null || series.name().isBlank()
+                || !type.equals(series.type()) || !"RUB".equals(series.currency())
+                || !positiveMoney(series.amount()) || !positiveMoney(series.minAmount()) || !positiveMoney(series.maxAmount())
+                || new BigDecimal(series.minAmount()).compareTo(new BigDecimal(series.amount())) > 0
+                || new BigDecimal(series.maxAmount()).compareTo(new BigDecimal(series.amount())) < 0
+                || new BigDecimal(series.maxAmount()).subtract(new BigDecimal(series.minAmount()))
+                        .compareTo(new BigDecimal(series.amount()).multiply(new BigDecimal("0.25"))) > 0
+                || series.occurrences() < 3 || series.occurrences() > 5000
+                || series.minIntervalDays() < 1 || series.maxIntervalDays() < series.minIntervalDays()
+                || series.maxIntervalDays() > 3650 || series.lastDate() == null || series.nextDate() == null) {
+            throw invalidRecurringResponse();
+        }
+        LocalDate last = LocalDate.parse(series.lastDate());
+        LocalDate next = LocalDate.parse(series.nextDate());
+        if (!last.plusDays(series.periodDays()).equals(next)
+                || ChronoUnit.DAYS.between(today, next) != series.daysUntil()
+                || series.minIntervalDays() > series.periodDays() || series.maxIntervalDays() < series.periodDays()
+                || ("week".equals(series.periodCode())
+                ? series.periodDays() < 6 || series.periodDays() > 8
+                : "month".equals(series.periodCode()) ? series.periodDays() < 25 || series.periodDays() > 35 : true)) {
+            throw invalidRecurringResponse();
+        }
+    }
+
+    private static boolean positiveOrZeroMoney(String value) { return nonNegativeMoney(value); }
+
+    private static ResponseStatusException unavailableRecurring() {
+        return new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Recurring analytics service is unavailable");
+    }
+
+    private static ResponseStatusException invalidRecurringResponse() {
+        return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Recurring analytics response is incomplete");
     }
 
     private static void validatePersonalInflation(PersonalInflation result, PersonalInflationRequest request) {

@@ -1,0 +1,132 @@
+{
+  "algorithm_version": "recurring.v1",
+  "completeness": "complete",
+  "time_zone": "Europe/Moscow",
+  "as_of": "2026-10-06T00:00:00+03:00",
+  "expense_series": [
+    {
+      "id": "adcb965f825a29b07680f1d218eea75a",
+      "key": "internet utilities",
+      "name": "Internet",
+      "category": "utilities",
+      "type": "expense",
+      "currency": "RUB",
+      "amount": "700.00",
+      "min_amount": "680.00",
+      "max_amount": "720.00",
+      "period_code": "week",
+      "period_days": 7,
+      "min_interval_days": 7,
+      "max_interval_days": 7,
+      "occurrences": 3,
+      "last_date": "2026-10-02",
+      "next_date": "2026-10-09",
+      "days_until": 3
+    },
+    {
+      "id": "3e4e8a25f37780dd43946a2f42449b56",
+      "key": "housing rent",
+      "name": "Rent",
+      "category": "housing",
+      "type": "expense",
+      "currency": "RUB",
+      "amount": "1500.00",
+      "min_amount": "1500.00",
+      "max_amount": "1500.00",
+      "period_code": "month",
+      "period_days": 31,
+      "min_interval_days": 31,
+      "max_interval_days": 31,
+      "occurrences": 3,
+      "last_date": "2026-09-01",
+      "next_date": "2026-10-02",
+      "days_until": -4
+    }
+  ],
+  "income_series": [
+    {
+      "id": "27b357989a264c1de55090f000ec1e30",
+      "key": "income salary",
+      "name": "Salary",
+      "category": "income",
+      "type": "income",
+      "currency": "RUB",
+      "amount": "90000.00",
+      "min_amount": "90000.00",
+      "max_amount": "90000.00",
+      "period_code": "month",
+      "period_days": 31,
+      "min_interval_days": 31,
+      "max_interval_days": 31,
+      "occurrences": 3,
+      "last_date": "2026-09-10",
+      "next_date": "2026-10-11",
+      "days_until": 5
+    }
+  ],
+  "due_soon": [
+    {
+      "id": "adcb965f825a29b07680f1d218eea75a",
+      "key": "internet utilities",
+      "name": "Internet",
+      "category": "utilities",
+      "type": "expense",
+      "currency": "RUB",
+      "amount": "700.00",
+      "min_amount": "680.00",
+      "max_amount": "720.00",
+      "period_code": "week",
+      "period_days": 7,
+      "min_interval_days": 7,
+      "max_interval_days": 7,
+      "occurrences": 3,
+      "last_date": "2026-10-02",
+      "next_date": "2026-10-09",
+      "days_until": 3
+    }
+  ],
+  "overdue": [
+    {
+      "id": "3e4e8a25f37780dd43946a2f42449b56",
+      "key": "housing rent",
+      "name": "Rent",
+      "category": "housing",
+      "type": "expense",
+      "currency": "RUB",
+      "amount": "1500.00",
+      "min_amount": "1500.00",
+      "max_amount": "1500.00",
+      "period_code": "month",
+      "period_days": 31,
+      "min_interval_days": 31,
+      "max_interval_days": 31,
+      "occurrences": 3,
+      "last_date": "2026-09-01",
+      "next_date": "2026-10-02",
+      "days_until": -4
+    }
+  ],
+  "next_income": {
+    "id": "27b357989a264c1de55090f000ec1e30",
+    "key": "income salary",
+    "name": "Salary",
+    "category": "income",
+    "type": "income",
+    "currency": "RUB",
+    "amount": "90000.00",
+    "min_amount": "90000.00",
+    "max_amount": "90000.00",
+    "period_code": "month",
+    "period_days": 31,
+    "min_interval_days": 31,
+    "max_interval_days": 31,
+    "occurrences": 3,
+    "last_date": "2026-09-10",
+    "next_date": "2026-10-11",
+    "days_until": 5
+  },
+  "monthly_expense_estimate": "4500.00",
+  "monthly_expense_estimates": {
+    "RUB": "4500.00"
+  }
+}

@@ -4,6 +4,11 @@ import org.json.JSONObject
 import org.json.JSONArray
 import java.time.Instant
 import java.time.ZoneId
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.temporal.ChronoUnit
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 data class RollingFoodStatus(
     val fromDate: String,
@@ -162,6 +167,21 @@ data class FinancePersonalInflation(
     val indexPercent: String?,
     val rising: List<FinancePersonalInflationItem>,
     val falling: List<FinancePersonalInflationItem>,
+)
+
+data class FinanceRecurringSeries(
+    val id: String, val key: String, val name: String, val category: String?, val type: String, val currency: String,
+    val amount: String, val minAmount: String, val maxAmount: String, val periodCode: String, val periodDays: Int,
+    val minIntervalDays: Int, val maxIntervalDays: Int, val occurrences: Int, val lastDate: String, val nextDate: String,
+    val daysUntil: Int,
+)
+
+data class FinanceRecurringProjection(
+    val algorithmVersion: String, val completeness: String, val timeZone: String, val asOf: String,
+    val expenseSeries: List<FinanceRecurringSeries>, val incomeSeries: List<FinanceRecurringSeries>,
+    val dueSoon: List<FinanceRecurringSeries>, val overdue: List<FinanceRecurringSeries>,
+    val nextIncome: FinanceRecurringSeries?, val monthlyExpenseEstimate: String?,
+    val monthlyExpenseEstimates: Map<String, String>,
 )
 
 data class FinanceTransactionDraft(
@@ -503,6 +523,112 @@ internal object FinanceModels {
             }
         return FinancePersonalInflation(true, reason, asOf, windowDays, productCount, before, now, index,
             parseItems(risingJson, isRising = true), parseItems(fallingJson, isRising = false))
+    }
+
+    fun recurringProjection(json: JSONObject): FinanceRecurringProjection {
+        require(json.getString("algorithmVersion") == "recurring.v1" && json.getString("completeness") == "complete") {
+            "Invalid recurring projection version"
+        }
+        val timezone = json.getString("timeZone")
+        val zone = runCatching { ZoneId.of(timezone) }.getOrNull()
+        val asOf = json.getString("asOf")
+        val instant = runCatching { Instant.parse(asOf) }.getOrNull()
+        require(timezone.isNotBlank() && timezone.length <= 64 && zone != null && instant != null
+            && instant.atZone(zone).toLocalTime() == LocalTime.MIDNIGHT) { "Invalid recurring projection date" }
+        val today = instant.atZone(zone).toLocalDate()
+        val expenseJson = json.getJSONArray("expenseSeries")
+        val incomeJson = json.getJSONArray("incomeSeries")
+        val dueJson = json.getJSONArray("dueSoon")
+        val overdueJson = json.getJSONArray("overdue")
+        require(expenseJson.length() <= 5000 && incomeJson.length() <= 5000
+            && dueJson.length() <= 5000 && overdueJson.length() <= 5000) { "Invalid recurring series count" }
+        val ids = mutableSetOf<String>()
+
+        fun parseSeries(item: JSONObject, expectedType: String, register: Boolean = true): FinanceRecurringSeries {
+            val id = item.getString("id")
+            val key = item.getString("key")
+            val name = item.getString("name")
+            val category = nullableString(item, "category")
+            val type = item.getString("type")
+            val currency = item.getString("currency")
+            val amountRaw = item.getString("amount")
+            val minRaw = item.getString("minAmount")
+            val maxRaw = item.getString("maxAmount")
+            val periodCode = item.getString("periodCode")
+            val period = exactInt(item, "periodDays")
+            val minInterval = exactInt(item, "minIntervalDays")
+            val maxInterval = exactInt(item, "maxIntervalDays")
+            val occurrences = exactInt(item, "occurrences")
+            val lastRaw = item.getString("lastDate")
+            val nextRaw = item.getString("nextDate")
+            val daysUntil = exactInt(item, "daysUntil")
+            val amountPattern = Regex("^(?:0|[1-9]\\d{0,17})\\.\\d{2}$")
+            require(id.matches(Regex("^[0-9a-f]{32}$")) && (!register || ids.add(id))
+                && key.isNotBlank() && key.length <= 512 && name.isNotBlank() && name.length <= 500
+                && (category == null || category.length <= 64) && type == expectedType && currency == "RUB"
+                && amountPattern.matches(amountRaw) && amountPattern.matches(minRaw) && amountPattern.matches(maxRaw)
+                && periodCode in setOf("week", "month")
+                && (if (periodCode == "week") period in 6..8 else period in 25..35)
+                && minInterval in 1..period && maxInterval in period..3650 && occurrences in 3..5000
+                && daysUntil in -3650..3650) { "Invalid recurring series" }
+            val amount = amountRaw.toBigDecimal()
+            val minimum = minRaw.toBigDecimal()
+            val maximum = maxRaw.toBigDecimal()
+            require(minimum <= amount && amount <= maximum
+                && maximum.subtract(minimum) <= amount.multiply(BigDecimal("0.25"))) { "Invalid recurring amount range" }
+            val last = runCatching { LocalDate.parse(lastRaw) }.getOrNull()
+            val next = runCatching { LocalDate.parse(nextRaw) }.getOrNull()
+            require(last != null && next != null && last.plusDays(period.toLong()) == next
+                && ChronoUnit.DAYS.between(today, next) == daysUntil.toLong()) { "Invalid recurring dates" }
+            return FinanceRecurringSeries(id, key, name, category, type, currency, amountRaw, minRaw, maxRaw,
+                periodCode, period, minInterval, maxInterval, occurrences, lastRaw, nextRaw, daysUntil)
+        }
+
+        val expenses = (0 until expenseJson.length()).map { parseSeries(expenseJson.getJSONObject(it), "expense") }
+        val incomes = (0 until incomeJson.length()).map { parseSeries(incomeJson.getJSONObject(it), "income") }
+        val byExpenseId = expenses.associateBy { it.id }
+        val expectedDueSoon = expenses.filter { it.daysUntil in 0..3 }
+        val dueSoon = (0 until dueJson.length()).map { index ->
+            val item = parseSeries(dueJson.getJSONObject(index), "expense", register = false)
+            require(byExpenseId[item.id] == item) { "Recurring due-soon item is outside the expense series" }
+            item
+        }
+        val overdue = (0 until overdueJson.length()).map { index ->
+            val item = parseSeries(overdueJson.getJSONObject(index), "expense", register = false)
+            require(item.daysUntil < 0 && byExpenseId[item.id] == item) { "Recurring overdue item is outside the expense series" }
+            item
+        }
+        require(expectedDueSoon == dueSoon && overdue.map { it.id }.toSet() == expenses.filter { it.daysUntil < 0 }.map { it.id }.toSet()
+            && overdue.size == overdue.map { it.id }.toSet().size) { "Invalid recurring warning groups" }
+        val nextIncomeJson = if (json.isNull("nextIncome")) null else json.getJSONObject("nextIncome")
+        val expectedIncome = incomes.filter { it.daysUntil >= 0 }.minByOrNull { it.daysUntil }
+        val nextIncome = nextIncomeJson?.let { parseSeries(it, "income", register = false) }
+        require(nextIncome == expectedIncome) { "Invalid next recurring income" }
+
+        val estimatesJson = json.getJSONObject("monthlyExpenseEstimates")
+        require(estimatesJson.length() <= 8) { "Invalid recurring currency count" }
+        val estimates = estimatesJson.keys().asSequence().associateWith { estimatesJson.getString(it) }
+        val expectedByCurrency = expenses.groupBy { it.currency }.mapValues { (_, series) ->
+            series.fold(BigDecimal.ZERO) { total, item ->
+                val amount = item.amount.toBigDecimal()
+                val monthly = if (item.periodCode == "month") amount else amount.multiply(BigDecimal("30"))
+                    .divide(BigDecimal(item.periodDays), 12, RoundingMode.HALF_UP)
+                total.add(monthly)
+            }.setScale(2, RoundingMode.HALF_UP)
+        }
+        require(estimates.keys == expectedByCurrency.keys
+            && expectedByCurrency.all { (currency, expected) ->
+                val raw = estimates[currency]
+                raw != null && Regex("^(?:0|[1-9]\\d{0,17})\\.\\d{2}$").matches(raw)
+                    && raw.toBigDecimal().compareTo(expected) == 0
+            }) { "Invalid recurring monthly total" }
+        val total = nullableString(json, "monthlyExpenseEstimate")
+        val expectedTotal = expectedByCurrency.values.singleOrNull()
+        require(if (expectedTotal == null) total == null else total != null && total.toBigDecimalOrNull()?.compareTo(expectedTotal) == 0) {
+            "Invalid recurring monthly estimate"
+        }
+        return FinanceRecurringProjection("recurring.v1", "complete", timezone, asOf, expenses, incomes, dueSoon,
+            overdue, nextIncome, total, estimates)
     }
 
     fun budgetProposal(json: JSONObject) = BudgetProposal(

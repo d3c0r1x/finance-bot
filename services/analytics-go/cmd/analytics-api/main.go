@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/d3c0r1x/finance-bot/services/analytics-go/prices"
+	"github.com/d3c0r1x/finance-bot/services/analytics-go/recurring"
 )
 
 func main() {
@@ -46,11 +47,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	recurringAnalytics, err := recurring.NewHandler(os.Getenv("FINANCE_ANALYTICS_SERVICE_TOKEN"), store)
+	if err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/internal/v1/prices/compare", priceHistory)
 	mux.Handle("/internal/v1/products/catalog", productCatalog)
 	mux.Handle("/internal/v1/shopping/candidates", shoppingCandidates)
 	mux.Handle("/internal/v1/analytics/personal-inflation", personalInflation)
+	mux.Handle("/internal/v1/analytics/recurring", recurringAnalytics)
 	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

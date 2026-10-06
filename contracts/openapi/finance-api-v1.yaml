@@ -864,6 +864,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Personal receipt-price history is temporarily unavailable }
+  /bff/tenants/{tenantId}/analytics/recurring:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserRecurringProjection
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Authenticated member's recurring income and expense series in the member timezone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
   /bff/tenants/{tenantId}/shopping/{productKey}/bought:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -1276,6 +1293,27 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { description: Telegram or price analytics service is unavailable }
+  /internal/v1/telegram/actions/recurring:
+    post:
+      operationId: getTelegramRecurringProjection
+      security:
+        - telegramServiceToken: []
+      description: Returns recurring series for the verified Telegram actor and active tenant. Request cannot select another user or timezone.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Member-scoped recurring income, expense, due-soon, and overdue series
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { description: Telegram or recurring analytics service is unavailable }
   /internal/v1/telegram/shopping/{productKey}/bought:
     parameters:
       - name: productKey
@@ -3196,6 +3234,21 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Personal receipt-price history is temporarily unavailable }
+  /api/v1/tenants/{tenantId}/analytics/recurring:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getRecurringProjection
+      responses:
+        '200':
+          description: Authenticated member's recurring income and expense series in the member timezone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
   /api/v1/tenants/{tenantId}/shopping/{productKey}/bought:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -3697,6 +3750,9 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    MoneyAmount:
+      type: string
+      pattern: '^\d{1,18}(?:\.\d{2})$'
     BrowserSession:
       type: object
       additionalProperties: false
@@ -4604,6 +4660,63 @@ components:
           minItems: 1
           maxItems: 12
           items: { $ref: '#/components/schemas/PriceHistoryPoint' }
+    RecurringProjection:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, completeness, timeZone, asOf, expenseSeries, incomeSeries, dueSoon,
+                 overdue, nextIncome, monthlyExpenseEstimate, monthlyExpenseEstimates]
+      properties:
+        algorithmVersion: { type: string, const: recurring.v1 }
+        completeness: { type: string, const: complete }
+        timeZone: { type: string, minLength: 1, maxLength: 64 }
+        asOf: { type: string, format: date-time }
+        expenseSeries:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        incomeSeries:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        dueSoon:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        overdue:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        nextIncome: { oneOf: [{ $ref: '#/components/schemas/RecurringSeries' }, { type: 'null' }] }
+        monthlyExpenseEstimate: { oneOf: [{ $ref: '#/components/schemas/MoneyAmount' }, { type: 'null' }] }
+        monthlyExpenseEstimates:
+          type: object
+          maxProperties: 8
+          propertyNames: { pattern: '^[A-Z]{3}$' }
+          additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
+      description: Series are member-scoped and versioned. Empty history returns empty lists and null totals; overdue items never appear in dueSoon.
+    RecurringSeries:
+      type: object
+      additionalProperties: false
+      required: [id, key, name, type, currency, amount, minAmount, maxAmount, periodCode, periodDays,
+                 minIntervalDays, maxIntervalDays, occurrences, lastDate, nextDate, daysUntil]
+      properties:
+        id: { type: string, pattern: '^[0-9a-f]{32}$' }
+        key: { type: string, minLength: 1, maxLength: 512 }
+        name: { type: string, minLength: 1, maxLength: 500 }
+        category: { type: string, maxLength: 64 }
+        type: { type: string, enum: [expense, income] }
+        currency: { type: string, const: RUB }
+        amount: { $ref: '#/components/schemas/MoneyAmount' }
+        minAmount: { $ref: '#/components/schemas/MoneyAmount' }
+        maxAmount: { $ref: '#/components/schemas/MoneyAmount' }
+        periodCode: { type: string, enum: [week, month] }
+        periodDays: { type: integer, minimum: 6, maximum: 35 }
+        minIntervalDays: { type: integer, minimum: 1, maximum: 3650 }
+        maxIntervalDays: { type: integer, minimum: 1, maximum: 3650 }
+        occurrences: { type: integer, minimum: 3, maximum: 5000 }
+        lastDate: { type: string, format: date }
+        nextDate: { type: string, format: date }
+        daysUntil: { type: integer, minimum: -3650, maximum: 3650 }
     PersonalInflation:
       type: object
       additionalProperties: false

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import uuid
 import re
-from datetime import date, datetime
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, ROUND_HALF_UP
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 
@@ -352,6 +353,12 @@ class TelegramCoreClient:
         }, expected_status=200)
         return self._validated_personal_inflation(body)
 
+    async def get_recurring_projection(self, actor_context_token: str) -> dict:
+        if not isinstance(actor_context_token, str) or not actor_context_token:
+            raise TelegramCoreError("unavailable")
+        body = await self._post_json("actions/recurring", {"token": actor_context_token}, expected_status=200)
+        return self._validated_recurring_projection(body)
+
     async def mark_shopping_bought(self, actor_context_token: str, product_key: str) -> dict:
         return await self._shopping_decision(actor_context_token, product_key, "bought")
 
@@ -609,6 +616,108 @@ class TelegramCoreClient:
             "rising": rising,
             "falling": falling,
         }
+
+    @staticmethod
+    def _validated_recurring_projection(body: object) -> dict:
+        required = {"algorithmVersion", "completeness", "timeZone", "asOf", "expenseSeries", "incomeSeries",
+                    "dueSoon", "overdue", "nextIncome", "monthlyExpenseEstimate", "monthlyExpenseEstimates"}
+        if not isinstance(body, dict) or not required <= body.keys() or body.get("algorithmVersion") != "recurring.v1" \
+                or body.get("completeness") != "complete" or not isinstance(body.get("timeZone"), str) \
+                or not body["timeZone"] or len(body["timeZone"]) > 64 \
+                or not isinstance(body.get("monthlyExpenseEstimates"), dict) \
+                or len(body["monthlyExpenseEstimates"]) > 8:
+            raise TelegramCoreError("unavailable")
+        try:
+            zone = ZoneInfo(body["timeZone"])
+            as_of = TelegramCoreClient._validated_product_datetime(body.get("asOf"), "asOf")
+            today = as_of.astimezone(zone).date()
+            if as_of.astimezone(zone).time().replace(tzinfo=None) != time.min:
+                raise TelegramCoreError("unavailable")
+        except (TelegramCoreError, ZoneInfoNotFoundError, ValueError):
+            raise TelegramCoreError("unavailable")
+
+        fields = ("expenseSeries", "incomeSeries", "dueSoon", "overdue")
+        if any(not isinstance(body.get(field), list) or len(body[field]) > 5000 for field in fields):
+            raise TelegramCoreError("unavailable")
+        ids: set[str] = set()
+
+        def series(item: object, expected_type: str) -> dict:
+            if not isinstance(item, dict):
+                raise TelegramCoreError("unavailable")
+            identifier, key, name = item.get("id"), item.get("key"), item.get("name")
+            if not isinstance(identifier, str) or not re.fullmatch(r"[0-9a-f]{32}", identifier) \
+                    or identifier in ids or not isinstance(key, str) or not key or len(key) > 512 \
+                    or not isinstance(name, str) or not name.strip() or len(name) > 500 \
+                    or item.get("type") != expected_type or item.get("currency") != "RUB" \
+                    or item.get("periodCode") not in {"week", "month"}:
+                raise TelegramCoreError("unavailable")
+            if item.get("category") is not None and (not isinstance(item["category"], str) or len(item["category"]) > 64):
+                raise TelegramCoreError("unavailable")
+            amount = TelegramCoreClient._validated_product_decimal(item.get("amount"), "amount", _BUDGET_ALERT_AMOUNT, positive=True)
+            minimum = TelegramCoreClient._validated_product_decimal(item.get("minAmount"), "minAmount", _BUDGET_ALERT_AMOUNT, positive=True)
+            maximum = TelegramCoreClient._validated_product_decimal(item.get("maxAmount"), "maxAmount", _BUDGET_ALERT_AMOUNT, positive=True)
+            period, low_interval, high_interval, count = (
+                item.get("periodDays"), item.get("minIntervalDays"), item.get("maxIntervalDays"), item.get("occurrences"))
+            if type(period) is not int or (item["periodCode"] == "week" and not 6 <= period <= 8) \
+                    or (item["periodCode"] == "month" and not 25 <= period <= 35) \
+                    or type(low_interval) is not int or not 1 <= low_interval <= period \
+                    or type(high_interval) is not int or not period <= high_interval <= 3650 \
+                    or type(count) is not int or not 3 <= count <= 5000 \
+                    or maximum < minimum or minimum > amount or amount > maximum \
+                    or maximum - minimum > amount * Decimal("0.25"):
+                raise TelegramCoreError("unavailable")
+            try:
+                last = date.fromisoformat(item.get("lastDate"))
+                next_date = date.fromisoformat(item.get("nextDate"))
+            except (TypeError, ValueError):
+                raise TelegramCoreError("unavailable")
+            if last.isoformat() != item.get("lastDate") or next_date.isoformat() != item.get("nextDate") \
+                    or last + timedelta(days=period) != next_date \
+                    or type(item.get("daysUntil")) is not int or (next_date - today).days != item["daysUntil"]:
+                raise TelegramCoreError("unavailable")
+            ids.add(identifier)
+            return item
+
+        expenses = [series(item, "expense") for item in body["expenseSeries"]]
+        incomes = [series(item, "income") for item in body["incomeSeries"]]
+        expense_by_id = {item["id"]: item for item in expenses}
+        income_by_id = {item["id"]: item for item in incomes}
+        expected_soon = [item["id"] for item in expenses if 0 <= item["daysUntil"] <= 3]
+        if [item.get("id") for item in body["dueSoon"]] != expected_soon \
+                or len({item.get("id") for item in body["overdue"]}) != len(body["overdue"]) \
+                or {item.get("id") for item in body["overdue"]} != {item["id"] for item in expenses if item["daysUntil"] < 0}:
+            raise TelegramCoreError("unavailable")
+        if any(not isinstance(item, dict) or expense_by_id.get(item.get("id")) != item
+               for item in body["dueSoon"] + body["overdue"]):
+            raise TelegramCoreError("unavailable")
+        next_income = min((item for item in incomes if item["daysUntil"] >= 0), key=lambda item: item["daysUntil"], default=None)
+        if body.get("nextIncome") is not None and not isinstance(body["nextIncome"], dict):
+            raise TelegramCoreError("unavailable")
+        if (body.get("nextIncome") is None) != (next_income is None) \
+                or body.get("nextIncome") is not None and income_by_id.get(body["nextIncome"].get("id")) != body["nextIncome"]:
+            raise TelegramCoreError("unavailable")
+        expected_monthly: dict[str, Decimal] = {}
+        for item in expenses:
+            amount = Decimal(item["amount"])
+            monthly = amount if 25 <= item["periodDays"] <= 35 else amount * 30 / item["periodDays"]
+            expected_monthly[item["currency"]] = expected_monthly.get(item["currency"], Decimal("0")) + monthly
+        actual_monthly = body["monthlyExpenseEstimates"]
+        if set(actual_monthly) != set(expected_monthly):
+            raise TelegramCoreError("unavailable")
+        for currency, amount in expected_monthly.items():
+            value = TelegramCoreClient._validated_product_decimal(actual_monthly[currency], currency,
+                                                                  _BUDGET_ALERT_AMOUNT, positive=False)
+            if value != amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP):
+                raise TelegramCoreError("unavailable")
+        estimate = body.get("monthlyExpenseEstimate")
+        if len(expected_monthly) == 1:
+            expected = next(iter(expected_monthly.values())).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if TelegramCoreClient._validated_product_decimal(estimate, "monthlyExpenseEstimate", _BUDGET_ALERT_AMOUNT,
+                                                              positive=False) != expected:
+                raise TelegramCoreError("unavailable")
+        elif estimate is not None:
+            raise TelegramCoreError("unavailable")
+        return body
 
     @staticmethod
     def _validated_product_datetime(value: object, field: str) -> datetime:

@@ -78,6 +78,26 @@ paths:
         '400': { description: Request is malformed or contains unknown fields }
         '401': { description: Internal service token is missing or invalid }
         '503': { description: Shopping history is temporarily unavailable }
+  /internal/v1/analytics/recurring:
+    post:
+      operationId: getMemberRecurringProjection
+      security:
+        - serviceBearer: []
+      description: Computes member-scoped weekly and monthly expense/income series from full transaction snapshots in ClickHouse. The owner ID must be resolved by Core.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecurringRequest' }
+      responses:
+        '200':
+          description: Versioned recurrence evidence, upcoming warnings, overdue items, and monthly expense estimates
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '400': { description: Request is malformed or contains unknown fields }
+        '401': { description: Internal service token is missing or invalid }
+        '503': { description: Transaction history is unavailable or exceeds the supported bound }
   /internal/v1/budget-proposals:
     post:
       operationId: createHistoryBudgetShares
@@ -435,6 +455,73 @@ components:
         tenantId: { type: string, format: uuid }
         ownerUserId: { type: string, format: uuid }
       description: ownerUserId must be resolved by Core from the authenticated active member; callers cannot select another scope.
+    RecurringRequest:
+      type: object
+      additionalProperties: false
+      required: [tenantId, ownerUserId, asOf, timeZone]
+      properties:
+        tenantId: { type: string, format: uuid }
+        ownerUserId: { type: string, format: uuid }
+        asOf: { type: string, format: date-time }
+        timeZone: { type: string, minLength: 1, maxLength: 64, description: IANA timezone from the active member profile. }
+      description: ownerUserId and timeZone must be resolved by Core from the authenticated active member.
+    RecurringProjection:
+      type: object
+      additionalProperties: false
+      required: [algorithm_version, completeness, time_zone, as_of, expense_series, income_series, due_soon,
+                 overdue, next_income, monthly_expense_estimate, monthly_expense_estimates]
+      properties:
+        algorithm_version: { type: string, const: recurring.v1 }
+        completeness: { type: string, const: complete }
+        time_zone: { type: string, minLength: 1, maxLength: 64 }
+        as_of: { type: string, format: date-time }
+        expense_series:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        income_series:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        due_soon:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        overdue:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+        next_income: { oneOf: [{ $ref: '#/components/schemas/RecurringSeries' }, { type: 'null' }] }
+        monthly_expense_estimate: { oneOf: [{ $ref: '#/components/schemas/MoneyAmount' }, { type: 'null' }] }
+        monthly_expense_estimates:
+          type: object
+          maxProperties: 8
+          propertyNames: { pattern: '^[A-Z]{3}$' }
+          additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
+      description: No series yields empty lists and null totals. Cross-currency totals are reported by currency only.
+    RecurringSeries:
+      type: object
+      additionalProperties: false
+      required: [id, key, name, type, currency, amount, min_amount, max_amount, period_code, period_days,
+                 min_interval_days, max_interval_days, occurrences, last_date, next_date, days_until]
+      properties:
+        id: { type: string, pattern: '^[0-9a-f]{32}$' }
+        key: { type: string, minLength: 1, maxLength: 512 }
+        name: { type: string, minLength: 1, maxLength: 500 }
+        category: { type: string, maxLength: 64 }
+        type: { type: string, enum: [expense, income] }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        amount: { $ref: '#/components/schemas/MoneyAmount' }
+        min_amount: { $ref: '#/components/schemas/MoneyAmount' }
+        max_amount: { $ref: '#/components/schemas/MoneyAmount' }
+        period_code: { type: string, enum: [week, month] }
+        period_days: { type: integer, minimum: 6, maximum: 35 }
+        min_interval_days: { type: integer, minimum: 1, maximum: 3650 }
+        max_interval_days: { type: integer, minimum: 1, maximum: 3650 }
+        occurrences: { type: integer, minimum: 3, maximum: 5000 }
+        last_date: { type: string, format: date }
+        next_date: { type: string, format: date }
+        days_until: { type: integer, minimum: -3650, maximum: 3650 }
     ProductCatalogResponse:
       type: object
       additionalProperties: false

@@ -40,6 +40,7 @@ from services.python.telegram_gateway.core_client import TelegramCoreClient, Tel
 from services.python.telegram_gateway.digest_worker import run_notification_worker
 from services.python.presentation.report_renderer import (
     render_personal_inflation,
+    render_recurring_projection,
     render_product_catalog,
     render_report,
     render_shopping_candidates,
@@ -337,6 +338,33 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             return
         except (TypeError, ValueError, KeyError):
             await message.answer("Динамика цен получена в неверном формате. Попробуйте позже.",
+                                 reply_markup=MAIN_MENU)
+            return
+        await message.answer(text, reply_markup=MAIN_MENU, parse_mode=None)
+
+    async def show_recurring(message: Message, state: FSMContext) -> None:
+        if message.chat.type != "private":
+            await message.answer("Регулярные операции доступны только в личном чате с ботом.", reply_markup=MAIN_MENU)
+            return
+        actor = (await state.get_data()).get("telegram_actor_context")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await message.answer("Сначала выберите пространство командой /menu.", reply_markup=MAIN_MENU)
+            return
+        try:
+            projection = await core.get_recurring_projection(actor["token"])
+            text = render_recurring_projection(projection)
+        except TelegramCoreError as error:
+            response = {
+                "unauthorized": "Сессия истекла. Выберите пространство командой /menu.",
+                "forbidden": "У вашей роли нет доступа к операциям.",
+                "unavailable": "Регулярные операции временно недоступны. Попробуйте позже.",
+            }.get(error.code, "Не удалось загрузить регулярные операции. Попробуйте позже.")
+            if error.code == "unauthorized":
+                await state.clear()
+            await message.answer(response, reply_markup=MAIN_MENU)
+            return
+        except (TypeError, ValueError, KeyError):
+            await message.answer("Регулярные операции получены в неверном формате. Попробуйте позже.",
                                  reply_markup=MAIN_MENU)
             return
         await message.answer(text, reply_markup=MAIN_MENU, parse_mode=None)
@@ -986,6 +1014,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(show_product_catalog, Command("price"))
     router.message.register(show_shopping, Command("shopping"))
     router.message.register(show_personal_inflation, Command("inflation"))
+    router.message.register(show_recurring, Command("recurring"))
     router.message.register(show_debts, Command("debts"))
     router.message.register(show_budget, Command("budget"))
     router.message.register(link_account, Command("link"))

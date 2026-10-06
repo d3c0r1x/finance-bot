@@ -154,6 +154,10 @@ class FinanceApi(context: Context) {
         execute("/api/v1/tenants/$tenantId/analytics/personal-inflation", "GET"),
     ))
 
+    fun recurringProjection(tenantId: String): FinanceRecurringProjection = FinanceModels.recurringProjection(JSONObject(
+        execute("/api/v1/tenants/$tenantId/analytics/recurring", "GET"),
+    ))
+
     fun markShoppingBought(tenantId: String, productKey: String): FinanceShoppingList = FinanceModels.shoppingList(JSONObject(
         execute("/api/v1/tenants/$tenantId/shopping/${android.net.Uri.encode(productKey)}/bought", "POST", "{}"),
     ))

@@ -2,11 +2,12 @@
 
 import json
 import re
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 import pytest
 import yaml
-from jsonschema import Draft202012Validator, ValidationError
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from openapi_spec_validator import validate
 
 
@@ -962,3 +963,72 @@ def test_personal_inflation_is_member_scoped_and_has_an_explicit_no_history_cont
     item = spec["components"]["schemas"]["PersonalInflationItem"]
     assert item["properties"]["olderPurchaseCount"]["minimum"] == 2
     assert item["properties"]["windowPurchaseCount"]["minimum"] == 1
+
+
+def test_recurring_v1_golden_fixture_matches_contract_and_cross_field_rules():
+    root = ROOT / "contracts/analytics/recurring-v1"
+    request = json.loads((root / "request.json").read_text(encoding="utf-8"))
+    projection = json.loads((root / "projection.json").read_text(encoding="utf-8"))
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+    schemas = spec["components"]["schemas"]
+
+    Draft202012Validator(schemas["RecurringRequest"], format_checker=FormatChecker()).validate(request)
+    projection_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/RecurringProjection",
+    }
+    Draft202012Validator(projection_schema, format_checker=FormatChecker()).validate(projection)
+
+    expenses = projection["expense_series"]
+    incomes = projection["income_series"]
+    by_expense_id = {series["id"]: series for series in expenses}
+    by_income_id = {series["id"]: series for series in incomes}
+    assert len(by_expense_id) == len(expenses)
+    assert len(by_income_id) == len(incomes)
+    assert projection["time_zone"] == request["timeZone"]
+    assert [series["id"] for series in projection["due_soon"]] == [
+        series["id"] for series in expenses if 0 <= series["days_until"] <= 3
+    ]
+    assert all(by_expense_id[series["id"]] == series for series in projection["due_soon"])
+    assert {series["id"] for series in projection["overdue"]} == {
+        series["id"] for series in expenses if series["days_until"] < 0
+    }
+    assert all(by_expense_id[series["id"]] == series for series in projection["overdue"])
+    expected_income = min((series for series in incomes if series["days_until"] >= 0),
+                          key=lambda series: series["days_until"], default=None)
+    assert projection["next_income"] == expected_income
+    assert expected_income is None or by_income_id[expected_income["id"]] == expected_income
+
+    estimates = {}
+    for series in expenses:
+        amount = Decimal(series["amount"])
+        monthly = amount if series["period_code"] == "month" else amount * 30 / series["period_days"]
+        estimates[series["currency"]] = estimates.get(series["currency"], Decimal(0)) + monthly
+    rounded = {currency: value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+               for currency, value in estimates.items()}
+    assert projection["monthly_expense_estimates"] == {
+        currency: f"{amount:.2f}" for currency, amount in rounded.items()
+    }
+    assert projection["monthly_expense_estimate"] == (
+        f"{next(iter(rounded.values())):.2f}" if len(rounded) == 1 else None
+    )
+
+
+def test_recurring_projection_routes_require_member_bound_responses():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    for path, security in (
+        ("/api/v1/tenants/{tenantId}/analytics/recurring", None),
+        ("/bff/tenants/{tenantId}/analytics/recurring", [{"bffSession": []}]),
+    ):
+        operation = spec["paths"][path]["get"]
+        assert operation.get("security") == security
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "RecurringProjection"
+        )
+        assert {"403", "404", "503"}.issubset(operation["responses"])
+    private = spec["paths"]["/internal/v1/telegram/actions/recurring"]["post"]
+    assert private["security"] == [{"telegramServiceToken": []}]
+    assert private["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ResolveTelegramActorContext"
+    )

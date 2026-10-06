@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -134,6 +135,55 @@ class FinanceScreensTest {
         compose.onNodeWithText("Недостаточно истории для расчёта.").assertIsDisplayed()
         compose.onNodeWithText("Нужно минимум 3 товара: для каждого — 2 покупки до окна и 1 внутри 90-дневного окна.")
             .assertIsDisplayed()
+        compose.onNodeWithText("0.00 ₽").assertDoesNotExist()
+    }
+
+    @Test fun recurringScreenSeparatesNearDueFromOverdueAndLocalizes() {
+        val due = recurring("11111111111111111111111111111111", "rent", "Аренда", "expense", "100.00", 3, "2026-10-09")
+        val overdue = recurring("22222222222222222222222222222222", "service", "Сервис", "expense", "500.00", -1, "2026-10-05")
+        val income = recurring("33333333333333333333333333333333", "salary", "Зарплата", "income", "120000.00", 4, "2026-10-10")
+        val projection = FinanceRecurringProjection("recurring.v1", "complete", "Europe/Moscow", "2026-10-05T21:00:00Z",
+            listOf(due, overdue), listOf(income), listOf(due), listOf(overdue), income, "2571.43", mapOf("RUB" to "2571.43"))
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), recurringProjection = projection))
+
+        compose.onNodeWithText("Регулярные").performScrollTo().performClick()
+        compose.onNodeWithText("Регулярные доходы и расходы").assertIsDisplayed()
+        compose.onNodeWithText("Скоро · следующие 3 дня").assertIsDisplayed()
+        compose.onNodeWithText("Через 3 дн. · 2026-10-09").assertIsDisplayed()
+        assertEquals(2, compose.onAllNodesWithText("Обычно: 100.00–100.00 ₽ · интервал: 7–7 дн.").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("recurring-projection").performScrollToIndex(3)
+        compose.onNodeWithText("Оценка расходов в месяц: 2571.43 ₽").assertIsDisplayed()
+        compose.onNodeWithTag("recurring-projection").performScrollToIndex(8)
+        compose.onNodeWithText("Зарплата").assertIsDisplayed()
+        compose.onNodeWithTag("recurring-projection").performScrollToIndex(9)
+        compose.onNodeWithText("Просрочено · не входит в ближайшие списания").assertIsDisplayed()
+        compose.onNodeWithText("Просрочено на 1 дн. · 2026-10-05").assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("recurring-projection").performScrollToIndex(0)
+        compose.onNodeWithText("Recurring income and expenses").assertIsDisplayed()
+        compose.onNodeWithTag("recurring-projection").performScrollToIndex(1)
+        compose.onNodeWithText("Due soon · next 3 days").assertIsDisplayed()
+        assertEquals(2, compose.onAllNodesWithText("Typical range: 100.00–100.00 RUB · interval: 7–7 days").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("recurring-projection").performScrollToIndex(9)
+        compose.onNodeWithText("Overdue · excluded from upcoming charges").assertIsDisplayed()
+    }
+
+    @Test fun recurringScreenLoadsWhenOpened() {
+        var loads = 0
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))), onRecurringLoad = { loads++ })
+        compose.onNodeWithText("Регулярные").performScrollTo().performClick()
+        assertEquals(1, loads)
+        compose.onNodeWithTag("recurring-projection").assertIsDisplayed()
+    }
+
+    @Test fun recurringScreenShowsNoFakeTotalsWithoutHistory() {
+        val empty = FinanceRecurringProjection("recurring.v1", "complete", "Europe/Moscow", "2026-10-05T21:00:00Z",
+            emptyList(), emptyList(), emptyList(), emptyList(), null, null, emptyMap())
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), recurringProjection = empty))
+        compose.onNodeWithText("Регулярные").performScrollTo().performClick()
+        compose.onNodeWithText("Пока нет найденных регулярных операций.").assertIsDisplayed()
+        compose.onNodeWithText("Для серии нужны минимум три похожие операции.").assertIsDisplayed()
         compose.onNodeWithText("0.00 ₽").assertDoesNotExist()
     }
 
@@ -338,7 +388,8 @@ class FinanceScreensTest {
                       onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
                       onShoppingDecision: (String, String) -> Unit = { _, _ -> },
                       onShoppingCopy: (String) -> Unit = {},
-                      onPersonalInflationLoad: () -> Unit = {}) {
+                      onPersonalInflationLoad: () -> Unit = {},
+                      onRecurringLoad: () -> Unit = {}) {
         val language = mutableStateOf("ru")
         compose.setContent {
         MaterialTheme {
@@ -351,6 +402,7 @@ class FinanceScreensTest {
                 onNotificationPreferencesSave = onNotificationPreferencesSave,
                 onShoppingDecision = onShoppingDecision, onShoppingCopy = onShoppingCopy,
                 onPersonalInflationLoad = onPersonalInflationLoad,
+                onRecurringLoad = onRecurringLoad,
                 onUpdateDraft = onUpdateDraft, onConfirmDraft = onConfirmDraft, onCancelDraft = onCancelDraft,
                 onLogout = {},
                 onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = {},
@@ -362,6 +414,13 @@ class FinanceScreensTest {
     }
 
     private fun tenant(role: String) = FinanceTenant("tenant-1", "Дом", role, "Europe/Moscow")
+
+    private fun recurring(id: String, key: String, name: String, type: String, amount: String, daysUntil: Int, nextDate: String) =
+        FinanceRecurringSeries(id, key, name, if (type == "expense") "bills" else null, type, "RUB", amount,
+            amount, amount, if (key == "salary") "month" else "week", if (key == "salary") 30 else 7,
+            if (key == "salary") 29 else 7, if (key == "salary") 31 else 7, 3,
+            if (key == "salary") "2026-09-10" else if (daysUntil < 0) "2026-09-28" else "2026-10-02",
+            nextDate, daysUntil)
 
     private fun draft(version: Long, amount: String = "2000.00") = FinanceTransactionDraft(
         id = "draft-1", tenantId = "tenant-1", type = "expense", amount = amount, currency = "RUB",

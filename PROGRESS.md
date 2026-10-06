@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 01:48, Europe/Moscow.
+Updated: 2026-10-06 03:11, Europe/Moscow.
 
 ## Global plan
 
@@ -41,16 +41,17 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 | F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
 | F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
+| F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | this goal |
 
 ## Current goal
 
-- ID and outcome: F37 — personal 90-day price index from the member's own receipt basket.
-- Status: COMPLETE — Go projection reader, authenticated Java API, Telegram, Web and Android are implemented and verified; F33 live replay remains a separate NOT_RUN runtime gate.
-- Acceptance: at least two distinct receipts before the window and one within it for each product; at least three eligible products; median unit prices and prior-spend weights; top three rise/fall; receipt-price disclosure; insufficient history has no invented totals.
-- Ruling: Preserve v1's `services/inflation.py` and `services/purchase_history.py` behavior and shared `prices.SameProduct` identity. Core authenticates active membership before the owner ID reaches Go. User approved the F31 chart boundary; no F33/F40 price/waste placeholders were added.
-- User choices: Keycloak + OIDC; use F31 Web/PNG charts now, add price and optional-purchase series only after F33/F40 data; commit each fully verified goal.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `41b14f0` (F37 pushed).
-- Updated at: 2026-10-06 01:48 Europe/Moscow.
+- ID and outcome: F38 — detect recurring expenses and income, expose amount/interval ranges, warn three days ahead, keep overdue series out of upcoming.
+- Status: COMPLETE — projection, member-scoped API/BFF, Telegram/Web/Android surfaces, contract and regression acceptance all GREEN.
+- Acceptance: preserve v1's minimum three occurrences, 25% amount-range bound, weekly/monthly interval bands, 25% interval tolerance/60% share, local timezone dates, future-only income, 3-day upcoming warning and overdue separation; show amount/interval ranges.
+- Ruling: F26 has a Java recurrence detector for safe-to-spend; F38 must share its verified behavior and move analytics calculation into the planned Go ownership boundary without changing F26 results. F39 mute/unmute remains separate.
+- User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `03a306f` plus current F38 work.
+- Updated at: 2026-10-06 03:11 Europe/Moscow.
 
 ## Verification evidence
 
@@ -62,6 +63,7 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 | F34 Python / contracts | presentation + Telegram pytest; `tools/contracts` pytest | F34 worktree | PASS, 84 passed; 48 passed/2 optional skipped | `/price` response validation, PNG behavior, public/private/Telegram schemas |
 | F34 Core suite | `:services:core:check --no-daemon` | F34 worktree | PASS | Full Core unit/check gate; focused PostgreSQL acceptance also passed |
 | F33 live event store | tagged Kafka/ClickHouse replay | no endpoint configured | NOT_RUN (explicit test SKIP) | Separate F33 runtime gate; F34 acceptance itself is complete |
+| F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | F38 branch work | PASS; local Kafka/ClickHouse integration SKIP | Go/Core/Python/contracts/Web/Android coverage recorded in E3.27; CI workflow provisions Redpanda + ClickHouse |
 
 ## Failures and attempts
 
@@ -69,7 +71,7 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 
 ## Next action
 
-- F37 commit `41b14f0` is pushed. Start F38 by comparing recurring-expense behavior with v1 and writing deterministic RED acceptance tests.
+- Begin F39: inspect the legacy mute/unmute rules and existing member preferences, write independent RED acceptance, then implement the smallest cross-client goal.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
@@ -928,6 +930,14 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 - Reused current GREEN evidence: Core 201/201 with 2 integration-only skips, Web 36/36 and TypeScript, Android emulator 26/26, Python report/digest/worker/commands 71/71, contracts 46 passed/2 skipped. `report_renderer.py` tests specifically cover PNG size/readability, capped overrun, exact remaining, fallback, and DTO validation.
 - F31 stays in progress because its remaining price/waste chart data depends on F33/F40. Next: inspect and finish F33 authoritative price pipeline gates.
 
+## E3.27 F38 recurring series — 2026-10-06 03:11 MSK
+
+- F38 is complete. Go now projects recurring income/expense series from at least three occurrences, bounded amount and interval ranges, local calendar dates, three-day expense warnings, separate overdue rows, and non-fabricated empty-history totals. ClickHouse state projection is idempotent and supports retry/dead-letter handling.
+- Core exposes authenticated member-scoped API and Web BFF routes using the active profile timezone. Telegram, Web, and Android render localized ranges, due-soon, overdue, next income, and available monthly estimates. F26 cash-planning behavior remains covered by Core regression checks.
+- GREEN: Go `go test ./... -count=1` + `go vet ./...`; Core `:services:core:check --no-daemon` and isolated PostgreSQL API/BFF member-scope acceptance; Python presentation/Telegram 106 passed; contracts 54 passed/2 optional skips; Web 48/48 plus production build; Android emulator instrumentation 41/41. APK installed and launched on isolated `emulator-5556`, SHA-256 `B0C275204C68A1F2FA9F02EB6E64F09BB327EA757B3ED3DD7D455B357E99F1C7`. `git diff --check` clean.
+- Tagged Kafka/ClickHouse live integration remains NOT_RUN locally: required external endpoints are not configured. The integration test is part of the project and `.github/workflows/contracts.yml` provisions Redpanda and ClickHouse for CI.
+- Next: F39 mute/unmute recurring series, without deleting the underlying financial transactions or changing another member's view.
+
 ## E3.21 F35 shopping cadence suggestions — 2026-10-05 23:39 MSK
 
 - F35 preserves the legacy three-purchase threshold, median cadence and unit-price estimate, 3-day due horizon, and expiry after two overdue intervals. Go ignores duplicate rows within one receipt and separates tenant/member histories. Core exposes authenticated API/BFF and Telegram actor routes; Telegram `/shopping`, Web, and Android show RU/EN suggestions and estimated list cost with an explicit no-inventory statement.
@@ -963,3 +973,10 @@ Updated: 2026-10-06 01:48, Europe/Moscow.
 - GREEN: Go `go test ./...` and `go vet ./...`; Core `:services:core:check` and isolated PostgreSQL member-scope API/BFF acceptance; Python Telegram/presentation 101 passed; contracts 52 passed/2 optional skips; Web 46/46 and production build; Android clean-AVD instrumentation 36/36. Built and installed the debug APK on isolated Android 14 AVD, launched `com.decorix.finance.debug/.MainActivity`; SHA-256 `8BA2E392D0F2F7FC3198BC604622DC646CAE2CB9E0BA2B7B5CF5C89600BC5E44`. `git diff --check` passes.
 - First Android run exposed the new tab pushing existing budget/debt tabs outside the viewport. Moved the price-trend tab after established navigation; the full instrumented suite then passed. The existing user AVD and its data were not used for installation.
 - F37 is complete and pushed as `41b14f02dfe28928ccf411e7017d471010046851`. F33's live Kafka/ClickHouse replay remains NOT_RUN because no configured integration endpoint is available; it is not presented as verified. Next: begin F38 recurring-income/expense detection.
+
+## E3.26 F38 recurring series — 2026-10-06 02:02 MSK
+
+- Scope from `PLAN.md` and v1: weekly/monthly expense and income series; at least 3 occurrences; amount spread at most 25% of average; period median 6–8 or 25–35 days; at least 60% of intervals within 25% of the median; warning only for expenses due in the next 3 days; overdue rows never enter upcoming. Core owns authorization; Go owns the recurring analytics calculation.
+- Existing Core `RecurringProjectionPolicy` supports F26 safe-to-spend but does not expose the F38 read model or ranges. F38 will keep F26 regression behavior while adding its shared Go implementation and member-scoped view.
+- Observed RED: `go test ./recurring -count=1` fails because `Transaction` and `BuildProjection` are not implemented. The first deterministic fixture covers local timezone, weekly/monthly series, amount/interval ranges, next dates, warning/overdue separation, income and no-fake-zero behavior.
+- Next: implement the Go policy and its golden contract fixture, then add event projection and authenticated Core/client acceptance.

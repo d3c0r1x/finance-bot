@@ -820,6 +820,49 @@ def test_personal_inflation_command_uses_linked_actor_and_labels_receipt_prices(
     assert "только цены из ваших чеков" in sent[0].text.lower()
 
 
+def test_recurring_command_shows_due_soon_separately_from_overdue(monkeypatch):
+    sent = []
+    calls = []
+    phone = {"id": "1" * 32, "key": "phone plan", "name": "Phone plan", "type": "expense", "currency": "RUB",
+             "amount": "200.00", "minAmount": "200.00", "maxAmount": "200.00", "periodCode": "week",
+             "periodDays": 7, "minIntervalDays": 7, "maxIntervalDays": 7, "occurrences": 3,
+             "lastDate": "2026-08-15", "nextDate": "2026-08-22", "daysUntil": 2}
+    overdue = {**phone, "id": "2" * 32, "key": "old payment", "name": "Old payment",
+               "lastDate": "2026-08-06", "nextDate": "2026-08-13", "daysUntil": -7}
+    projection = {"algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "Europe/Moscow",
+                  "asOf": "2026-08-20T00:00:00+03:00", "expenseSeries": [phone, overdue], "incomeSeries": [],
+                  "dueSoon": [phone], "overdue": [overdue], "nextIncome": None,
+                  "monthlyExpenseEstimate": "857.14", "monthlyExpenseEstimates": {"RUB": "857.14"}}
+
+    class FakeCore:
+        async def get_recurring_projection(self, token):
+            calls.append(token)
+            return projection
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(message_id=961, date=datetime(2026, 10, 6, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"), from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/recurring", entities=[MessageEntity(type="bot_command", offset=0, length=10)])
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "owner"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=961, message=message)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    assert calls == ["opaque-context"]
+    assert len(sent) == 1 and sent[0].__class__.__name__ == "SendMessage"
+    assert "Phone plan" in sent[0].text and "Old payment" in sent[0].text
+    assert "интервал 7–7 дн." in sent[0].text
+    assert "скоро спишется" in sent[0].text.lower() and "просрочено на 7 дн." in sent[0].text.lower()
+
+
 def test_debts_command_rejects_foreign_tenant_response_without_disclosing_debt(monkeypatch):
     sent = []
 

@@ -6,6 +6,7 @@ from PIL import Image
 from services.python.presentation.report_renderer import (
     RendererUnavailable,
     render_personal_inflation,
+    render_recurring_projection,
     render_report,
     render_report_png,
     report_text,
@@ -255,3 +256,38 @@ def test_personal_inflation_renderer_rejects_inconsistent_available_dto(changes)
 
     with pytest.raises(ValueError):
         render_personal_inflation(dto)
+
+
+def test_recurring_renderer_separates_three_day_warnings_and_overdue_series():
+    phone = _recurring_series("1", "Phone plan", "2026-08-15", "2026-08-22", 2)
+    old = _recurring_series("2", "Old payment", "2026-08-06", "2026-08-13", -7)
+    text = render_recurring_projection({
+        "algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "Europe/Moscow",
+        "asOf": "2026-08-20T00:00:00+03:00", "expenseSeries": [phone, old], "incomeSeries": [],
+        "dueSoon": [phone], "overdue": [old], "nextIncome": None, "monthlyExpenseEstimate": "857.14",
+        "monthlyExpenseEstimates": {"RUB": "857.14"},
+    })
+    soon = text.split("Регулярные расходы:")[0]
+    overdue = text.split("Просрочено (не входит в предупреждения):")[-1]
+    assert "Phone plan" in soon
+    assert "интервал 7–7 дн." in soon
+    assert "Old payment" not in soon
+    assert "Old payment" in overdue and "просрочено на 7 дн." in overdue
+    assert "8 57" not in text and "857,14" in text
+
+
+def test_recurring_renderer_shows_no_fake_totals_without_history():
+    text = render_recurring_projection({
+        "algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "UTC",
+        "asOf": "2026-08-20T00:00:00Z", "expenseSeries": [], "incomeSeries": [], "dueSoon": [],
+        "overdue": [], "nextIncome": None, "monthlyExpenseEstimate": None, "monthlyExpenseEstimates": {},
+    })
+    assert "минимум 3" in text
+    assert "0,00" not in text
+
+
+def _recurring_series(identifier, name, last, next_date, days):
+    return {"id": identifier * 32, "key": name.lower(), "name": name, "category": "services", "type": "expense",
+            "currency": "RUB", "amount": "100.00", "minAmount": "100.00", "maxAmount": "100.00",
+            "periodCode": "week", "periodDays": 7, "minIntervalDays": 7, "maxIntervalDays": 7,
+            "occurrences": 3, "lastDate": last, "nextDate": next_date, "daysUntil": days}

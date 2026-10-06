@@ -623,6 +623,53 @@ def test_core_client_validates_personal_inflation_product_scope_and_direction():
     invalid = {**body, "falling": [{**body["falling"][0], "productName": "coffee"}]}
     with pytest.raises(TelegramCoreError):
         TelegramCoreClient._validated_personal_inflation(invalid)
+
+
+def test_core_client_requests_and_validates_empty_recurring_projection():
+    seen = []
+    response = {"algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "Europe/Moscow",
+                "asOf": "2026-10-06T00:00:00+03:00", "expenseSeries": [], "incomeSeries": [],
+                "dueSoon": [], "overdue": [], "nextIncome": None, "monthlyExpenseEstimate": None,
+                "monthlyExpenseEstimates": {}}
+
+    async def get_recurring(request):
+        seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
+        return web.json_response(response)
+
+    async def exercise():
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/actions/recurring", get_recurring)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "telegram-service-secret")
+            return await client.get_recurring_projection("opaque-actor-context")
+
+    assert asyncio.run(exercise()) == response
+    assert seen == [("/internal/v1/telegram/actions/recurring", "telegram-service-secret",
+                     {"token": "opaque-actor-context"})]
+
+
+def test_core_client_validates_recurring_warning_scope_and_monthly_total():
+    from services.python.telegram_gateway.core_client import TelegramCoreClient
+
+    due = recurring_series("1", "Phone plan", "2026-08-15", "2026-08-22", 2)
+    old = recurring_series("2", "Old payment", "2026-08-06", "2026-08-13", -7)
+    body = {"algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "Europe/Moscow",
+            "asOf": "2026-08-20T00:00:00+03:00", "expenseSeries": [due, old], "incomeSeries": [],
+            "dueSoon": [due], "overdue": [old], "nextIncome": None, "monthlyExpenseEstimate": "857.14",
+            "monthlyExpenseEstimates": {"RUB": "857.14"}}
+
+    assert TelegramCoreClient._validated_recurring_projection(body) == body
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_recurring_projection({**body, "dueSoon": [old]})
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_recurring_projection({**body, "monthlyExpenseEstimate": "999.00"})
+
+
+def recurring_series(identifier, name, last, next_date, days):
+    return {"id": identifier * 32, "key": name.lower(), "name": name, "category": "services", "type": "expense",
+            "currency": "RUB", "amount": "100.00", "minAmount": "100.00", "maxAmount": "100.00",
+            "periodCode": "week", "periodDays": 7, "minIntervalDays": 7, "maxIntervalDays": 7,
+            "occurrences": 3, "lastDate": last, "nextDate": next_date, "daysUntil": days}
     invalid = {**body, "rising": [{**body["rising"][0], "changePercent": "-10.00"}]}
     with pytest.raises(TelegramCoreError):
         TelegramCoreClient._validated_personal_inflation(invalid)

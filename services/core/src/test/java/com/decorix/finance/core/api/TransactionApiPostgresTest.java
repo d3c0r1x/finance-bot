@@ -100,6 +100,7 @@ class TransactionApiPostgresTest {
     private static final AtomicReference<String> LAST_PRICE_CATALOG_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_SHOPPING_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_PERSONAL_INFLATION_REQUEST = new AtomicReference<>("");
+    private static final AtomicReference<String> LAST_RECURRING_REQUEST = new AtomicReference<>("");
     private static final String ANALYTICS_SERVICE_TOKEN = "integration-analytics-price-token";
     private static final HttpServer AI_SERVER = startAiServer();
     private static final String JDBC_URL = System.getenv("FINANCE_TEST_JDBC_URL");
@@ -3892,6 +3893,38 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void recurringProjectionUsesOnlyAuthenticatedActiveMemberForApiAndBff() throws Exception {
+        LAST_RECURRING_REQUEST.set("");
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/recurring", tenantId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.algorithmVersion").value("recurring.v1"))
+                .andExpect(jsonPath("$.completeness").value("complete"))
+                .andExpect(jsonPath("$.expenseSeries").isEmpty())
+                .andExpect(jsonPath("$.monthlyExpenseEstimate").doesNotExist());
+        org.junit.jupiter.api.Assertions.assertEquals(tenantId.toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.tenantId"));
+        org.junit.jupiter.api.Assertions.assertEquals(userIdFor(subject).toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.ownerUserId"));
+        org.junit.jupiter.api.Assertions.assertEquals("UTC",
+                com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.timeZone"));
+
+        String memberSubject = "keycloak|recurring-member-" + UUID.randomUUID();
+        UUID memberId = addTenantMember(memberSubject, "Taylor", "member");
+        mvc.perform(get("/bff/tenants/{tenantId}/analytics/recurring", tenantId)
+                        .with(oidcLogin().idToken(token -> token.subject(memberSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.algorithmVersion").value("recurring.v1"))
+                .andExpect(jsonPath("$.incomeSeries").isEmpty());
+        org.junit.jupiter.api.Assertions.assertEquals(memberId.toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.ownerUserId"));
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/recurring", UUID.randomUUID())
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void confirmedNotToBuyDecisionIsShownAsBlockedWithItsReason() throws Exception {
         transactions.executeWithoutResult(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
@@ -4923,6 +4956,29 @@ class TransactionApiPostgresTest {
                          "productCount":0,"basketBefore":null,"basketNow":null,"indexPercent":null,
                          "rising":[],"falling":[]}
                         """.formatted(asOf);
+                byte[] body = response.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+                exchange.sendResponseHeaders(200, body.length);
+                try (var output = exchange.getResponseBody()) {
+                    output.write(body);
+                }
+            });
+            server.createContext("/internal/v1/analytics/recurring", exchange -> {
+                if (!("Bearer " + ANALYTICS_SERVICE_TOKEN).equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
+                    exchange.sendResponseHeaders(401, -1);
+                    exchange.close();
+                    return;
+                }
+                LAST_RECURRING_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                String asOf = com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.asOf");
+                String timeZone = com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.timeZone");
+                String startOfDay = Instant.parse(asOf).atZone(ZoneId.of(timeZone)).toLocalDate()
+                        .atStartOfDay(ZoneId.of(timeZone)).toInstant().toString();
+                String response = """
+                        {"algorithmVersion":"recurring.v1","completeness":"complete","timeZone":"%s","asOf":"%s",
+                         "expenseSeries":[],"incomeSeries":[],"dueSoon":[],"overdue":[],"nextIncome":null,
+                         "monthlyExpenseEstimate":null,"monthlyExpenseEstimates":{}}
+                        """.formatted(timeZone, startOfDay);
                 byte[] body = response.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
                 exchange.sendResponseHeaders(200, body.length);

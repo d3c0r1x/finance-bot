@@ -17,6 +17,43 @@ import tools.jackson.databind.ObjectMapper;
 class ProductPriceHistoryClientTest {
     @Test
     @SuppressWarnings("unchecked")
+    void requestsRecurringProjectionWithCoreResolvedScopeAndAcceptsNoHistory() throws Exception {
+        UUID tenant = UUID.randomUUID();
+        UUID owner = UUID.randomUUID();
+        var asOf = java.time.Instant.parse("2026-10-06T12:00:00Z");
+        AtomicReference<String> path = new AtomicReference<>();
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        try {
+            server.createContext("/internal/v1/analytics/recurring", exchange -> {
+                path.set(exchange.getRequestURI().getPath());
+                assertEquals("Bearer analytics-secret", exchange.getRequestHeaders().getFirst("Authorization"));
+                requestBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                byte[] body = ("{\"algorithmVersion\":\"recurring.v1\",\"completeness\":\"complete\","
+                        + "\"timeZone\":\"Europe/Moscow\",\"asOf\":\"2026-10-06T00:00:00+03:00\","
+                        + "\"expenseSeries\":[],\"incomeSeries\":[],\"dueSoon\":[],\"overdue\":[],"
+                        + "\"nextIncome\":null,\"monthlyExpenseEstimate\":null,\"monthlyExpenseEstimates\":{}}")
+                        .getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length); exchange.getResponseBody().write(body); exchange.close();
+            });
+            server.start();
+            var client = new ProductPriceHistoryClient(new ObjectMapper(), base(server), "analytics-secret", Duration.ofSeconds(2));
+
+            var response = client.recurring(tenant, owner, asOf, "Europe/Moscow");
+
+            assertEquals("/internal/v1/analytics/recurring", path.get());
+            Map<String, Object> sent = new ObjectMapper().readValue(requestBody.get(), Map.class);
+            assertEquals(tenant.toString(), sent.get("tenantId"));
+            assertEquals(owner.toString(), sent.get("ownerUserId"));
+            assertEquals("Europe/Moscow", sent.get("timeZone"));
+            assertEquals("complete", response.completeness());
+            assertEquals(0, response.expenseSeries().size());
+        } finally { server.stop(0); }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void requestsPersonalInflationWithCoreResolvedMemberAndValidatesExplicitNoHistory() throws Exception {
         UUID tenant = UUID.randomUUID();
         UUID owner = UUID.randomUUID();

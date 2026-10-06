@@ -180,6 +180,16 @@ export type PersonalInflation = {
   basketBefore: string | null; basketNow: string | null; indexPercent: string | null;
   rising: PersonalInflationItem[]; falling: PersonalInflationItem[];
 };
+export type RecurringSeries = {
+  id: string; key: string; name: string; category?: string; type: 'expense' | 'income'; currency: string;
+  amount: string; minAmount: string; maxAmount: string; periodCode: 'week' | 'month'; periodDays: number;
+  minIntervalDays: number; maxIntervalDays: number; occurrences: number; lastDate: string; nextDate: string; daysUntil: number;
+};
+export type RecurringProjection = {
+  algorithmVersion: 'recurring.v1'; completeness: 'complete'; timeZone: string; asOf: string;
+  expenseSeries: RecurringSeries[]; incomeSeries: RecurringSeries[]; dueSoon: RecurringSeries[]; overdue: RecurringSeries[];
+  nextIncome: RecurringSeries | null; monthlyExpenseEstimate: string | null; monthlyExpenseEstimates: Record<string, string>;
+};
 export type ReceiptItemPage = { items: ReceiptItem[]; page: number; totalItems: number; hasMore: boolean };
 export type ReceiptRepeatWarning = {
   itemId: string; name: string; productKey: string; verdict: string; title: string;
@@ -390,6 +400,9 @@ export const api = {
   getShoppingCandidates: (tenantId: string) => request<ShoppingList>(`/bff/tenants/${tenantId}/shopping`),
   getPersonalInflation: (tenantId: string) => request<PersonalInflation>(
     `/bff/tenants/${tenantId}/analytics/personal-inflation`,
+  ),
+  getRecurringProjection: (tenantId: string) => request<RecurringProjection>(
+    `/bff/tenants/${tenantId}/analytics/recurring`,
   ),
   markShoppingBought: (tenantId: string, productKey: string) => request<ShoppingList>(
     `/bff/tenants/${tenantId}/shopping/${encodeURIComponent(productKey)}/bought`, { method: 'POST' },

@@ -112,3 +112,11 @@ jobs:
           FINANCE_PRICE_IT_CLICKHOUSE_PASSWORD: integration-only
         run: go test -tags=integration ./cmd/receipt-price-projector -run TestReceiptPriceProjectorKafkaClickHouseIntegration -count=1
         working-directory: services/analytics-go
+      - name: Verify recurring transaction projection and replay
+        env:
+          FINANCE_RECURRING_IT_BROKERS: 127.0.0.1:19092
+          FINANCE_RECURRING_IT_CLICKHOUSE_URL: http://127.0.0.1:8123
+          FINANCE_RECURRING_IT_CLICKHOUSE_USER: finance_test
+          FINANCE_RECURRING_IT_CLICKHOUSE_PASSWORD: integration-only
+        run: go test -tags=integration ./cmd/transaction-state-projector -run TestTransactionStateProjectorKafkaClickHouseIntegration -count=1
+        working-directory: services/analytics-go

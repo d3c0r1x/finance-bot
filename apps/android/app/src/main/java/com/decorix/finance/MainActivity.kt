@@ -95,7 +95,8 @@ class MainActivity : ComponentActivity() {
                         onDebtCreate = ::createDebt, onDebtPay = ::payDebt, onDebtAdjust = ::adjustDebt,
                         onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
                         onShoppingLoad = ::loadShoppingCandidates, onShoppingDecision = ::applyShoppingDecision,
-                        onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation)
+                        onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation,
+                        onRecurringLoad = ::loadRecurring)
                 }
             }
         }
@@ -321,6 +322,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadRecurring() {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        ui = ui.copy(recurringLoading = true, recurringError = null)
+        executor.execute {
+            runCatching { api.recurringProjection(tenantId) }
+                .onSuccess { projection ->
+                    if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(recurringLoading = false, recurringProjection = projection, recurringError = null)
+                    }
+                }
+                .onFailure { error ->
+                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    else if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(recurringLoading = false, recurringError = error.message ?: "Request failed")
+                    }
+                }
+        }
+    }
+
     private fun applyShoppingDecision(productKey: String, action: String) {
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
         ui = ui.copy(shoppingLoading = true, shoppingError = null)
@@ -389,6 +409,9 @@ data class FinanceUiState(
     val personalInflation: FinancePersonalInflation? = null,
     val personalInflationLoading: Boolean = false,
     val personalInflationError: String? = null,
+    val recurringProjection: FinanceRecurringProjection? = null,
+    val recurringLoading: Boolean = false,
+    val recurringError: String? = null,
 )
 
 private data class FinanceWorkspaceSnapshot(
@@ -429,7 +452,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onShoppingLoad: () -> Unit = {},
                           onShoppingDecision: (String, String) -> Unit = { _, _ -> },
                           onShoppingCopy: (String) -> Unit = {},
-                          onPersonalInflationLoad: () -> Unit = {}) {
+                          onPersonalInflationLoad: () -> Unit = {},
+                          onRecurringLoad: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -497,18 +521,22 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 Text(state.tenants.first().name, style = MaterialTheme.typography.headlineSmall)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile", "inflation").forEach { screen ->
+                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring").forEach { screen ->
                         TextButton(onClick = {
                             activeScreen = screen
                             if (screen == "shopping" && state.shoppingList == null && !state.shoppingLoading) onShoppingLoad()
                             if (screen == "inflation" && state.personalInflation == null && !state.personalInflationLoading) {
                                 onPersonalInflationLoad()
                             }
+                            if (screen == "recurring" && state.recurringProjection == null && !state.recurringLoading) {
+                                onRecurringLoad()
+                            }
                         }) {
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
                                 "inflation" -> if (russian) "Динамика цен" else "Price trend"
+                                "recurring" -> if (russian) "Регулярные" else "Recurring"
                                 "budgets" -> if (russian) "Бюджеты" else "Budgets"
                                 "debts" -> if (russian) "Долги" else "Debts"
                                 "reports" -> if (russian) "Отчёты" else "Reports"
@@ -524,6 +552,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onShoppingDecision, onShoppingCopy)
                     "inflation" -> PersonalInflationScreen(Modifier.weight(1f), state, language,
                         onRetry = onPersonalInflationLoad)
+                    "recurring" -> RecurringScreen(Modifier.weight(1f), state, language, onRetry = onRecurringLoad)
                     "budgets" -> BudgetScreen(state, language, onBudgetUpdate, onBudgetReset, onBudgetProposal, onBudgetApply)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad)
@@ -566,6 +595,90 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
         }
         if (state.busy) androidx.compose.material3.CircularProgressIndicator()
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun RecurringScreen(modifier: Modifier, state: FinanceUiState, language: String, onRetry: () -> Unit) {
+    val russian = language == "ru"
+    val projection = state.recurringProjection
+    LazyColumn(modifier.testTag("recurring-projection"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(if (russian) "Регулярные доходы и расходы" else "Recurring income and expenses",
+                    style = MaterialTheme.typography.titleLarge)
+                Text(if (russian) "Оценка по повторяющимся операциям из вашей истории."
+                    else "Estimate from repeated transactions in your history.")
+            }
+        }
+        when {
+            state.recurringLoading -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            state.recurringError != null -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (russian) "Регулярные операции временно недоступны." else "Recurring transactions are unavailable.")
+                    Button(onClick = onRetry) { Text(if (russian) "Повторить" else "Retry") }
+                }
+            }
+            projection == null -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            projection.expenseSeries.isEmpty() && projection.incomeSeries.isEmpty() -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(if (russian) "Пока нет найденных регулярных операций." else "No recurring transactions found yet.")
+                    Text(if (russian) "Для серии нужны минимум три похожие операции." else "Each series needs at least three similar transactions.")
+                }
+            }
+            else -> {
+                if (projection.dueSoon.isNotEmpty()) {
+                    item { Text(if (russian) "Скоро · следующие 3 дня" else "Due soon · next 3 days",
+                        style = MaterialTheme.typography.titleMedium) }
+                    items(projection.dueSoon, key = { "due-${it.id}" }) { series ->
+                        RecurringSeriesCard(series, russian, warning = true)
+                    }
+                }
+                if (projection.monthlyExpenseEstimate != null) item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Text("${if (russian) "Оценка расходов в месяц" else "Estimated monthly expenses"}: " +
+                            "${projection.monthlyExpenseEstimate} ${if (russian) "₽" else "RUB"}",
+                            Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                item { Text(if (russian) "Регулярные расходы" else "Recurring expenses", style = MaterialTheme.typography.titleMedium) }
+                if (projection.expenseSeries.isEmpty()) item { Text(if (russian) "Нет подтверждённых серий расходов." else "No confirmed expense series.") }
+                items(projection.expenseSeries, key = { "expense-${it.id}" }) { series -> RecurringSeriesCard(series, russian) }
+                item { Text(if (russian) "Регулярные доходы" else "Recurring income", style = MaterialTheme.typography.titleMedium) }
+                if (projection.incomeSeries.isEmpty()) item { Text(if (russian) "Нет подтверждённых серий доходов." else "No confirmed income series.") }
+                items(projection.incomeSeries, key = { "income-${it.id}" }) { series -> RecurringSeriesCard(series, russian) }
+                if (projection.overdue.isNotEmpty()) {
+                    item { Text(if (russian) "Просрочено · не входит в ближайшие списания" else "Overdue · excluded from upcoming charges",
+                        style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error) }
+                    items(projection.overdue, key = { "overdue-${it.id}" }) { series ->
+                        RecurringSeriesCard(series, russian, warning = false, overdue = true)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun RecurringSeriesCard(series: FinanceRecurringSeries, russian: Boolean, warning: Boolean = false, overdue: Boolean = false) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(series.name, style = MaterialTheme.typography.titleMedium)
+            Text("${series.amount} ${if (russian) "₽" else series.currency} · " +
+                (if (series.periodCode == "week") { if (russian) "еженедельно" else "weekly" }
+                else { if (russian) "ежемесячно" else "monthly" }))
+            Text("${if (russian) "Обычно" else "Typical range"}: ${series.minAmount}–${series.maxAmount} " +
+                "${if (russian) "₽" else series.currency} · ${if (russian) "интервал" else "interval"}: " +
+                "${series.minIntervalDays}–${series.maxIntervalDays} ${if (russian) "дн." else "days"}")
+            Text(if (overdue) {
+                if (russian) "Просрочено на ${-series.daysUntil} дн. · ${series.nextDate}" else "Overdue ${-series.daysUntil} days · ${series.nextDate}"
+            } else if (warning) {
+                if (russian) "Через ${series.daysUntil} дн. · ${series.nextDate}" else "In ${series.daysUntil} days · ${series.nextDate}"
+            } else {
+                if (russian) "Следующая дата: ${series.nextDate} · ${series.occurrences} операций"
+                else "Next: ${series.nextDate} · ${series.occurrences} transactions"
+            })
+        }
     }
 }
 

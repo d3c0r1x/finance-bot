@@ -6,8 +6,10 @@ import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingCandidate;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
+import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import com.decorix.finance.core.domain.ProductIdentityPolicy;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -166,6 +168,37 @@ public class ProductPriceHistoryService {
         return analytics.personalInflation(tenantId, userId, Instant.now());
     }
 
+    public RecurringProjection recurring(UUID tenantId, String subject) {
+        if (tenantId == null || subject == null || subject.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
+        }
+        MemberScope member = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID userId = memberUserId(tenantId, subject);
+            if (userId == null) return null;
+            return new MemberScope(userId, profileTimezone(tenantId, userId));
+        });
+        if (member == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
+        return analytics.recurring(tenantId, member.userId(), Instant.now(), member.timezone());
+    }
+
+    /** Rechecks the active Telegram member before requesting that member's recurring history. */
+    public RecurringProjection recurring(UUID tenantId, UUID ownerUserId) {
+        if (tenantId == null || ownerUserId == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
+        }
+        MemberScope member = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            List<UUID> members = jdbc.query("SELECT user_id FROM memberships WHERE tenant_id = ? AND user_id = ? AND status = 'active'",
+                    (rs, row) -> rs.getObject("user_id", UUID.class), tenantId, ownerUserId);
+            if (members.isEmpty()) return null;
+            UUID userId = members.get(0);
+            return new MemberScope(userId, profileTimezone(tenantId, userId));
+        });
+        if (member == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
+        return analytics.recurring(tenantId, member.userId(), Instant.now(), member.timezone());
+    }
+
     private ShoppingList shoppingForMember(UUID tenantId, UUID userId) {
         return shoppingDecisions.apply(tenantId, userId, analytics.shopping(tenantId.toString(), userId.toString()));
     }
@@ -231,6 +264,16 @@ public class ProductPriceHistoryService {
         return users.isEmpty() ? null : users.get(0);
     }
 
+    private String profileTimezone(UUID tenantId, UUID userId) {
+        String timezone = jdbc.queryForObject("SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?",
+                String.class, tenantId, userId);
+        try { return ZoneId.of(timezone).getId(); }
+        catch (RuntimeException invalid) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Member timezone is invalid", invalid);
+        }
+    }
+
+    private record MemberScope(UUID userId, String timezone) {}
     private record CurrentPriceItem(String currency, String name, String quantity, String lineSum,
                                     Instant purchasedAt, UUID ownerUserId) {}
 }

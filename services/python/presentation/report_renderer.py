@@ -662,6 +662,73 @@ def render_personal_inflation(inflation: Mapping[str, object]) -> str:
     return "\n".join(lines)
 
 
+def render_recurring_projection(projection: Mapping[str, object]) -> str:
+    """Render the authoritative recurring read model; upcoming and overdue stay separate."""
+    expenses = projection.get("expenseSeries")
+    incomes = projection.get("incomeSeries")
+    due_soon = projection.get("dueSoon")
+    overdue = projection.get("overdue")
+    if any(not isinstance(items, list) for items in (expenses, incomes, due_soon, overdue)):
+        raise ValueError("recurring projection lists are invalid")
+    if projection.get("algorithmVersion") != "recurring.v1" or projection.get("completeness") != "complete":
+        raise ValueError("recurring projection version is invalid")
+
+    def label(item: Mapping[str, object]) -> str:
+        name = item.get("name")
+        amount = item.get("amount")
+        minimum = item.get("minAmount")
+        maximum = item.get("maxAmount")
+        minimum_interval = item.get("minIntervalDays")
+        maximum_interval = item.get("maxIntervalDays")
+        days_until = item.get("daysUntil")
+        if (not isinstance(name, str) or not name.strip() or not isinstance(days_until, int)
+                or type(minimum_interval) is not int or type(maximum_interval) is not int
+                or minimum_interval < 1 or maximum_interval < minimum_interval):
+            raise ValueError("recurring series is incomplete")
+        amount_value = _recurring_amount(amount)
+        minimum_value = _recurring_amount(minimum)
+        maximum_value = _recurring_amount(maximum)
+        range_text = _format_rub(minimum_value)
+        if maximum_value != minimum_value:
+            range_text += "–" + _format_rub(maximum_value)
+        when = (f"просрочено на {abs(days_until)} дн." if days_until < 0 else
+                "сегодня" if days_until == 0 else "завтра" if days_until == 1 else f"через {days_until} дн.")
+        return (f"• {name[:100]} — {_format_rub(amount_value)} ₽ (обычно {range_text} ₽), "
+                f"интервал {minimum_interval}–{maximum_interval} дн., {when}")
+
+    lines = ["🔁 Регулярные расходы и доходы"]
+    if not expenses and not incomes:
+        lines.extend(("", "Пока не нашёл регулярных операций.",
+                      "Для серии нужны минимум 3 похожие операции с недельным или месячным интервалом."))
+        return "\n".join(lines)
+
+    if due_soon:
+        lines.extend(("", "Скоро спишется (ближайшие 3 дня):"))
+        lines.extend(label(item) for item in due_soon[:8] if isinstance(item, Mapping))
+    if expenses:
+        lines.extend(("", "Регулярные расходы:"))
+        lines.extend(label(item) for item in expenses[:8] if isinstance(item, Mapping))
+    if incomes:
+        lines.extend(("", "Регулярные доходы:"))
+        lines.extend(label(item) for item in incomes[:8] if isinstance(item, Mapping))
+    estimate = projection.get("monthlyExpenseEstimate")
+    if estimate is not None:
+        lines.extend(("", f"В месяц на расходы: {_format_rub(_recurring_amount(estimate))} ₽."))
+    if overdue:
+        lines.extend(("", "Просрочено (не входит в предупреждения):"))
+        lines.extend(label(item) for item in overdue[:5] if isinstance(item, Mapping))
+    return "\n".join(lines)
+
+
+def _recurring_amount(value: object) -> Decimal:
+    if not isinstance(value, str) or not re.fullmatch(r"(?:0|[1-9]\d{0,17})\.\d{2}", value):
+        raise ValueError("recurring amount is invalid")
+    amount = Decimal(value)
+    if not amount.is_finite() or amount < 0:
+        raise ValueError("recurring amount is invalid")
+    return amount
+
+
 def _personal_inflation_decimal(value: object, field: str, *, positive: bool, percent: bool = False) -> Decimal:
     pattern = PERSONAL_INFLATION_PERCENT_PATTERN if percent else PERSONAL_INFLATION_MONEY_PATTERN
     if not isinstance(value, str) or not pattern.fullmatch(value):

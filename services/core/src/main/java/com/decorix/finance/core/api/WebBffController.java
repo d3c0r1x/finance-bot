@@ -21,6 +21,7 @@ import com.decorix.finance.core.api.ProductApi.PriceComparison;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
+import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import com.decorix.finance.core.api.ReceiptProcessingApi.ReceiptProcessingJob;
 import java.util.List;
 import java.util.Map;
@@ -517,6 +518,11 @@ public class WebBffController {
     @GetMapping("/tenants/{tenantId}/analytics/personal-inflation")
     PersonalInflation personalInflation(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
         return productPriceHistory.personalInflation(tenantId, user.getSubject());
+    }
+
+    @GetMapping("/tenants/{tenantId}/analytics/recurring")
+    RecurringProjection recurring(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
+        return productPriceHistory.recurring(tenantId, user.getSubject());
     }
 
     @PostMapping("/tenants/{tenantId}/shopping/{productKey}/bought")

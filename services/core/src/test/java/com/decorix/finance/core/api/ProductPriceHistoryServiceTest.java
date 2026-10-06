@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
+import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,52 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 class ProductPriceHistoryServiceTest {
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void recurringResolvesAuthenticatedMemberAndUsesProfileTimezone() {
+        UUID tenantId = UUID.randomUUID(); UUID ownerId = UUID.randomUUID(); String subject = "keycloak-subject";
+        JdbcTemplate jdbc = mock(JdbcTemplate.class); TransactionTemplate transaction = mock(TransactionTemplate.class);
+        ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        when(jdbc.queryForObject(eq("SELECT set_config('app.tenant_id', ?, true)"), eq(String.class), eq(tenantId.toString())))
+                .thenReturn(tenantId.toString());
+        doAnswer(invocation -> List.of(ownerId)).when(jdbc).query(anyString(), any(RowMapper.class), eq(tenantId), eq(subject));
+        when(jdbc.queryForObject(eq("SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?"),
+                eq(String.class), eq(tenantId), eq(ownerId))).thenReturn("Europe/Moscow");
+        var expected = new RecurringProjection("recurring.v1", "complete", "Europe/Moscow",
+                java.time.Instant.parse("2026-10-06T00:00:00+03:00"), List.of(), List.of(), List.of(), List.of(), null, null, java.util.Map.of());
+        when(analytics.recurring(eq(tenantId), eq(ownerId), any(), eq("Europe/Moscow"))).thenReturn(expected);
+
+        var service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+
+        assertEquals(expected, service.recurring(tenantId, subject));
+        verify(analytics).recurring(eq(tenantId), eq(ownerId), any(), eq("Europe/Moscow"));
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void recurringDoesNotReadAnalyticsForInactiveMember() {
+        UUID tenantId = UUID.randomUUID(); String subject = "inactive-subject";
+        JdbcTemplate jdbc = mock(JdbcTemplate.class); TransactionTemplate transaction = mock(TransactionTemplate.class);
+        ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
+            TransactionCallback callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
+        when(jdbc.queryForObject(eq("SELECT set_config('app.tenant_id', ?, true)"), eq(String.class), eq(tenantId.toString())))
+                .thenReturn(tenantId.toString());
+        doAnswer(invocation -> List.of()).when(jdbc).query(anyString(), any(RowMapper.class), eq(tenantId), eq(subject));
+        var service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> service.recurring(tenantId, subject));
+
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
+        verify(analytics, never()).recurring(any(UUID.class), any(UUID.class), any(), anyString());
+    }
+
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})
     void personalInflationResolvesOnlyAuthenticatedActiveMemberBeforeAnalyticsCall() {

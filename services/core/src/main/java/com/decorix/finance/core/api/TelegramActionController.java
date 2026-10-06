@@ -28,6 +28,7 @@ import com.decorix.finance.core.api.BudgetApi.BudgetProposalResponse;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
+import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import java.util.UUID;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -91,6 +92,14 @@ public class TelegramActionController {
             @RequestBody ResolveRequest request) {
         requireServiceToken(suppliedToken);
         return actions.personalInflation(request);
+    }
+
+    @PostMapping("/actions/recurring")
+    RecurringProjection recurring(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.recurring(request);
     }
 
     @PostMapping("/shopping/{productKey}/bought")
