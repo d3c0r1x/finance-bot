@@ -4325,7 +4325,7 @@ components:
     FinanceReport:
       type: object
       additionalProperties: false
-      required: [period, scope, fromDate, toDate, asOfDate, timezone, currency, incomeTotal, expenseTotal, debtPaymentTotal, refundTotal, transactionCount, expenseByCategory, expenseByDay, weekendSharePercent, monthlyBudgetLimit, monthlyBudgetRemaining, rolling7FoodStatus]
+      required: [period, scope, fromDate, toDate, asOfDate, timezone, currency, incomeTotal, expenseTotal, debtPaymentTotal, refundTotal, transactionCount, expenseByCategory, expenseByDay, weekendSharePercent, monthlyBudgetLimit, monthlyBudgetRemaining, rolling7FoodStatus, waste]
       properties:
         period: { type: string, enum: [month, week, 90d, custom] }
         scope: { type: string, enum: [personal, family] }
@@ -4350,6 +4350,77 @@ components:
         monthlyBudgetLimit: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
         monthlyBudgetRemaining: { type: [string, 'null'], pattern: '^-?\d+\.\d{2}$' }
         rolling7FoodStatus: { $ref: '#/components/schemas/RollingFoodStatus' }
+        waste: { $ref: '#/components/schemas/AdviceWasteReport' }
+    AdviceWasteReport:
+      type: object
+      additionalProperties: false
+      required: [available, reasonCode, algorithmVersion, completeness, asOf, inputVersion, fromDate, toDate, reviewedSpend, optionalSpend, optionalShare, reviewedItemCount, optionalItemCount, missingAmountCount, byVerdict, bySource, topItems, repeats, corrected, optionalByDay]
+      properties:
+        available: { type: boolean }
+        reasonCode: { type: string, enum: [available, no_reviewed_items, missing_amounts, too_many_items, analytics_unavailable] }
+        algorithmVersion: { type: [string, 'null'], enum: [advice-waste.v1, null] }
+        completeness: { type: string, enum: [complete, partial] }
+        asOf: { type: string, format: date-time }
+        inputVersion: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        reviewedSpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        optionalSpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        optionalShare: { type: [string, 'null'], pattern: '^\d+\.\d{3}$' }
+        reviewedItemCount: { type: integer, minimum: 0, maximum: 50000 }
+        optionalItemCount: { type: integer, minimum: 0, maximum: 50000 }
+        missingAmountCount: { type: integer, minimum: 0, maximum: 50000 }
+        byVerdict:
+          type: array
+          maxItems: 2
+          items: { $ref: '#/components/schemas/AdviceWasteVerdictTotal' }
+        bySource:
+          type: object
+          maxProperties: 5
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        topItems:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/AdviceWasteItemSummary' }
+        repeats:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/AdviceWasteProductGroup' }
+        corrected:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/AdviceWasteProductGroup' }
+        optionalByDay:
+          type: object
+          maxProperties: 366
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+    AdviceWasteVerdictTotal:
+      type: object
+      additionalProperties: false
+      required: [verdict, amount, count]
+      properties:
+        verdict: { type: string, enum: [harmful, unnecessary] }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
+        count: { type: integer, minimum: 1, maximum: 50000 }
+    AdviceWasteItemSummary:
+      type: object
+      additionalProperties: false
+      required: [itemId, name, amount, verdict, source]
+      properties:
+        itemId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 500 }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
+        verdict: { type: string, enum: [harmful, unnecessary] }
+        source: { type: string, enum: [model, rule, human, default, unknown] }
+    AdviceWasteProductGroup:
+      type: object
+      additionalProperties: false
+      required: [productKey, productName, count, amount]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256 }
+        productName: { type: string, minLength: 1, maxLength: 500 }
+        count: { type: integer, minimum: 1, maximum: 50000 }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
     DashboardSummary:
       type: object
       additionalProperties: false

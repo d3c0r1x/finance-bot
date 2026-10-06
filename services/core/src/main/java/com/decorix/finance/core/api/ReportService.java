@@ -27,11 +27,14 @@ public class ReportService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final BudgetService budgets;
+    private final AdviceWasteReportService adviceWaste;
 
-    public ReportService(JdbcTemplate jdbc, TransactionTemplate transaction, BudgetService budgets) {
+    public ReportService(JdbcTemplate jdbc, TransactionTemplate transaction, BudgetService budgets,
+                         AdviceWasteReportService adviceWaste) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.budgets = budgets;
+        this.adviceWaste = adviceWaste;
     }
 
     public Report get(UUID tenantId, String subject, String period, YearMonth requestedMonth,
@@ -39,7 +42,7 @@ public class ReportService {
         if (tenantId == null || subject == null || subject.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid report request");
         }
-        return transaction.execute(status -> {
+        Report report = transaction.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
             UUID userId = jdbc.queryForList("SELECT user_id FROM memberships WHERE tenant_id = ? AND subject = ? "
                             + "AND status = 'active'", UUID.class, tenantId, subject).stream().findFirst().orElse(null);
@@ -119,8 +122,10 @@ public class ReportService {
                     totals.incomeTotal(), totals.expenseTotal(), totals.debtPaymentTotal(), totals.refundTotal(),
                     totals.transactionCount(), Collections.unmodifiableMap(categoryTotals),
                     Collections.unmodifiableMap(dailyTotals), weekendShare, monthlyLimit,
-                    monthlyRemaining, foodStatus);
+                    monthlyRemaining, foodStatus, null);
         });
+        return report.withWaste(adviceWaste.get(tenantId, subject, report.fromDate(), report.toDate(),
+                report.timezone(), family));
     }
 
     private static Window resolveWindow(String period, YearMonth requestedMonth, LocalDate from, LocalDate to, LocalDate today) {

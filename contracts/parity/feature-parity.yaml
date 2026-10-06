@@ -602,9 +602,10 @@ features:
     tests:
       - services/analytics-go/advice/waste_test.go
       - services/analytics-go/advice/waste_api_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - tools/contracts/test_contracts.py
     evidence:
-      - "F40.1 implements the versioned Go advice-waste.v1 algorithm and authenticated internal API. Exact reviewed/optional totals, verdict/source provenance, owner-allowed correction visibility, deterministic input hash, local-day series, missing-amount behavior and strict request validation have golden/unit/contract coverage. Local gates: full analytics Go tests, go vet, analytics-api build, contracts 41 passed. GitHub runs 37403107898, 37403107896 and 37403107903 passed. Core fact selection and Web/Android/Telegram presentation remain open."
+      - "F40.1 implements the versioned Go advice-waste.v1 algorithm and authenticated internal API. Exact reviewed/optional totals, verdict/source provenance, owner-allowed correction visibility, deterministic input hash, local-day series, missing-amount behavior and strict request validation have golden/unit/contract coverage. F40.2 supplies only confirmed receipt lines joined to posted expense transactions in the exact member-local report window, applies each line owner's allowed decision, preserves nullable evidence, stops above 50,000 lines, and calls Go only after Core's database transaction ends. Analytics/query outage and overflow return explicit partial unavailability while finance totals remain available; no-line reports return complete no_reviewed_items. Core report/PostgreSQL acceptance, full Core check and contracts 42 passed locally. GitHub runs 37403107898, 37403107896 and 37403107903 passed for F40.1. Web/Android/Telegram presentation remains open as F40.3."
     intentional_differences: []
   - id: F41
     feature: "«Не брать», отдельные догадки модели, подтверждение/разрешение"

@@ -11,5 +11,12 @@ public final class ReportApi {
                          String incomeTotal, String expenseTotal, String debtPaymentTotal, String refundTotal,
                           int transactionCount, Map<String, String> expenseByCategory,
                           Map<String, String> expenseByDay, Integer weekendSharePercent, String monthlyBudgetLimit,
-                          String monthlyBudgetRemaining, BudgetApi.RollingFoodStatus rolling7FoodStatus) {}
+                          String monthlyBudgetRemaining, BudgetApi.RollingFoodStatus rolling7FoodStatus,
+                          AdviceWasteApi.WasteReport waste) {
+        public Report withWaste(AdviceWasteApi.WasteReport result) {
+            return new Report(period, scope, fromDate, toDate, asOfDate, timezone, currency, incomeTotal, expenseTotal,
+                    debtPaymentTotal, refundTotal, transactionCount, expenseByCategory, expenseByDay,
+                    weekendSharePercent, monthlyBudgetLimit, monthlyBudgetRemaining, rolling7FoodStatus, result);
+        }
+    }
 }

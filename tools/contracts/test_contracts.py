@@ -806,6 +806,43 @@ def test_finance_report_exposes_server_computed_local_day_chart_data():
     }
 
 
+def test_finance_report_waste_contract_accepts_complete_and_unavailable_results():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    report = spec["components"]["schemas"]["FinanceReport"]
+    assert "waste" in report["required"]
+    assert report["properties"]["waste"] == {"$ref": "#/components/schemas/AdviceWasteReport"}
+    waste_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": spec["components"]["schemas"]},
+        "$ref": "#/components/schemas/AdviceWasteReport",
+    }
+    fixture = json.loads((ROOT / "contracts/analytics/advice-waste.v1.json").read_text("utf-8"))
+    validator = Draft202012Validator(waste_document, format_checker=FormatChecker())
+    validator.validate(dict(fixture["expected"], inputVersion="0" * 64))
+    validator.validate({
+        "available": False,
+        "reasonCode": "analytics_unavailable",
+        "algorithmVersion": None,
+        "completeness": "partial",
+        "asOf": "2026-10-02T00:00:00Z",
+        "inputVersion": None,
+        "fromDate": "2026-10-01",
+        "toDate": "2026-10-01",
+        "reviewedSpend": None,
+        "optionalSpend": None,
+        "optionalShare": None,
+        "reviewedItemCount": 0,
+        "optionalItemCount": 0,
+        "missingAmountCount": 0,
+        "byVerdict": [],
+        "bySource": {},
+        "topItems": [],
+        "repeats": [],
+        "corrected": [],
+        "optionalByDay": {},
+    })
+
+
 def test_bank_import_preview_contract_is_strict_and_exposes_web_and_api_routes():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for route in (

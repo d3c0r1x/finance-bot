@@ -102,6 +102,8 @@ class TransactionApiPostgresTest {
     private static final AtomicReference<String> LAST_SHOPPING_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_PERSONAL_INFLATION_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_RECURRING_REQUEST = new AtomicReference<>("");
+    private static final AtomicReference<String> LAST_WASTE_REQUEST = new AtomicReference<>("");
+    private static final AtomicInteger WASTE_RESPONSE_STATUS = new AtomicInteger(200);
     private static final AtomicBoolean RECURRING_FIXTURE_ENABLED = new AtomicBoolean();
     private static final String RECURRING_SERIES_ID = "abcdef0123456789abcdef0123456789";
     private static final String ANALYTICS_SERVICE_TOKEN = "integration-analytics-price-token";
@@ -171,6 +173,8 @@ class TransactionApiPostgresTest {
     @BeforeEach
     void createTenantAndMembership() {
         RECURRING_FIXTURE_ENABLED.set(false);
+        LAST_WASTE_REQUEST.set("");
+        WASTE_RESPONSE_STATUS.set(200);
         cleanupReceiptPhotoFixtures();
         grantAppPrivileges();
         subject = "keycloak|integration-" + UUID.randomUUID();
@@ -1713,6 +1717,118 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void optionalSpendReportUsesConfirmedReceiptFactsAndOwnerScopedAllowedDecisions() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        List<UUID> itemIds = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE member_profiles SET timezone = 'Europe/Moscow' WHERE tenant_id = ?", tenantId);
+            UUID ownerId = userIdFor(subject);
+            String familySubject = "keycloak|waste-report-family-" + UUID.randomUUID();
+            UUID familyUserId = jdbc.queryForObject("INSERT INTO users DEFAULT VALUES RETURNING id", UUID.class);
+            jdbc.update("INSERT INTO external_identities (user_id, provider, subject) VALUES (?, 'keycloak', ?)",
+                    familyUserId, familySubject);
+            jdbc.update("INSERT INTO memberships (tenant_id, subject, role, user_id) VALUES (?, ?, 'member', ?)",
+                    tenantId, familySubject, familyUserId);
+            jdbc.update("INSERT INTO member_profiles (tenant_id, user_id, display_name, timezone) "
+                    + "VALUES (?, ?, 'Family', 'Europe/Moscow')", tenantId, familyUserId);
+
+            UUID personalTransaction = addReportTransaction(ownerId, subject, "expense", "100.00", "food",
+                    "2026-10-01T10:00:00Z");
+            UUID personalItem = addConfirmedReceiptItem(ownerId, subject, personalTransaction, "Чипсы", "100.00",
+                    "harmful", "model", 1);
+            UUID familyTransaction = addReportTransaction(familyUserId, familySubject, "expense", "200.00", "food",
+                    "2026-10-02T10:00:00Z");
+            UUID familyItem = addConfirmedReceiptItem(familyUserId, familySubject, familyTransaction, "Чипсы", "200.00",
+                    "harmful", "unknown", 2);
+            UUID unreviewedTransaction = addReportTransaction(familyUserId, familySubject, "expense", "50.00", "food",
+                    "2026-10-03T10:00:00Z");
+            UUID unreviewedItem = addConfirmedReceiptItem(familyUserId, familySubject, unreviewedTransaction, "Чай", null,
+                    null, "unknown", 3);
+            UUID outsideTransaction = addReportTransaction(ownerId, subject, "expense", "300.00", "food",
+                    "2026-09-30T10:00:00Z");
+            addConfirmedReceiptItem(ownerId, subject, outsideTransaction, "Кофе", "300.00", "harmful", "rule", 4);
+
+            jdbc.update("INSERT INTO user_product_decisions (tenant_id, user_id, product_key, decision, version) "
+                    + "VALUES (?, ?, 'чипсы', 'allowed', 4)", tenantId, ownerId);
+            return List.of(personalItem, familyItem, unreviewedItem);
+        });
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/reports/period", tenantId).with(auth)
+                        .param("period", "custom").param("from", "2026-10-01").param("to", "2026-10-03"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.waste.available").value(true))
+                .andExpect(jsonPath("$.waste.optionalSpend").value("50.00"));
+        org.junit.jupiter.api.Assertions.assertEquals(1,
+                ((Number) com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items.length()")).intValue());
+        org.junit.jupiter.api.Assertions.assertEquals(itemIds.get(0).toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[0].itemId"));
+        org.junit.jupiter.api.Assertions.assertEquals("чипсы",
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[0].productKey"));
+        org.junit.jupiter.api.Assertions.assertEquals(true,
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[0].allowed"));
+        org.junit.jupiter.api.Assertions.assertEquals(4,
+                ((Number) com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[0].decisionVersion")).intValue());
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/reports/family", tenantId).with(auth)
+                        .param("period", "custom").param("from", "2026-10-01").param("to", "2026-10-03"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.waste.available").value(true));
+        org.junit.jupiter.api.Assertions.assertEquals(3,
+                ((Number) com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items.length()")).intValue());
+        org.junit.jupiter.api.Assertions.assertEquals(itemIds.get(0).toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[0].itemId"));
+        org.junit.jupiter.api.Assertions.assertEquals(true,
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[0].allowed"));
+        org.junit.jupiter.api.Assertions.assertEquals(itemIds.get(1).toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[1].itemId"));
+        org.junit.jupiter.api.Assertions.assertEquals(false,
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[1].allowed"));
+        org.junit.jupiter.api.Assertions.assertEquals(itemIds.get(2).toString(),
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[2].itemId"));
+        org.junit.jupiter.api.Assertions.assertNull(
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[2].verdict"));
+        org.junit.jupiter.api.Assertions.assertNull(
+                com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.items[2].lineSum"));
+
+        WASTE_RESPONSE_STATUS.set(503);
+        mvc.perform(get("/api/v1/tenants/{tenantId}/reports/period", tenantId).with(auth)
+                        .param("period", "custom").param("from", "2026-10-01").param("to", "2026-10-03"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseTotal").exists())
+                .andExpect(jsonPath("$.waste.available").value(false))
+                .andExpect(jsonPath("$.waste.reasonCode").value("analytics_unavailable"))
+                .andExpect(jsonPath("$.waste.optionalSpend").doesNotExist());
+    }
+
+    @Test
+    void optionalSpendReportStopsBeforeAnalyticsWhenReceiptLineLimitIsExceeded() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            UUID transactionId = addReportTransaction(ownerId, subject, "expense", "1.00", "food",
+                    "2026-10-01T10:00:00Z");
+            addConfirmedReceiptItem(ownerId, subject, transactionId, "Product", "1.00", "harmful", "model", 1);
+            UUID receiptId = jdbc.queryForObject("SELECT id FROM receipts WHERE tenant_id = ? AND transaction_id = ?",
+                    UUID.class, tenantId, transactionId);
+            jdbc.update("""
+                    INSERT INTO receipt_items (tenant_id, receipt_id, ordinal, name, quantity, line_sum)
+                    SELECT ?, ?, ordinal, 'Product ' || ordinal, 1, 1.00
+                    FROM generate_series(2, 50001) AS generated(ordinal)
+                    """, tenantId, receiptId);
+        });
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/reports/period", tenantId).with(auth)
+                        .param("period", "custom").param("from", "2026-10-01").param("to", "2026-10-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseTotal").exists())
+                .andExpect(jsonPath("$.waste.available").value(false))
+                .andExpect(jsonPath("$.waste.reasonCode").value("too_many_items"))
+                .andExpect(jsonPath("$.waste.completeness").value("partial"));
+        org.junit.jupiter.api.Assertions.assertEquals("", LAST_WASTE_REQUEST.get());
+    }
+
+    @Test
     void telegramReportUsesTheSharedReportDtoAndScopesThroughItsActorContext() throws Exception {
         long telegramUserId = newTelegramUserId();
         String linkCode = mvc.perform(post("/api/v1/me/telegram-link")
@@ -1808,14 +1924,38 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.personalOverrides['еда']").doesNotExist());
     }
 
-    private void addReportTransaction(UUID ownerId, String ownerSubject, String type, String amount,
+    private UUID addReportTransaction(UUID ownerId, String ownerSubject, String type, String amount,
                                       String category, String occurredAt) {
-        jdbc.update("""
+        return jdbc.queryForObject("""
                 INSERT INTO transactions (tenant_id, owner_subject, owner_user_id, type, amount, currency,
                     category_code, description, source, occurred_at)
                 VALUES (?, ?, ?, ?, ?, 'RUB', ?, '', 'test', ?)
-                """, tenantId, ownerSubject, ownerId, type, new java.math.BigDecimal(amount), category,
+                RETURNING id
+                """, UUID.class, tenantId, ownerSubject, ownerId, type, new java.math.BigDecimal(amount), category,
                 java.sql.Timestamp.from(Instant.parse(occurredAt)));
+    }
+
+    private UUID addConfirmedReceiptItem(UUID ownerId, String ownerSubject, UUID transactionId,
+                                         String name, String lineSum, String verdict, String source, int ordinal) {
+        String amount = lineSum == null ? "50.00" : lineSum;
+        LocalDate receiptDate = jdbc.queryForObject(
+                "SELECT (occurred_at AT TIME ZONE 'UTC')::date FROM transactions WHERE tenant_id = ? AND id = ?",
+                LocalDate.class, tenantId, transactionId);
+        UUID receiptId = jdbc.queryForObject("""
+                INSERT INTO receipts (tenant_id, owner_user_id, owner_subject, transaction_id, state,
+                    cash_total, items_total, receipt_date, selected_reader, version, create_idempotency_key,
+                    create_request_hash, confirm_idempotency_key, confirmed_at)
+                VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?, 'manual', 2, ?, repeat('0', 64), ?, now())
+                RETURNING id
+                """, UUID.class, tenantId, ownerId, ownerSubject, transactionId,
+                new java.math.BigDecimal(amount), lineSum == null ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(lineSum),
+                receiptDate, "waste-report-create-" + UUID.randomUUID(), "waste-report-confirm-" + UUID.randomUUID());
+        return jdbc.queryForObject("""
+                INSERT INTO receipt_items (tenant_id, receipt_id, ordinal, name, quantity, line_sum, verdict,
+                    verdict_source, version)
+                VALUES (?, ?, ?, ?, 1, ?::numeric, ?, ?, ?)
+                RETURNING id
+                """, UUID.class, tenantId, receiptId, ordinal, name, lineSum, verdict, source, ordinal);
     }
 
     @Test
@@ -5072,6 +5212,37 @@ class TransactionApiPostgresTest {
                          "productCount":0,"basketBefore":null,"basketNow":null,"indexPercent":null,
                          "rising":[],"falling":[]}
                         """.formatted(asOf);
+                byte[] body = response.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+                exchange.sendResponseHeaders(200, body.length);
+                try (var output = exchange.getResponseBody()) {
+                    output.write(body);
+                }
+            });
+            server.createContext("/internal/v1/analytics/waste", exchange -> {
+                if (!("Bearer " + ANALYTICS_SERVICE_TOKEN).equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
+                    exchange.sendResponseHeaders(401, -1);
+                    exchange.close();
+                    return;
+                }
+                LAST_WASTE_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                int status = WASTE_RESPONSE_STATUS.get();
+                if (status != 200) {
+                    exchange.sendResponseHeaders(status, -1);
+                    exchange.close();
+                    return;
+                }
+                String asOf = com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.asOf");
+                String fromDate = com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.fromDate");
+                String toDate = com.jayway.jsonpath.JsonPath.read(LAST_WASTE_REQUEST.get(), "$.toDate");
+                String response = """
+                        {"available":true,"reasonCode":"available","algorithmVersion":"advice-waste.v1",
+                         "completeness":"complete","asOf":"%s","inputVersion":"0000000000000000000000000000000000000000000000000000000000000000",
+                         "fromDate":"%s","toDate":"%s","reviewedSpend":"300.00","optionalSpend":"50.00",
+                         "optionalShare":"0.167","reviewedItemCount":3,"optionalItemCount":1,"missingAmountCount":0,
+                         "byVerdict":[{"verdict":"harmful","amount":"50.00","count":1}],
+                         "bySource":{"unknown":"50.00"},"topItems":[],"repeats":[],"corrected":[],"optionalByDay":{}}
+                        """.formatted(asOf, fromDate, toDate);
                 byte[] body = response.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
                 exchange.sendResponseHeaders(200, body.length);
