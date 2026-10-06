@@ -54,7 +54,7 @@ Updated: 2026-10-06 07:05, Europe/Moscow.
 ## Current goal
 
 - ID and outcome: F41 — preserve model-only product hypotheses as reviewable suggestions; only a human decision may block or allow a product.
-- Status: ACTIVE — scope selected from `PLAN.md`; existing F20/F40 behavior under review before writing focused RED acceptance.
+- Status: ANALYSIS — bounded design presented; no F41 product code changed while awaiting design approval.
 - Acceptance: model-only “do not buy” evidence never hides a purchase and never becomes a user decision; explicit owner confirm/allow persists member-scoped provenance, affects only the chosen product, and is reversible/audited; existing user decisions remain authoritative.
 - Data boundary: model evidence is advisory and separate from confirmed `user_product_decisions`; all blocking and visibility decisions remain Core/PostgreSQL-owned.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
@@ -101,7 +101,7 @@ Updated: 2026-10-06 07:05, Europe/Moscow.
 
 ## Next action
 
-- F31/F33/F10 gates are closed with local and CI evidence. For F41, inspect existing F20/F40 decision and suggestion seams, add focused policy and PostgreSQL acceptance tests, observe RED, then implement the smallest Core/Web/Android/Telegram slice.
+- F31/F33/F10 gates are closed with local and CI evidence. F41 next requires approval of the bounded design; after approval, add focused Go policy and PostgreSQL/API RED acceptance, then implement the agreed Core and RU/EN clients.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
