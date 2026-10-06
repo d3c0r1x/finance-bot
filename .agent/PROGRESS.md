@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 12:12, Europe/Moscow.
+Updated: 2026-10-06 13:05, Europe/Moscow.
 
 ## Global plan
 
@@ -68,7 +68,7 @@ Updated: 2026-10-06 12:12, Europe/Moscow.
 - Data boundary: Android parses Core evidence and decision DTOs; tenant switch clears cached advice/decisions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
 - Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `cdc51c9`; F41.3c files modified in working tree.
-- Updated at: 2026-10-06 12:12 Europe/Moscow.
+- Updated at: 2026-10-06 13:05 Europe/Moscow.
 
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
@@ -85,6 +85,15 @@ Updated: 2026-10-06 12:12, Europe/Moscow.
 - Debug APK assembled, installed and launched on `emulator-5556`; process `21967`; SHA-256 `BB7D6BC6EF01CD793F37D7124420058C3B3273F56C3D976106699E7F5B5F6297`.
 - Plan docs commit `cdc51c9` is on origin. Next: commit only F41.3c source/tests plus progress, push feature branch, inspect CI result; then begin MVP Android API 23 goal. Android 6–8 images, persistent backend, public HTTPS and real email are still unverified.
 - Next: isolate Android test discovery failure without changing product code; finish current F41.3c gates and commit. Then run MVP M0/M1. No claim of MVP runtime, public HTTPS, or email delivery yet.
+
+## E4.58 Personal MVP M1.1 Android API 23 compatibility — 2026-10-06 13:05 MSK
+
+- Observed RED: APK acceptance script rejected the existing `minSdk 26` against required API 23. The first full API 23 instrumentation run then exposed 18 runtime failures because `java.time.Instant` and `YearMonth` were missing on Android 6.
+- Implemented `minSdk 23` and official Android core library desugaring (`desugar_jdk_libs:2.0.3`). This removed the runtime date/time failures. The remaining UI failures exposed test assumptions about content already being visible on a 320x480-class screen; corrected tests to scroll the actual lazy lists before asserting their content/actions.
+- GREEN: all 50 Android instrumentation tests passed on isolated API 23 / Android 6, API 25 / Android 7.1.1, and API 27 / Android 8.1 AVDs. AVDs were created under the local Android user profile; existing API 34 AVDs were not wiped or modified. Gradle `testDebugUnitTest assembleDebug` succeeded; min-SDK verifier reported `PASS: APK minSdk 23 is compatible with required API 23 floor.`
+- Built debug APK: `apps/android/app/build/outputs/apk/debug/app-debug.apk`, SHA-256 `0D54F551950FFD5936BC9A8994ACF92702ABF0B7CE304A5C9ED9EB39CED4419E`. Installed and launched by package on Android 8.1 emulator; process observed. Debug BuildConfig still uses emulator-only API/OIDC endpoints.
+- Plan now splits M1.1 (API 23 compatibility, COMPLETE) from M1.2 (configurable endpoints and release HTTPS checks, TODO). M1 as a whole, public access, server autostart and email registration remain incomplete.
+- Next: write endpoint-configuration acceptance tests and finish M1.2 before making a phone-installable APK. Continue to M2/M3 only after checking local Docker/PostgreSQL/Keycloak and safe public HTTPS options. Never publish a backend before auth protects financial routes.
 
 ## Verification evidence
 
