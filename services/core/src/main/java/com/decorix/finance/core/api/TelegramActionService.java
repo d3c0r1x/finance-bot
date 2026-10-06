@@ -27,6 +27,7 @@ import com.decorix.finance.core.api.BudgetApi.Overview;
 import com.decorix.finance.core.api.BudgetApi.BudgetProposalResponse;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
+import com.decorix.finance.core.api.ProductApi.ProductDecisionSelection;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import java.util.List;
@@ -46,10 +47,14 @@ public class TelegramActionService {
     private final ReportService reports;
     private final TransactionTemplate transaction;
     private final ProductPriceHistoryService productHistory;
+    private final AdviceEvidenceService evidence;
+    private final ReceiptService receipts;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public TelegramActionService(TelegramActorContextService actorContexts, TransactionService transactions,
                                  TransactionDraftService drafts, DebtService debts, BudgetService budgets, ReportService reports,
-                                 TransactionTemplate transaction, ProductPriceHistoryService productHistory) {
+                                 TransactionTemplate transaction, ProductPriceHistoryService productHistory,
+                                 AdviceEvidenceService evidence, ReceiptService receipts) {
         this.actorContexts = actorContexts;
         this.transactions = transactions;
         this.drafts = drafts;
@@ -58,6 +63,14 @@ public class TelegramActionService {
         this.reports = reports;
         this.transaction = transaction;
         this.productHistory = productHistory;
+        this.evidence = evidence;
+        this.receipts = receipts;
+    }
+
+    TelegramActionService(TelegramActorContextService actorContexts, TransactionService transactions,
+                          TransactionDraftService drafts, DebtService debts, BudgetService budgets, ReportService reports,
+                          TransactionTemplate transaction, ProductPriceHistoryService productHistory) {
+        this(actorContexts, transactions, drafts, debts, budgets, reports, transaction, productHistory, null, null);
     }
 
     public DashboardSummary dashboardSummary(String actorToken) {
@@ -98,6 +111,26 @@ public class TelegramActionService {
             ActorContext actor = actorContexts.require(request.token(), "receipt.read");
             return productHistory.shopping(actor.tenantId(), actor.userId());
         });
+    }
+
+    public AdviceEvidenceApi.Report doNotBuy(ResolveRequest request) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Do-not-buy request is required");
+        ActorContext actor = transaction.execute(status -> actorContexts.require(request.token(), "receipt.read"));
+        return evidence.get(actor.tenantId(), actor.userId());
+    }
+
+    public AdviceEvidenceApi.Report decideDoNotBuy(ResolveRequest request, String productKey, String action) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Do-not-buy decision is required");
+        ActorContext actor = transaction.execute(status -> actorContexts.require(request.token(), "receipt.write.own"));
+        switch (action) {
+            case "confirm" -> receipts.allowProduct(actor.tenantId(), actor.keycloakSubject(), productKey,
+                    new ProductDecisionSelection("confirmed"));
+            case "allow" -> receipts.allowProduct(actor.tenantId(), actor.keycloakSubject(), productKey,
+                    new ProductDecisionSelection("allowed"));
+            case "revoke" -> receipts.revokeProduct(actor.tenantId(), actor.keycloakSubject(), productKey);
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Do-not-buy action is invalid");
+        }
+        return evidence.get(actor.tenantId(), actor.userId());
     }
 
     public PersonalInflation personalInflation(ResolveRequest request) {

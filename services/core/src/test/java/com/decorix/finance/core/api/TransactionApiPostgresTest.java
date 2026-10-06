@@ -4650,6 +4650,54 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void telegramDoNotBuyActionsUseActorScopeAndPersistHumanDecision() throws Exception {
+        long telegramUserId = newTelegramUserId();
+        String code = com.jayway.jsonpath.JsonPath.read(mvc.perform(post("/api/v1/me/telegram-link")
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.code");
+        mvc.perform(post("/internal/v1/telegram/link-codes/redeem")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"code\":\"" + code + "\",\"telegramUserId\":" + telegramUserId + "}"))
+                .andExpect(status().isOk());
+        String context = mvc.perform(post("/internal/v1/telegram/actor-contexts")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + telegramUserId + ",\"tenantId\":\""
+                                + tenantId + "\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String token = com.jayway.jsonpath.JsonPath.read(context, "$.token");
+        String body = "{\"token\":\"" + token + "\"}";
+        String route = "/internal/v1/telegram/actions/do-not-buy";
+        mvc.perform(post(route).contentType("application/json").content(body))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post(route).header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.reasonCode").value("no_optional_items"));
+        mvc.perform(post(route + "/coffee/confirm")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions")
+                        .with(jwt().jwt(jwt -> jwt.subject(subject))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.confirmedProductKeys[0]").value("coffee"));
+        mvc.perform(post(route + "/coffee/allow")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions")
+                        .with(jwt().jwt(jwt -> jwt.subject(subject))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.productKeys[0]").value("coffee"));
+        mvc.perform(post(route + "/coffee/revoke")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions")
+                        .with(jwt().jwt(jwt -> jwt.subject(subject))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.productKeys").isEmpty());
+    }
+
+    @Test
     void doNotBuyListSeparatesModelGuessesAndScopesReceiptEvidenceToMember() throws Exception {
         var auth = jwt().jwt(token -> token.subject(subject));
         String otherSubject = "keycloak|evidence-other-" + UUID.randomUUID();

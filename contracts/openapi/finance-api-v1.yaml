@@ -1326,6 +1326,56 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { description: Telegram service credential is not configured or shopping history is unavailable }
+  /internal/v1/telegram/actions/do-not-buy:
+    post:
+      operationId: getTelegramDoNotBuyList
+      security:
+        - telegramServiceToken: []
+      description: Resolves the Telegram actor with receipt.read and returns only that member's evidence and decisions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Personal rule-backed blocks and separate model-only guesses
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdviceEvidenceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /internal/v1/telegram/actions/do-not-buy/{productKey}/{action}:
+    parameters:
+      - name: productKey
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[a-zа-я0-9]{1,256}$' }
+      - name: action
+        in: path
+        required: true
+        schema: { type: string, enum: [confirm, allow, revoke] }
+    post:
+      operationId: decideTelegramDoNotBuyProduct
+      security:
+        - telegramServiceToken: []
+      description: Resolves receipt.write.own before persisting the member's explicit decision and returning fresh evidence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Refreshed personal evidence after confirmation, allowance or revocation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdviceEvidenceReport' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /internal/v1/telegram/actions/personal-inflation:
     post:
       operationId: getTelegramPersonalInflation

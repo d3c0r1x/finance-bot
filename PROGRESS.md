@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 07:23, Europe/Moscow.
+Updated: 2026-10-06 08:02, Europe/Moscow.
 
 ## Global plan
 
@@ -53,20 +53,22 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 | F41.1 | Go evidence groups for the personal “do not buy” list | COMPLETE — local and three GitHub workflows GREEN | F40 facts | bd8444f |
 | F41.2a | Confirm/allow/revoke member-local product decisions with audit | COMPLETE — local and four GitHub workflows GREEN | F41.1 | d537b08 |
 | F41.2b | Core evidence API, personal policy overlay and shopping isolation | COMPLETE — local and four GitHub workflows GREEN | F41.2a | 7307fff |
-| F41.3a | RU/EN Web list, guesses and human controls | COMMIT_PENDING — 53 Web tests and production build GREEN | F41.2b | pending |
-| F41.3b | Telegram list and human controls | NOT_IMPLEMENTED | F41.2b | pending |
+| F41.3a | RU/EN Web list, guesses and human controls | COMPLETE — local gates and two GitHub workflows GREEN | F41.2b | 8706159 |
+| F41.3b | Telegram list and human controls | IN PROGRESS — Core actor routes verified; Python gateway remains | F41.2b | pending |
+| F41.3b1 | Actor-scoped Telegram list and decision routes | COMMIT_PENDING — Core and 46 contracts GREEN | F41.2b | pending |
+| F41.3b2 | Telegram command, renderer and callbacks | NOT_IMPLEMENTED | F41.3b1 | pending |
 | F41.3c | Android list and human controls | NOT_IMPLEMENTED | F41.2b | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F41.3a — RU/EN Web exposes personal do-not-buy evidence, separate model guesses, confirm/allow/undo controls and actual shopping block reasons.
-- Status: COMMIT_PENDING — F41.2b `7307fff` is pushed and four GitHub workflows are GREEN; Web 53 tests and production build pass locally.
-- Acceptance: model-only evidence remains labelled a guess; confirmation sends `confirmed` with CSRF; allow sends `allowed`; viewer has no write controls; unavailable evidence is explicit; shopping labels rule-backed and human blocks differently.
-- Data boundary: Web reads Core's member-scoped DTO and sends only explicit human decisions; it never infers or writes a block from model evidence.
+- ID and outcome: F41.3b1 — internal Telegram actions expose the personal list and persist human decisions through actor context.
+- Status: COMMIT_PENDING — focused PostgreSQL acceptance, full Core check and 46 contracts pass locally; Web F41.3a `8706159` is pushed and two GitHub workflows are GREEN.
+- Acceptance: service credentials and actor token required; `receipt.read` reads, `receipt.write.own` decides; confirm/allow/revoke persist the same member-local decisions as Web.
+- Data boundary: Telegram routes resolve tenant and member from actor context; product decisions never accept caller-supplied tenant/member identifiers.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7307fff`.
-- Updated at: 2026-10-06 07:56 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `8706159`.
+- Updated at: 2026-10-06 08:02 Europe/Moscow.
 
 ## Verification evidence
 
@@ -97,6 +99,9 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 | F41.2b GitHub regression | Actions `37415625964`, `37415625735`, `37415625772`, `37415625724` | commit `7307fff` | PASS | Go/contracts, private S3, Core PostgreSQL and bot workflows all completed successfully |
 | F41.3a observed RED | `pnpm --dir apps/web exec vitest run src/DoNotBuyPanel.test.tsx` | test before component | FAIL expected | Missing DoNotBuyPanel import; new Web behavior absent |
 | F41.3a Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | F41.3a worktree | PASS, 53 tests; build | Model guess, confirm and allow with CSRF, viewer read-only, outage, distinct shopping reasons, TypeScript and production bundle |
+| F41.3a GitHub regression | Actions `37416106918`, `37416106876` | commit `8706159` | PASS | Python/contracts and bot test workflows completed successfully |
+| F41.3b1 observed RED | Focused PostgreSQL Telegram action test; OpenAPI contract test | F41.3b1 test before routes | FAIL expected | Internal actor-scoped do-not-buy routes missing |
+| F41.3b1 Core and contracts | `:services:core:check --rerun-tasks --no-daemon`; `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | isolated PostgreSQL `finance_test_f41_20261006` | PASS; 46 contracts | Actor-scoped read/write permissions and persistent human decisions; full Core suite |
 | F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
 | F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, commit `b1e64c4` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
 | F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
@@ -128,7 +133,7 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 
 ## Next action
 
-- Commit and push F41.3a after staged diff review; then implement F41.3b Telegram actor-scoped list and controls.
+- Commit and push F41.3b1 after staged diff review; then implement F41.3b2 Telegram gateway list and controls.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 

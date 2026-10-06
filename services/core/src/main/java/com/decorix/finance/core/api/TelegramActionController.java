@@ -86,6 +86,22 @@ public class TelegramActionController {
         return actions.shopping(request);
     }
 
+    @PostMapping("/actions/do-not-buy")
+    AdviceEvidenceApi.Report doNotBuy(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.doNotBuy(request);
+    }
+
+    @PostMapping("/actions/do-not-buy/{productKey}/{action}")
+    AdviceEvidenceApi.Report decideDoNotBuy(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @PathVariable String productKey, @PathVariable String action, @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.decideDoNotBuy(request, productKey, action);
+    }
+
     @PostMapping("/actions/personal-inflation")
     PersonalInflation personalInflation(
             @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,

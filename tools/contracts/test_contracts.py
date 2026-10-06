@@ -459,6 +459,21 @@ def test_do_not_buy_contract_separates_model_guesses_from_shopping_blocks():
     assert "rule_backed_not_to_buy" in schemas["BlockedShoppingCandidate"]["properties"]["reasonCode"]["enum"]
 
 
+def test_telegram_do_not_buy_actions_require_actor_and_service_credentials():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    for path in ("/internal/v1/telegram/actions/do-not-buy",
+                 "/internal/v1/telegram/actions/do-not-buy/{productKey}/{action}"):
+        operation = spec["paths"][path]["post"]
+        assert operation["security"] == [{"telegramServiceToken": []}]
+        assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "ResolveTelegramActorContext")
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "AdviceEvidenceReport")
+    action = spec["paths"]["/internal/v1/telegram/actions/do-not-buy/{productKey}/{action}"]
+    assert next(parameter for parameter in action["parameters"] if parameter["name"] == "action")["schema"]["enum"] \
+        == ["confirm", "allow", "revoke"]
+
+
 def test_repeat_warnings_only_describe_prior_confirmed_item_evidence():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for path in ("/api/v1/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings",
