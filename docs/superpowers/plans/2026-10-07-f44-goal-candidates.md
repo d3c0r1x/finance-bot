@@ -8,7 +8,7 @@
 - [x] Run the new tests and verify RED is missing F44 behavior.
 - [x] Implement a versioned pure calculator and authenticated handler in the existing `analytics-api`; do not add a deployable or data store.
 - [x] Run focused tests, `go test ./... -count=1`, `go vet ./...`, contract tests, and `git diff --check`.
-- [ ] Commit F44.1 only after GREEN; record evidence in `.agent/PROGRESS.md`.
+- [x] Commit F44.1 only after GREEN; record evidence in `.agent/PROGRESS.md`.
 
 ## F44.2 Core persistence and member API
 

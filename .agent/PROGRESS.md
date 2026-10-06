@@ -66,19 +66,19 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 | F42.5 | Telegram `/recalculate` preview with actor-scoped explicit apply | COMMITTED — local gates GREEN; pushed, GitHub returned no run for the SHA | F42.4 | 1a484bb |
 | F43 | Advice analytics calculation, durable member job, Go worker, Web report | COMPLETE — F43.1–F43.4 pushed; local gates green; GitHub CI did not start | F42 | a911e27 |
 | F44 | Product/group goal candidates, count/sum, one active 30-day goal | IN PROGRESS — F44.1 Go candidate API is locally green; Core persistence and Web surface remain | F43 | pending |
-| F44.1 | Deterministic Go product/group candidates and internal service API | COMMIT_PENDING — focused/full Go and contract gates pass; reviewed diff before commit | F44 | pending |
+| F44.1 | Deterministic Go product/group candidates and internal service API | COMPLETE — `959c750`; focused/full Go and contract gates pass | F44 | 959c750 |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F44.1 — deterministic product/group goal candidates and service-authenticated Go API.
-- Status: COMMIT_PENDING — test-first RED reproduced as missing F44 calculator/API symbols; calculator and `/internal/v1/analytics/goals/candidates` are GREEN. Full Go and contract regression gates pass.
+- ID and outcome: F44.2 — Core member-scoped goal preference, acceptance, and active-goal persistence.
+- Status: ANALYSIS — F44.1 is COMPLETE as `959c750`. Begin F44.2 with PostgreSQL tests for viewer denial, one active goal, fixed 30-day period, immutable accepted unit/target, and member-scoped preference.
 - Acceptance: only established/confirmed harmful products; exclude allowed and model-only guesses; minimum two purchases per 30-day equivalent; count and sum targets follow legacy rounding/minimum-saving rules; groups are count-only and require combined confirmed evidence; stable sorting/limits; strict bounded request and service bearer auth.
-- Changed files: F44 Go calculation/handler/tests, analytics-api route, OpenAPI, analytics golden fixture, contract test, F44 specification/execution plan and parity.
+- Changed files: F44.1 committed. F44.2 tests and Core implementation have not started.
 - User choices: maintain F01–F60 scope; personal MVP first; V2 deferred; preserve 30-day goal promise and one active goal per member.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `b867205` before F44.1 commit; unrelated user-owned untracked files remain untouched.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `959c750`; unrelated user-owned untracked files remain untouched.
 - Runtime: public HTTPS, persistent server and installed Android MVP remain unverified; no deployment or network configuration was changed.
-- Updated at: 2026-10-07 01:58 Europe/Moscow.
+- Updated at: 2026-10-07 02:00 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -1307,3 +1307,10 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 - Telegram `/report` was inspected: it accepts period/scope and returns the legacy finance report DTO, with no route for the stored F43 job/report DTO. F43 stays in Web; no duplicate Telegram calculation was added. Parity now records this intentional difference.
 - F43.4 and plan/parity updates committed as `a911e27` (`feat(F43.4): expose advice analytics report`) and pushed to `origin/feat/saas-rewrite`. `gh run list --commit a911e27` returned `[]`; remote CI did not start and is unverified.
 - F43 feature work is complete. This does not complete personal MVP operations: no persistent server, public HTTPS, or Android emulator-installed MVP delivery was verified here. Continue with the next V1 feature goal F44 using test-first gates, while keeping MVP deployment gates visible in the global plan.
+
+## E4.74 F44.1 deterministic candidates — 2026-10-07 02:00 MSK
+
+- Created `.agent/specs/F44-goal-candidates.md` and an execution plan splitting F44 into Go candidates (F44.1), Core persistence/API (F44.2), and Web UI (F44.3). F45 lifecycle/history and F46 outcome delivery remain separate.
+- Baseline `go test ./advice -count=1` passed before changes. New tests first observed compile RED for missing `F44Request`, `BuildF44Candidates`, and `NewF44Handler`; an early fixture then caught a missing sweets/snacks category mapping and was corrected to the verified legacy behavior.
+- F44.1 adds decimal-based cadence and monthly spending candidates, count/sum targets, legacy category stems, allowed/guess handling, group count-only suggestions, meaningful minimum savings, stable sorted limits, combined 50,000-input bound, strict payload decoding and service-bearer endpoint in the existing `analytics-api`. OpenAPI and a golden fixture cover the interface.
+- GREEN: Go `test ./... -count=1` and `go vet ./...`; full contract suite 51/51; `git diff --check`. F44.1 committed as `959c750` (`feat(F44.1): calculate goal candidates`). Next: F44.2 Core PostgreSQL acceptance tests before implementation.
