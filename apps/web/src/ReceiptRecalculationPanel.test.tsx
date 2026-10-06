@@ -91,6 +91,29 @@ describe('ReceiptRecalculationPanel', () => {
     expect(screen.queryByText(/Изменение: .*0\.00/)).not.toBeInTheDocument();
   });
 
+  it('shows saved recalculation snapshots through the member history API', async () => {
+    const run = {
+      runId: 'run-old', algorithmVersion: 'receipt-basket.v1', state: 'applied', checked: 4,
+      updateCount: 2, changedCount: 1, createdAt: '2026-10-06T12:00:00Z', appliedAt: '2026-10-06T12:01:00Z',
+      impact: preview.impact,
+    };
+    const change = preview.changes[0];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/bff/csrf') return json({ token: 'csrf' });
+      if (url.includes('/review-recalculations?')) return json({ runs: [run], nextCursor: null });
+      if (url.includes('/review-recalculations/run-old?')) return json({ run, changes: [change], nextCursor: null });
+      throw new Error(`Unexpected request ${url}`);
+    }));
+    mount();
+
+    fireEvent.click(screen.getByRole('button', { name: 'История пересчётов' }));
+    expect(await screen.findByText(/applied · Проверено позиций: 4/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Показать сохранённые изменения' }));
+    expect(await screen.findByText('Старое: neutral · old reason')).toBeInTheDocument();
+    expect(screen.getByText('Новое: unnecessary · Current rule')).toBeInTheDocument();
+  });
+
   it('drops an older preview when refreshing it fails', async () => {
     let attempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

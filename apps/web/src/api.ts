@@ -184,6 +184,15 @@ export type ReceiptRecalculationApplyResult = {
   runId: string; algorithmVersion: string; state: 'applied'; appliedCount: number;
   changedCount: number; impact: ReceiptRecalculationImpact | null; changes: ReceiptRecalculationChange[];
 };
+export type ReceiptRecalculationRun = {
+  runId: string; algorithmVersion: string; state: 'previewed' | 'applied'; checked: number;
+  updateCount: number; changedCount: number; createdAt: string; appliedAt: string | null;
+  impact: ReceiptRecalculationImpact | null;
+};
+export type ReceiptRecalculationHistoryPage = { runs: ReceiptRecalculationRun[]; nextCursor: string | null };
+export type ReceiptRecalculationRunDetail = {
+  run: ReceiptRecalculationRun; changes: ReceiptRecalculationChange[]; nextCursor: string | null;
+};
 export type ProductCatalogCard = {
   productName: string; purchaseCount: number; usualUnitPrice: string; hasBaseline: boolean;
   baselineUnitPrice: string | null; lastUnitPrice: string; lastPurchasedAt: string; lastMerchant: string | null;
@@ -445,6 +454,18 @@ export const api = {
   applyReceiptRecalculation: (tenantId: string, runId: string) => request<ReceiptRecalculationApplyResult>(
     `/bff/tenants/${tenantId}/review-recalculations/apply`, { method: 'POST', body: JSON.stringify({ runId }) },
   ),
+  getReceiptRecalculationHistory: (tenantId: string, cursor?: string) => {
+    const query = new URLSearchParams({ limit: '20' });
+    if (cursor) query.set('cursor', cursor);
+    return request<ReceiptRecalculationHistoryPage>(`/bff/tenants/${tenantId}/review-recalculations?${query}`);
+  },
+  getReceiptRecalculationRun: (tenantId: string, runId: string, cursor?: string) => {
+    const query = new URLSearchParams({ limit: '100' });
+    if (cursor) query.set('cursor', cursor);
+    return request<ReceiptRecalculationRunDetail>(
+      `/bff/tenants/${tenantId}/review-recalculations/${runId}?${query}`,
+    );
+  },
   getProductCatalog: (tenantId: string, query: string) => {
     const search = query.trim();
     return request<ProductCatalogResponse>(`/bff/tenants/${tenantId}/products${search ? `?query=${encodeURIComponent(search)}` : ''}`);

@@ -1253,3 +1253,13 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 - `gh run list --commit 1a484bb` returned `[]`; GitHub CI is unverified.
 - Worktree still contains only unrelated untracked user data; these files remain untouched.
 - Next: inspect the plan's job/batch target and add member-scoped run history with meaningful pagination and bounded batch behavior.
+
+## E4.68 F42.6 member-scoped recalculation history — 2026-10-07 00:25 MSK
+
+- Extended F42 in `PLAN.md` and parity acceptance: retained history is owner-scoped, run pages default to 20, change pages cap at 100, and recalculation input remains capped at 50,000 items. This records concrete bounds for the existing explicit durable preview/apply flow; it does not change architecture or financial behavior.
+- Added Core API/BFF endpoints to list newest runs with stable `(created_at, id)` cursor pagination and read stored old/new snapshots with UUID keyset pages. Queries require active membership and scope runs to the actor's `owner_user_id`. Invalid cursors/limits return 400; foreign/missing runs return 404.
+- Web shows saved run state/counts/impact and stored before/after decisions. It loads run pages and change pages on demand and invalidates history after preview/apply.
+- TDD: PostgreSQL API tests were added before service/controller implementation. First Gradle attempt showed RED at compilation because the cursor record was missing; added the record, then Core compilation/check passed. This was a compile RED, not an observed route-behavior RED.
+- Initial run skipped PostgreSQL tests because test connection variables were unset. Reused the pre-existing isolated `finance_test_codex_20261004` database on local PostgreSQL 18.6 at port 55432; did not alter the legacy `finance_test` database. Focused recalculation preview/history tests passed against PostgreSQL. Full `:services:core:check` then passed: 245 tests, 0 failures, 2 skips; PostgreSQL `TransactionApiPostgresTest` passed 102/102 with 0 skips.
+- Verification: Web tests 60/60 and production build pass; contract tests 47/47 pass; full Core check and live PostgreSQL acceptance pass; `git diff --check` passes. The first compile attempt caught missing `HistoryCursor`; fixed before the passing API run. Tests were written before endpoint implementation, but no feature-level RED was observed because first executable run hit that compile error. Existing untracked user files remain untouched.
+- No commit yet. GitHub CI status not queried for this change. Next: commit/push F42.6 and check whether GitHub starts CI. M2 public HTTPS and alltime runtime remain separate deployment gates.

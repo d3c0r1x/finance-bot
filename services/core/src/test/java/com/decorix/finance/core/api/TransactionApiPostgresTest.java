@@ -1884,6 +1884,14 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.state").value("applied"))
                 .andExpect(jsonPath("$.appliedCount").value(1))
                 .andExpect(jsonPath("$.impact.optionalSpendDelta").value("-123.45"));
+        mvc.perform(get("/api/v1/tenants/{tenantId}/review-recalculations/{runId}", tenantId, runId).with(auth)
+                        .param("limit", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.run.state").value("applied"))
+                .andExpect(jsonPath("$.changes.length()").value(1))
+                .andExpect(jsonPath("$.changes[0].beforeVerdict").value("unnecessary"))
+                .andExpect(jsonPath("$.changes[0].afterVerdict").value("neutral"))
+                .andExpect(jsonPath("$.changes[0].lineSum").value("123.45"));
         mvc.perform(post("/api/v1/tenants/" + tenantId + "/review-recalculations/apply").with(auth)
                         .contentType("application/json").content("{\"runId\":\"" + runId + "\"}"))
                 .andExpect(status().isOk())
@@ -1960,6 +1968,49 @@ class TransactionApiPostgresTest {
         org.junit.jupiter.api.Assertions.assertEquals(new BigDecimal("45.00"), persisted.get("amount"));
         org.junit.jupiter.api.Assertions.assertEquals("previewed", persisted.get("run_state"));
         org.junit.jupiter.api.Assertions.assertEquals(0L, ((Number) persisted.get("audit_count")).longValue());
+    }
+
+    @Test
+    void recalculationHistoryIsMemberScopedAndUsesStableCursorPages() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        mvc.perform(post("/api/v1/tenants/{tenantId}/review-recalculations/preview", tenantId).with(auth)
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/tenants/{tenantId}/review-recalculations/preview", tenantId).with(auth)
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isOk());
+
+        var first = mvc.perform(get("/api/v1/tenants/{tenantId}/review-recalculations", tenantId).with(auth)
+                        .param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runs.length()").value(1))
+                .andExpect(jsonPath("$.runs[0].state").value("previewed"))
+                .andExpect(jsonPath("$.runs[0].algorithmVersion").value("receipt-basket.v1"))
+                .andExpect(jsonPath("$.nextCursor").isNotEmpty())
+                .andReturn();
+        String cursor = com.jayway.jsonpath.JsonPath.read(
+                first.getResponse().getContentAsString(), "$.nextCursor");
+        String firstRun = com.jayway.jsonpath.JsonPath.read(
+                first.getResponse().getContentAsString(), "$.runs[0].runId");
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/review-recalculations", tenantId).with(auth)
+                        .param("limit", "1").param("cursor", cursor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.runs.length()").value(1))
+                .andExpect(jsonPath("$.runs[0].runId").value(org.hamcrest.Matchers.not(firstRun)))
+                .andExpect(jsonPath("$.nextCursor").doesNotExist());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/review-recalculations", tenantId).with(auth)
+                        .param("limit", "1").param("cursor", "invalid"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/review-recalculations", tenantId)
+                        .with(jwt().jwt(token -> token.subject("unlinked-user"))))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/review-recalculations", tenantId).with(auth)
+                        .param("limit", "101"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/review-recalculations/{runId}", tenantId, UUID.randomUUID())
+                        .with(auth))
+                .andExpect(status().isNotFound());
     }
 
     @Test

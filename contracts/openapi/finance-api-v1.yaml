@@ -3584,6 +3584,42 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '413': { description: Receipt history exceeds the recalculation bound }
+  /api/v1/tenants/{tenantId}/review-recalculations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      - name: cursor
+        in: query
+        schema: { type: string }
+    get:
+      operationId: listReceiptVerdictRecalculations
+      description: Lists only runs initiated for the authenticated member. Cursor pages are newest first.
+      responses:
+        '200': { description: Member-scoped run history, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationHistoryPage' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/tenants/{tenantId}/review-recalculations/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      - name: cursor
+        in: query
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getReceiptVerdictRecalculation
+      description: Returns the stored old/new verdict snapshot in bounded pages.
+      responses:
+        '200': { description: Member-owned recalculation snapshot, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationRunDetail' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/tenants/{tenantId}/review-recalculations/apply:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -3899,6 +3935,42 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '413': { description: Receipt history exceeds the recalculation bound }
+  /bff/tenants/{tenantId}/review-recalculations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      - name: cursor
+        in: query
+        schema: { type: string }
+    get:
+      operationId: listBrowserReceiptVerdictRecalculations
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Member-scoped run history, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationHistoryPage' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /bff/tenants/{tenantId}/review-recalculations/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      - name: limit
+        in: query
+        schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      - name: cursor
+        in: query
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserReceiptVerdictRecalculation
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Stored member-owned old/new verdict snapshot page, content: { application/json: { schema: { $ref: '#/components/schemas/ReceiptRecalculationRunDetail' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /bff/tenants/{tenantId}/review-recalculations/apply:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4781,6 +4853,53 @@ components:
           type: array
           maxItems: 50000
           items: { $ref: '#/components/schemas/ReceiptRecalculationChange' }
+    ReceiptRecalculationHistoryPage:
+      type: object
+      additionalProperties: false
+      required: [runs, nextCursor]
+      properties:
+        runs:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/ReceiptRecalculationRun' }
+        nextCursor:
+          anyOf:
+            - { type: string }
+            - { type: 'null' }
+    ReceiptRecalculationRun:
+      type: object
+      additionalProperties: false
+      required: [runId, algorithmVersion, state, checked, updateCount, changedCount, createdAt, appliedAt, impact]
+      properties:
+        runId: { type: string, format: uuid }
+        algorithmVersion: { type: string, const: receipt-basket.v1 }
+        state: { type: string, enum: [previewed, applied] }
+        checked: { type: integer, minimum: 0, maximum: 50000 }
+        updateCount: { type: integer, minimum: 0, maximum: 50000 }
+        changedCount: { type: integer, minimum: 0, maximum: 50000 }
+        createdAt: { type: string, format: date-time }
+        appliedAt:
+          anyOf:
+            - { type: string, format: date-time }
+            - { type: 'null' }
+        impact:
+          anyOf:
+            - { $ref: '#/components/schemas/ReceiptRecalculationImpact' }
+            - { type: 'null' }
+    ReceiptRecalculationRunDetail:
+      type: object
+      additionalProperties: false
+      required: [run, changes, nextCursor]
+      properties:
+        run: { $ref: '#/components/schemas/ReceiptRecalculationRun' }
+        changes:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/ReceiptRecalculationChange' }
+        nextCursor:
+          anyOf:
+            - { type: string, format: uuid }
+            - { type: 'null' }
     ReceiptRecalculationApplyRequest:
       type: object
       additionalProperties: false

@@ -5,7 +5,10 @@ import com.decorix.finance.core.api.AdviceWasteApi.ReceiptLine;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyRequest;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyResult;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.Change;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.HistoryPage;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.Preview;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.RunDetail;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.RunSummary;
 import com.decorix.finance.core.domain.ReceiptBasketPolicy;
 import com.decorix.finance.core.domain.ProductIdentityPolicy;
 import com.decorix.finance.core.domain.ReceiptRecalculationPolicy;
@@ -14,7 +17,9 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -51,6 +56,103 @@ public class ReceiptRecalculationService {
         Impact impact = impactClient.calculate(new AdviceRecalculationImpactApi.Request(
                 prepared.before(), prepared.after())).withCurrency(prepared.currency());
         return transaction.execute(status -> persistPreview(tenantId, subject, prepared, impact));
+    }
+
+    public HistoryPage history(UUID tenantId, String subject, int limit, String cursor) {
+        if (limit < 1 || limit > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "History limit must be 1..100");
+        HistoryCursor before = cursor == null || cursor.isBlank() ? null : decodeCursor(cursor);
+        return transaction.execute(status -> {
+            Actor actor = actor(tenantId, subject);
+            String sql = """
+                    SELECT id, algorithm_version, state, checked_count, update_count, changed_count,
+                           created_at, applied_at, impact_report::text AS impact_report
+                    FROM recalculation_runs
+                    WHERE tenant_id = ? AND owner_user_id = ?
+                    """ + (before == null ? "" : " AND (created_at, id) < (?, ?)") + """
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """;
+            List<RunSummary> rows = before == null
+                    ? jdbc.query(sql, (rs, row) -> summary(rs), tenantId, actor.userId(), limit + 1)
+                    : jdbc.query(sql, (rs, row) -> summary(rs), tenantId, actor.userId(),
+                            Timestamp.from(before.createdAt()), before.runId(), limit + 1);
+            boolean hasMore = rows.size() > limit;
+            List<RunSummary> page = List.copyOf(rows.subList(0, Math.min(rows.size(), limit)));
+            return new HistoryPage(page, hasMore ? encodeCursor(page.get(page.size() - 1)) : null);
+        });
+    }
+
+    public RunDetail historyDetail(UUID tenantId, String subject, UUID runId, int limit, String cursor) {
+        if (limit < 1 || limit > 100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "History limit must be 1..100");
+        UUID afterItem;
+        try {
+            afterItem = cursor == null || cursor.isBlank() ? null : UUID.fromString(cursor);
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "History cursor is invalid", invalid);
+        }
+        return transaction.execute(status -> {
+            Actor actor = actor(tenantId, subject);
+            List<RunSummary> runs = jdbc.query("""
+                    SELECT id, algorithm_version, state, checked_count, update_count, changed_count,
+                           created_at, applied_at, impact_report::text AS impact_report
+                    FROM recalculation_runs
+                    WHERE tenant_id = ? AND owner_user_id = ? AND id = ?
+                    """, (rs, row) -> summary(rs), tenantId, actor.userId(), runId);
+            if (runs.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recalculation run not found");
+            String sql = """
+                    SELECT receipt_item_id, expected_item_version, line_sum::text AS line_sum,
+                           before_state ->> 'name' AS name,
+                           before_state ->> 'verdict' AS before_verdict,
+                           before_state ->> 'reason' AS before_reason,
+                           before_state ->> 'action' AS before_action,
+                           before_state ->> 'source' AS before_source,
+                           after_state ->> 'verdict' AS after_verdict,
+                           after_state ->> 'reason' AS after_reason,
+                           after_state ->> 'action' AS after_action,
+                           after_state ->> 'source' AS after_source, changed
+                    FROM recalculation_changes WHERE tenant_id = ? AND run_id = ?
+                    """ + (afterItem == null ? "" : " AND receipt_item_id > ?") + " ORDER BY receipt_item_id LIMIT ?";
+            List<Change> rows = afterItem == null
+                    ? jdbc.query(sql, changeMapper(), tenantId, runId, limit + 1)
+                    : jdbc.query(sql, changeMapper(), tenantId, runId, afterItem, limit + 1);
+            boolean hasMore = rows.size() > limit;
+            List<Change> page = List.copyOf(rows.subList(0, Math.min(rows.size(), limit)));
+            String nextCursor = hasMore ? page.get(page.size() - 1).itemId().toString() : null;
+            return new RunDetail(runs.get(0), page, nextCursor);
+        });
+    }
+
+    private static org.springframework.jdbc.core.RowMapper<Change> changeMapper() {
+        return (rs, row) -> new Change(rs.getObject("receipt_item_id", UUID.class), rs.getString("name"),
+                rs.getString("line_sum"), rs.getLong("expected_item_version"), rs.getString("before_verdict"),
+                rs.getString("before_reason"), rs.getString("before_action"), rs.getString("before_source"),
+                rs.getString("after_verdict"), rs.getString("after_reason"), rs.getString("after_action"),
+                rs.getString("after_source"), rs.getBoolean("changed"));
+    }
+
+    private RunSummary summary(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Timestamp createdAt = rs.getTimestamp("created_at");
+        Timestamp appliedAt = rs.getTimestamp("applied_at");
+        return new RunSummary(rs.getObject("id", UUID.class), rs.getString("algorithm_version"),
+                rs.getString("state"), rs.getInt("checked_count"), rs.getInt("update_count"),
+                rs.getInt("changed_count"), createdAt.toInstant(), appliedAt == null ? null : appliedAt.toInstant(),
+                readImpact(rs.getString("impact_report")));
+    }
+
+    private static String encodeCursor(RunSummary run) {
+        String value = run.createdAt() + "|" + run.runId();
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static HistoryCursor decodeCursor(String cursor) {
+        try {
+            String value = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            int separator = value.indexOf('|');
+            if (separator <= 0 || separator == value.length() - 1) throw new IllegalArgumentException();
+            return new HistoryCursor(Instant.parse(value.substring(0, separator)),
+                    UUID.fromString(value.substring(separator + 1)));
+        } catch (RuntimeException invalid) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "History cursor is invalid", invalid);
+        }
     }
 
     private PreparedPreview prepare(UUID tenantId, String subject) {
@@ -400,6 +502,7 @@ public class ReceiptRecalculationService {
     }
 
     private record Actor(UUID userId, String role) {}
+    private record HistoryCursor(Instant createdAt, UUID runId) {}
     private record Run(UUID id, String algorithmVersion, String state, int updateCount, int changedCount, Impact impact) {}
     private record StoredLine(UUID receiptId, UUID itemId, String name, BigDecimal lineSum, String verdict,
                               String reason, String action, String source, long version, Instant purchasedAt) {}

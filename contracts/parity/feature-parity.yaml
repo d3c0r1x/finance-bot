@@ -634,14 +634,14 @@ features:
   - id: F42
     feature: "Пересчёт старых verdict по текущим правилам и отчёт изменений"
     target: "J explicit recalculation job; G пакетная подготовка"
-    acceptance: "Только явный запуск; старый/новый verdict и причина сохранены; суммы чеков неизменны"
-    status: in_progress
+    acceptance: "Только явный запуск; старый/новый verdict и причина сохранены; суммы чеков неизменны; история запусков доступна владельцу с keyset-пагинацией (20 запусков, до 100 изменений на странице); Core ограничивает перерасчёт 50 000 позициями"
+    status: complete
     tests:
       - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptRecalculationPolicyTest.java
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - apps/web/src/ReceiptRecalculationPanel.test.tsx
     evidence:
-      - "F42.1 policy is pushed as 6f80afc. F42.2 adds RLS-protected durable preview snapshots, explicit member-scoped API/BFF preview and apply, stale-preview 412, idempotent retry, unchanged receipt totals and review audit. F42.4 adds authenticated Go impact from equal before/after receipt facts, stores the exact report and profile currency in Core V36, and presents the delta or unavailable reason in Web. F42.5 adds private Telegram /recalculate with actor-scoped preview, stale callback rejection, viewer denial and separate Apply button. Local GREEN: Go test/vet, Core 244 tests (0 failures, 2 skipped), Web 59/59 plus TypeScript/Vite build, Telegram gateway 95/95, contracts 47/47. F42.4 commit 659b537 and F42.5 commit 1a484bb are pushed; GitHub returned no run for those SHAs. Accessible run history and bounded batch execution remain."
+      - "F42.1 policy is pushed as 6f80afc. F42.2 adds RLS-protected durable preview snapshots, explicit member-scoped API/BFF preview and apply, stale-preview 412, idempotent retry, unchanged receipt totals and review audit. F42.4 adds authenticated Go impact from equal before/after receipt facts, stores the exact report and profile currency in Core V36, and presents the delta or unavailable reason in Web. F42.5 adds private Telegram /recalculate with actor-scoped preview, stale callback rejection, viewer denial and separate Apply button. F42.6 adds owner-scoped run history: stable cursor pages for 20 runs and bounded 100-change detail pages; Core rejects limits outside 1..100 and retains existing 50,000-item recalculation cap. Web displays stored run status, impact delta and before/after decisions. GREEN: isolated PostgreSQL 18.6 Core `:check`, 245 tests/0 failures/2 skips; `TransactionApiPostgresTest` 102/102; Web 60/60 plus production build; contracts 47/47; `git diff --check`. GitHub CI and runtime/public HTTPS remain separate gates."
     intentional_differences: []
   - id: F43
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"
