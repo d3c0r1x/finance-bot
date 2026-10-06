@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 13:14, Europe/Moscow.
+Updated: 2026-10-06 13:17, Europe/Moscow.
 
 ## Global plan
 
@@ -68,7 +68,7 @@ Updated: 2026-10-06 13:14, Europe/Moscow.
 - Data boundary: Android parses Core evidence and decision DTOs; tenant switch clears cached advice/decisions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
 - Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `cdc51c9`; F41.3c files modified in working tree.
-- Updated at: 2026-10-06 13:14 Europe/Moscow.
+- Updated at: 2026-10-06 13:17 Europe/Moscow.
 
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
@@ -101,8 +101,16 @@ Updated: 2026-10-06 13:14, Europe/Moscow.
 - Release builds depend on `validateReleaseEndpoints`; it requires both values, HTTPS, public hosts, and a root origin for the Core API. Explicit checks: HTTPS endpoints pass; missing values, HTTP and `192.168.1.50` fail. The endpoint unit test passes for both injected and default debug values.
 - Regression: full Android instrumentation 50/50 passed on API 23/25/27 before this BuildConfig-only change; OIDC sign-in screen smoke 1/1 passed on API 27 after it. `testDebugUnitTest assembleDebug` succeeds with no properties. Debug APK installed and launched on API 27, SHA-256 `6BF718140D420BCA39A88CEF2DAE8AE9C3F2D2465B4C4AC5D17497364CCE8B93`; APK floor verifier passes (`minSdk 23`).
 - M1.2 code is complete; no actual public API/OIDC endpoint exists yet. Release APK for a phone therefore remains blocked on M2/M3. Tailscale service is running, but `tailscale funnel status` and `tailscale serve status` report `No serve config`; no Docker/Podman, PostgreSQL, Keycloak or service listeners are present. No public tunnel was opened.
-- Commit `10882fb` (`fix(android): support API 23 with desugaring`) pushed; GitHub tests workflow `37447430201` completed successfully. Endpoint configuration changes remain uncommitted pending regression and review.
-- Next: complete endpoint configuration commit after checks, inspect CI; M2 must provision a repeatable database/Core/Keycloak runtime, then M3 may configure Funnel only after auth is protected and external HTTPS can be tested.
+- Commit `10882fb` (`fix(android): support API 23 with desugaring`) pushed; GitHub tests workflow `37447430201` completed successfully. Endpoint configuration was committed and pushed as `1e99c2e` after local regression.
+- Next: inspect CI for `1e99c2e`. M2 must provision a repeatable database/Core/Keycloak runtime, then M3 may configure Funnel only after auth is protected and external HTTPS can be tested.
+
+## E4.60 Personal MVP M2 environment audit — 2026-10-06 13:17 MSK
+
+- Confirmed no Docker, Podman, Keycloak server runtime, or cloudflared command. The Tailscale Windows service is running; `tailscale funnel status` and `tailscale serve status` both return `No serve config`.
+- A local PostgreSQL process listens at `127.0.0.1:55438` from the Codex-managed runtime cache. It is temporary test infrastructure; do not use as the personal app's durable store. No app/API listeners on 5432, 8080 or 8081. `ops/keycloak/realm-finance.json` is configuration only, not an active Keycloak.
+- M2 is not implemented; server autostart, durable application database, Keycloak, backups/readiness, and restart recovery remain unverified. No public tunnel was opened. User's Cloudflare screenshot still shows a Worker build, not proof of a deployed Java Core API.
+- Email sender/domain still absent, so real email verification remains a hard end-to-end dependency. Never fake a successful confirmation.
+- M1 work pushed: `10882fb` and `1e99c2e`; endpoint commit CI is running as GitHub workflow `37448579789` at last check. Next: inspect CI, then provision durable local service components without opening public ingress until auth and email verification are protected.
 
 ## Verification evidence
 
