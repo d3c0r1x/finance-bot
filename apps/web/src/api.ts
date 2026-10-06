@@ -163,6 +163,20 @@ export type ProductPriceComparison = {
   relative: string | null; signal: boolean; direction: 'up' | 'down' | null;
   priorPurchases: number; history: ProductPricePoint[];
 };
+export type ReceiptRecalculationChange = {
+  itemId: string; name: string; lineSum: string | null; itemVersion: number;
+  beforeVerdict: string | null; beforeReason: string | null; beforeAction: string | null; beforeSource: string | null;
+  afterVerdict: string; afterReason: string | null; afterAction: string | null; afterSource: string;
+  changed: boolean;
+};
+export type ReceiptRecalculationPreview = {
+  runId: string; algorithmVersion: string; state: 'previewed'; checked: number; updateCount: number;
+  changedCount: number; changes: ReceiptRecalculationChange[];
+};
+export type ReceiptRecalculationApplyResult = {
+  runId: string; algorithmVersion: string; state: 'applied'; appliedCount: number;
+  changedCount: number; changes: ReceiptRecalculationChange[];
+};
 export type ProductCatalogCard = {
   productName: string; purchaseCount: number; usualUnitPrice: string; hasBaseline: boolean;
   baselineUnitPrice: string | null; lastUnitPrice: string; lastPurchasedAt: string; lastMerchant: string | null;
@@ -418,6 +432,12 @@ export const api = {
     const query = new URLSearchParams({ receiptId, itemId });
     return request<ProductPriceComparison>(`/bff/tenants/${tenantId}/products/price-history?${query}`);
   },
+  previewReceiptRecalculation: (tenantId: string) => request<ReceiptRecalculationPreview>(
+    `/bff/tenants/${tenantId}/review-recalculations/preview`, { method: 'POST' },
+  ),
+  applyReceiptRecalculation: (tenantId: string, runId: string) => request<ReceiptRecalculationApplyResult>(
+    `/bff/tenants/${tenantId}/review-recalculations/apply`, { method: 'POST', body: JSON.stringify({ runId }) },
+  ),
   getProductCatalog: (tenantId: string, query: string) => {
     const search = query.trim();
     return request<ProductCatalogResponse>(`/bff/tenants/${tenantId}/products${search ? `?query=${encodeURIComponent(search)}` : ''}`);

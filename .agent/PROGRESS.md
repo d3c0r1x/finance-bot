@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 23:52, Europe/Moscow.
+Updated: 2026-10-06 23:36, Europe/Moscow.
 
 ## Global plan
 
@@ -61,17 +61,18 @@ Updated: 2026-10-06 23:52, Europe/Moscow.
 | F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — Core preview/apply and durable audit complete; client actions and batch history remain | F41 | pending |
 | F42.1 | Deterministic preview policy for eligible receipt lines | COMPLETE — local Core regression passed | F42 | 6f80afc |
 | F42.2 | Persist preview, apply safely, audit and report changes through Core API | COMMITTED — local PostgreSQL/Core checks pass; contract pytest unavailable, GitHub run not found | F42.1 | d41888c |
+| F42.3 | Web preview and explicit apply flow for receipt verdict recalculation | COMMIT_PENDING — Web 57/57 and production build pass | F42.2 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F42.2 — persist receipt verdict previews and apply them with stale-state protection and audit.
-- Status: COMMITTED — `d41888c` pushed; observed RED for missing route; PostgreSQL acceptance and full Core check GREEN. Contract pytest unavailable locally; no GitHub run found.
-- Acceptance: preview makes no financial writes; apply changes only eligible receipt verdict fields; preserves receipt/transaction totals; stores before/after snapshot; stale state returns 412 without partial writes; retry is idempotent; tenant/member scope enforced.
-- Changed files: Core recalculation API/service/controller, migration V35, OpenAPI schemas/routes, PostgreSQL acceptance tests, nullable historical line sum handling, parity and this progress log.
+- ID and outcome: F42.3 — let Web users safely preview and explicitly apply recalculation in the receipts area.
+- Status: COMMIT_PENDING — observed RED for missing component and stale preview surviving refresh failure; focused 3/3 and full Web 57/57 pass, production build passes.
+- Acceptance: writer can request preview, compare old/new verdict and reason, then explicitly apply; viewer sees no controls; UI states receipt/transaction totals remain unchanged; reports refresh after apply.
+- Changed files: `ReceiptRecalculationPanel.tsx`, focused tests, API types/client, receipts integration, parity and this progress log.
 - User choices: maintain F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, no placeholder financial data. Personal MVP takes priority; V2 remains deferred.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `d41888c`; only unrelated user-owned untracked files remain.
-- Updated at: 2026-10-06 23:52 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `489ab66` plus uncommitted F42.3 changes; unrelated user-owned untracked files remain.
+- Updated at: 2026-10-06 23:36 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -1206,4 +1207,14 @@ Updated: 2026-10-06 23:52, Europe/Moscow.
 - Historical receipt line sum may be null; preview preserves null without inventing a value. OpenAPI declares API and CSRF-protected BFF routes.
 - GREEN: targeted PostgreSQL recalculation tests passed; full `:services:core:check --no-daemon` passed, 241 tests, 0 failures, 2 skipped. `git diff --check` passed. Contract pytest NOT_RUN: local Python environment has no pytest/PyYAML/jsonschema; CI contract gate remains required.
 - F42.1 `6f80afc` and F42.2 `d41888c` are pushed. GitHub Actions returned no run for `d41888c`; remote gates remain unverified. M2 runtime remains BLOCKED; test PostgreSQL is temporary Codex infrastructure and public ingress remains closed.
-- Next: add user-facing preview/apply flow and remaining F42 batch/change-history behavior. Preserve unrelated untracked files.
+- Next: commit and push F42.3; then implement Telegram controls and remaining F42 batch/change-history behavior. Preserve unrelated untracked files.
+
+
+## E4.63 F42.3 Web preview and explicit apply — 2026-10-06 23:36 MSK
+
+- Observed RED: focused Vitest first failed because `ReceiptRecalculationPanel` did not exist. Added stale-preview failure case, observed an old apply action remain after a failed refresh, then cleared the stored preview before retry.
+- Added RU/EN Web panel in receipts. Writers see explicit preview, old/new verdict and reason, item amount, checked/update/changed counts, and separate apply action. Viewers receive no controls. No apply request runs before the user clicks apply.
+- Apply success invalidates report and summary queries. Stale/apply errors clear preview so user can request a current one. UI states receipt and transaction totals stay unchanged.
+- GREEN: focused Vitest 3/3; full `pnpm --dir apps/web test` 57/57; `pnpm --dir apps/web build` passed (`tsc -b` and Vite production build).
+- F42.2 `d41888c` is pushed; GitHub has no run for that commit. M2 runtime remains BLOCKED; no server restart or deployment is possible because no persistent Core runtime exists.
+- Next: stage only F42.3-owned files, review diff, commit and push; then implement remaining F42 batch/history and Telegram flow.

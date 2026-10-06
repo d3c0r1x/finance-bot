@@ -639,8 +639,9 @@ features:
     tests:
       - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptRecalculationPolicyTest.java
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/ReceiptRecalculationPanel.test.tsx
     evidence:
-      - "F42.1 policy is pushed as 6f80afc. F42.2 adds RLS-protected durable preview snapshots, explicit member-scoped API/BFF preview and apply, stale-preview 412, idempotent retry, unchanged receipt totals and review audit. Targeted PostgreSQL acceptance and full Core check pass locally; contract validation awaits GitHub CI. Client controls and batch/change-history parity remain."
+      - "F42.1 policy is pushed as 6f80afc. F42.2 adds RLS-protected durable preview snapshots, explicit member-scoped API/BFF preview and apply, stale-preview 412, idempotent retry, unchanged receipt totals and review audit. Targeted PostgreSQL acceptance and full Core check pass locally; contract pytest unavailable locally and GitHub run not found. Web preview/apply 57 tests and production build pass locally; Telegram controls and batch/change-history parity remain."
     intentional_differences: []
   - id: F43
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"

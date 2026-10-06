@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type CreateReceipt, type ProductPriceComparison, type Receipt, type ReceiptItem, type ReceiptItemInput } from './api';
+import { ReceiptRecalculationPanel } from './ReceiptRecalculationPanel';
 
 type Language = 'ru' | 'en';
 
@@ -318,6 +319,7 @@ export function ReceiptsPanel({ tenantId, language, canWrite }: {
     && !(candidateList.length > 0 && receipt.duplicateDecision === 'unknown'));
 
   return <section className="transactions-layout" aria-label={t.title}>
+    <ReceiptRecalculationPanel tenantId={tenantId} language={language} canWrite={canWrite} />
     <form className="transaction-form panel" aria-label={t.uploadPhoto} onSubmit={(event) => {
       event.preventDefault();
       if (photoFile) uploadPhoto.mutate({ file: photoFile, key: photoKey });
