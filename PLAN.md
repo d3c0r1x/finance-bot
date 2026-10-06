@@ -559,7 +559,7 @@ CSV/другие банки/сканированные PDF — дальнейш�
 | `/products`, `/products/:id` | Каталог, поиск, история, медиана, магазин, price chart | F33–F34 |
 | `/shopping` | «Пора купить», bought/muted/blocked с объяснениями, copy list | F35–F36 |
 | `/analytics` | Inflation, recurring, food pace, waste, effects, trend, savings ceiling | F37–F43 |
-| `/goals` | Count/sum, product/group, active progress, outcome/history/new proposal | F44–F46 |
+| `/goals` | F44 count/sum proposals and accepted 30-day goal; F45 progress/history; F46 one-time outcome delivery | F44–F46 |
 | `/assistant` | Запрос рекомендации, объяснение данных, budget/basket proposals | F18/F23 + новая единая оболочка |
 | `/accounts` | Счета, валюты в рамках scope, opening balance, transfers | Новое расширение SaaS |
 | `/family` | Участники, роли, приглашения, профили, переход к тратам | F53 + новый tenancy |

@@ -126,6 +126,25 @@ export type AdviceAnalyticsJob = {
   completeness: 'complete' | 'partial' | null; errorCode: string | null;
   report: AdviceAnalyticsReport | null; updatedAt: string;
 };
+export type GoalCandidate = {
+  key: string; productKey: string | null; name: string; unit: 'count' | 'sum'; monthlyRate: string;
+  countTarget: number; monthlySpend: string | null; monthlyLimit: string | null;
+  estimatedReduction: string | null; purchaseCount: number; evidenceCount: number;
+};
+export type GoalSkippedCandidate = {
+  productKey: string; name: string; monthlySpend: string | null;
+  reasonCode: 'minimum_savings' | 'missing_amounts';
+};
+export type MemberGoal = {
+  id: string; key: string; scope: 'product' | 'group'; name: string; unit: 'count' | 'sum';
+  monthlyRate: string; countTarget: number; monthlySpend: string | null; monthlyLimit: string | null;
+  evidenceCount: number; inputWatermark: string; acceptedAt: string; endsAt: string;
+  status: 'active' | 'cancelled' | 'completed'; version: number;
+};
+export type GoalOverview = {
+  unit: 'count' | 'sum'; active: MemberGoal | null; inputWatermark: string;
+  candidates: GoalCandidate[]; groups: GoalCandidate[]; skipped: GoalSkippedCandidate[];
+};
 export type CreateTransaction = Pick<Transaction, 'type' | 'amount' | 'currency' | 'categoryCode' | 'description' | 'source' | 'occurredAt'>
   & { subcategoryCode?: string | null; ownerUserId?: string | null };
 export type UpdateTransaction = CreateTransaction & { debtId?: string | null };
@@ -382,6 +401,16 @@ export const api = {
   ),
   requestAdviceAnalytics: (tenantId: string) => request<AdviceAnalyticsJob>(
     `/bff/tenants/${tenantId}/analytics/advice`, { method: 'POST' },
+  ),
+  getGoals: (tenantId: string) => request<GoalOverview>(`/bff/tenants/${tenantId}/goals`),
+  updateGoalUnit: (tenantId: string, unit: 'count' | 'sum') => request<{ unit: 'count' | 'sum' }>(
+    `/bff/tenants/${tenantId}/goals/unit`, { method: 'PUT', body: JSON.stringify({ unit }) },
+  ),
+  acceptGoal: (tenantId: string, candidate: { candidateKey: string; inputWatermark: string }) => request<MemberGoal>(
+    `/bff/tenants/${tenantId}/goals`, { method: 'POST', body: JSON.stringify(candidate) },
+  ),
+  cancelGoal: (tenantId: string, goalId: string) => request<MemberGoal>(
+    `/bff/tenants/${tenantId}/goals/${goalId}/cancel`, { method: 'POST' },
   ),
   getBudgets: (tenantId: string) => request<BudgetOverview>(`/bff/tenants/${tenantId}/budgets`),
   updateBudget: (tenantId: string, budgetKey: string, scope: 'family' | 'personal', amount: string, version: number, period: 'monthly' | 'rolling7' = 'monthly') =>

@@ -12,6 +12,7 @@ import { PersonalInflationPanel } from './PersonalInflationPanel';
 import { RecurringPanel } from './RecurringPanel';
 import { ImportsPanel } from './ImportsPanel';
 import { AdviceAnalyticsPanel } from './AdviceAnalyticsPanel';
+import { GoalsPanel } from './GoalsPanel';
 import './styles.css';
 
 const copy = {
@@ -69,7 +70,7 @@ const copy = {
     safeSpendDays: 'дн.', plannedIncomeBasis: 'плановый доход', actualIncomeBasis: 'доход этого месяца',
     currentBudgetRemaining: 'Остаток месячного лимита',
     projectedReserve: 'Ожидаемый остаток лимита', projectedOverrun: 'Ожидаемый перерасход лимита',
-    reports: 'Отчёты', reportPeriod: 'Период отчёта', reportScope: 'Область отчёта', periodMonth: 'Месяц',
+    reports: 'Отчёты', goals: 'Цели', reportPeriod: 'Период отчёта', reportScope: 'Область отчёта', periodMonth: 'Месяц',
     periodWeek: 'Неделя', period90d: '90 дней', periodCustom: 'Произвольный период', scopePersonal: 'Личные',
     scopeFamily: 'Вся семья', reportFrom: 'С даты отчёта', reportTo: 'По дату отчёта', reportIncome: 'Доходы',
     reportExpense: 'Расходы', reportDebtPayments: 'Платежи по долгам', reportRefunds: 'Возвраты',
@@ -138,7 +139,7 @@ const copy = {
     safeSpendDays: 'days', plannedIncomeBasis: 'planned income', actualIncomeBasis: 'this month income',
     currentBudgetRemaining: 'Monthly budget remaining',
     projectedReserve: 'Projected budget remaining', projectedOverrun: 'Projected budget overrun',
-    reports: 'Reports', reportPeriod: 'Report period', reportScope: 'Report scope', periodMonth: 'Month',
+    reports: 'Reports', goals: 'Goals', reportPeriod: 'Report period', reportScope: 'Report scope', periodMonth: 'Month',
     periodWeek: 'Week', period90d: '90 days', periodCustom: 'Custom period', scopePersonal: 'Personal',
     scopeFamily: 'Whole family', reportFrom: 'From report date', reportTo: 'To report date', reportIncome: 'Income',
     reportExpense: 'Expenses', reportDebtPayments: 'Debt payments', reportRefunds: 'Refunds',
@@ -496,6 +497,7 @@ export function App() {
         <Link className="nav-link" to="/budgets">{t.budgets}</Link>
         <Link className="nav-link" to="/debts">{t.debts}</Link>
         <Link className="nav-link" to="/reports">{t.reports}</Link>
+        <Link className="nav-link" to="/goals">{t.goals}</Link>
         <Link className="nav-link" to="/profile">{t.profile}</Link>
       </nav>
       <div className="sidebar-footer">
@@ -559,6 +561,8 @@ export function App() {
             onAdjust={(debtId, version, balance) => adjustDebt.mutate({ debtId, version, balance })}
             onForecast={(debtId) => api.getDebtForecast(activeTenant.tenantId, debtId)} />} />
           <Route path="/reports" element={<ReportPanel t={t} tenantId={activeTenant.tenantId}
+            language={language} canWrite={activeTenant.role !== 'viewer'} />} />
+          <Route path="/goals" element={<GoalsPanel tenantId={activeTenant.tenantId}
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
           <Route path="/receipts" element={<ReceiptsPanel tenantId={activeTenant.tenantId}
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
