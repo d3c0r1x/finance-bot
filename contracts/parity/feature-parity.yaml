@@ -635,9 +635,11 @@ features:
     feature: "Пересчёт старых verdict по текущим правилам и отчёт изменений"
     target: "J explicit recalculation job; G пакетная подготовка"
     acceptance: "Только явный запуск; старый/новый verdict и причина сохранены; суммы чеков неизменны"
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptRecalculationPolicyTest.java
+    evidence:
+      - "F42.1 Java preview policy is locally GREEN: it recalculates only model/default-source lines covered by current deterministic rules, preserves exact receipt line amounts, reports old/new verdict and source, skips human/rule/unknown sources, and leaves uncovered model opinions untouched. Persistence, explicit API preview/apply and durable change report remain incomplete."
     intentional_differences: []
   - id: F43
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"

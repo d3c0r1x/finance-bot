@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 13:17, Europe/Moscow.
+Updated: 2026-10-06 23:08, Europe/Moscow.
 
 ## Global plan
 
@@ -49,7 +49,7 @@ Updated: 2026-10-06 13:17, Europe/Moscow.
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
 | F40.3 | Web, Android and Telegram optional-spend presentation | COMPLETE — local client gates and GitHub regression GREEN | F40.2 | ec1a373 |
-| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — all surfaces verified locally; Android commit/CI remains | F40 | pending |
+| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — Android commit exists; GitHub run not found | F40 | ccfcf6a |
 | F41.1 | Go evidence groups for the personal “do not buy” list | COMPLETE — local and three GitHub workflows GREEN | F40 facts | bd8444f |
 | F41.2a | Confirm/allow/revoke member-local product decisions with audit | COMPLETE — local and four GitHub workflows GREEN | F41.1 | d537b08 |
 | F41.2b | Core evidence API, personal policy overlay and shopping isolation | COMPLETE — local and four GitHub workflows GREEN | F41.2a | 7307fff |
@@ -57,18 +57,20 @@ Updated: 2026-10-06 13:17, Europe/Moscow.
 | F41.3b | Telegram list and human controls | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 41ace8f |
 | F41.3b1 | Actor-scoped Telegram list and decision routes | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 7089a63 |
 | F41.3b2 | Telegram command, renderer and callbacks | COMPLETE — local and four GitHub workflows GREEN | F41.3b1 | 41ace8f |
-| F41.3c | Android list and human controls | COMMIT_PENDING — current diff passed 50/50 instrumentation and APK launch | F41.2b | pending |
+| F41.3c | Android list and human controls | COMMITTED — 50/50 instrumentation and APK launch; GitHub run not found | F41.2b | ccfcf6a |
+| F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — deterministic Java preview policy complete; persistence/API remain | F41 | pending |
+| F42.1 | Deterministic preview policy for eligible receipt lines | COMMIT_PENDING — targeted and full Core check pass | F42 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F41.3c — Android RU/EN shows verified blocks and separate model guesses, human decisions and distinct shopping block reasons.
-- Status: COMMIT_PENDING — current-diff local gates pass; F41.3c handles mixed/unknown evidence conservatively across Core, Telegram, Web and Android.
-- Acceptance: model guess and unknown-provenance evidence remain reviewable without blocking shopping; confirm/allow/revoke call member-scoped Core API; viewer has no write controls; unavailable evidence is explicit.
-- Data boundary: Android parses Core evidence and decision DTOs; tenant switch clears cached advice/decisions.
+- ID and outcome: F42.1 — deterministic Java preview policy for old receipt verdict recalculation.
+- Status: COMMIT_PENDING — observed RED for missing policy; targeted test and full Core check now pass.
+- Acceptance: only model/default sources with current deterministic-rule coverage enter preview; old/new verdict and source remain inspectable; receipt line amounts remain unchanged; human/rule/unknown and uncovered model rows remain untouched.
+- Data boundary: pure domain policy only; no database writes, API or public route yet.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `cdc51c9`; F41.3c files modified in working tree.
-- Updated at: 2026-10-06 13:17 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `0654738`; F42.1 and MVP plan tracked changes remain.
+- Updated at: 2026-10-06 23:08 Europe/Moscow.
 
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
@@ -182,7 +184,7 @@ Updated: 2026-10-06 13:17, Europe/Moscow.
 
 ## Next action
 
-- Commit and push F41.3c after staged diff review; confirm GitHub regression, then begin F42.
+- Commit F42.1 after staged diff review, then begin F42 persistence/API acceptance tests.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
@@ -1187,3 +1189,12 @@ Updated: 2026-10-06 13:17, Europe/Moscow.
 - F10 storage gate is GREEN on GitHub run `37406496544`, commit `68253b7`: authenticated SeaweedFS S3 operations and real ClamAV malware scanning passed.
 - Contracts regression after parity updates: `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` — 42 passed. No product code changed in this evidence update.
 - F10, F31 and F33 are complete. Next: F41, preserve model-only product hypotheses as reviewable suggestions and require explicit human decision before any product block/allow behavior.
+
+## E4.61 F42.1 deterministic recalculation preview policy — 2026-10-06 23:08 MSK
+
+- Legacy `services/advice.py` recalculates only blank/model/default sources, leaves human/rule/unknown sources untouched, applies current name-based rules, and never changes receipt sums. Ported that eligibility and preview-only boundary into `ReceiptRecalculationPolicy`.
+- Observed RED: targeted Gradle test first could not start because Java was absent from PATH. Existing cached JDK 17 then produced the intended compile failure because `ReceiptRecalculationPolicy` did not exist. No JDK was installed or system PATH changed.
+- GREEN: targeted `:services:core:test --tests com.decorix.finance.core.domain.ReceiptRecalculationPolicyTest` passed. Full `:services:core:check --no-daemon` passed; latest test report shows 238 tests, 0 failures, 100 skipped. Skipped tests remain environmental/integration gates and are not counted as exercised.
+- The policy reports old/new verdict, advice and source with exact stored line amount; it skips human/rule/unknown sources, retains uncovered model opinions, and is idempotent after an item becomes rule-backed. Persistence/API does not exist yet, so F42 remains IN PROGRESS.
+- M2 environment audit is complete but runtime remains BLOCKED: durable PostgreSQL and Keycloak are absent; current PostgreSQL listener is temporary test infrastructure; Tailscale Funnel is unconfigured. Public ingress remains closed until auth and durable storage work.
+- Next: commit this independently tested policy slice, then write PostgreSQL acceptance for explicit preview/apply, audit snapshots, stale-version handling, and unchanged receipt totals before implementation.
