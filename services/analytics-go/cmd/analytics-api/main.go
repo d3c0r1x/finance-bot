@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,12 @@ func main() {
 }
 
 func run() error {
+	worker, err := configuredF43Worker(os.Getenv("ADVICE_ANALYTICS_WORKER_ENABLED"),
+		os.Getenv("ANALYTICS_CORE_URL"), os.Getenv("FINANCE_ANALYTICS_SERVICE_TOKEN"),
+		os.Getenv("ADVICE_ANALYTICS_WORKER_POLL_INTERVAL"))
+	if err != nil {
+		return err
+	}
 	store, err := prices.NewClickHouseHTTPStore(prices.ClickHouseHTTPConfig{
 		Endpoint: os.Getenv("CLICKHOUSE_URL"),
 		Database: envOr("CLICKHOUSE_DATABASE", "finance_analytics"),
@@ -98,22 +105,61 @@ func run() error {
 		ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second,
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	serverErrors := make(chan error, 1)
 	go func() {
 		if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}
 	}()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	workerErrors := make(chan error, 1)
+	if worker != nil {
+		go func() {
+			if err := worker.Run(ctx); err != nil && ctx.Err() == nil {
+				workerErrors <- err
+			}
+		}()
+	}
 	select {
 	case err := <-serverErrors:
+		stop()
+		return err
+	case err := <-workerErrors:
+		stop()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdown)
 		return err
 	case <-ctx.Done():
 		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdown)
 	}
+}
+
+func configuredF43Worker(enabledValue, coreURL, serviceToken, pollValue string) (*advice.F43Worker, error) {
+	enabled, err := strconv.ParseBool(strings.TrimSpace(enabledValue))
+	if enabledValue == "" {
+		enabled = false
+	} else if err != nil {
+		return nil, errors.New("ADVICE_ANALYTICS_WORKER_ENABLED must be true or false")
+	}
+	if !enabled {
+		return nil, nil
+	}
+	pollInterval := time.Second
+	if strings.TrimSpace(pollValue) != "" {
+		pollInterval, err = time.ParseDuration(strings.TrimSpace(pollValue))
+		if err != nil || pollInterval <= 0 {
+			return nil, errors.New("ADVICE_ANALYTICS_WORKER_POLL_INTERVAL must be a positive duration")
+		}
+	}
+	core, err := advice.NewF43CoreClient(coreURL, serviceToken, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return advice.NewF43Worker(core, pollInterval)
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {

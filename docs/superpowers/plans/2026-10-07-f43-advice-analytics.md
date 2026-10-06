@@ -81,7 +81,7 @@
 - [x] **Step 5: Implement public, BFF and internal controllers** with member/viewer authorization, idempotent enqueue, service-token auth via `X-Analytics-Service-Token`, atomic leases/retry limits, result validation, and current-watermark write guard.
 - [x] **Step 6: Run focused PostgreSQL tests;** member scope, viewer denial, overflow, retry, duplicate delivery, stale completion and Web BFF routes pass. No financial rows are written.
 - [x] **Step 7: Run `:services:core:check` with PostgreSQL enabled** from repository root and `python -m pytest tools/contracts/test_core_migration.py tools/contracts/test_contracts.py -q`; Core check and F43 PostgreSQL cases pass; contracts pass 64 with 2 existing optional DB skips.
-- [ ] **Step 8: Commit** as `feat(F43.2): add durable member analytics jobs` after focused and regression gates pass.
+- [x] **Step 8: Commit** as `feat(F43.2): add durable member analytics jobs` after focused and regression gates pass.
 
 ### Task 3: Existing Go analytics-api worker lifecycle and result delivery
 
@@ -96,6 +96,7 @@
 **Interfaces:**
 - `F43CoreClient` claims one Core job, submits `F43Request`, and reports typed result/error for a leased job using service authentication and bounded HTTP timeouts.
 - `F43Worker.Run(ctx)` polls with configured delay, processes one lease at a time, honors shutdown, and relies on Core lease expiry/retry after process failure.
+- Enable with `ADVICE_ANALYTICS_WORKER_ENABLED=true`; configure Core base URL in `ANALYTICS_CORE_URL`, share `FINANCE_ANALYTICS_SERVICE_TOKEN` with Core's `finance.analytics.price-history.service-token`, and optionally set `ADVICE_ANALYTICS_WORKER_POLL_INTERVAL` (default `1s`).
 
 - [x] **Step 1: Write fake-Core worker tests** for no available work, successful claim/calculate/result, transient Core failure, invalid calculation delivery, cancellation during idle poll, and serialized processing in one worker instance.
 - [x] **Step 2: Run the focused tests;** observed compile RED on missing `F43LeasedJob`, `F43JobResult`, and `NewF43CoreClient` symbols before implementation.

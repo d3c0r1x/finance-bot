@@ -1287,7 +1287,8 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 - Added public and same-origin BFF latest/enqueue/poll routes, explicit viewer read-only behavior, and internal claim/result routes protected by `X-Analytics-Service-Token`. Claims use `FOR UPDATE SKIP LOCKED`, five bounded attempts, expiring leases and delayed retry; result writes compare lease, algorithm, watermark and current member watermark.
 - PostgreSQL integration covers member isolation, viewer denial, unchanged-input idempotency, changed-input watermark/stale reads, no-truncation overflow, service-token enforcement, successful result and duplicate delivery, retry token rotation/late result rejection, stale completion after new inputs, and BFF session/CSRF.
 - GREEN: focused F43 PostgreSQL tests pass; full `:services:core:check` passes with PostgreSQL enabled; `pytest tools/contracts/test_core_migration.py tools/contracts/test_contracts.py -q -p no:cacheprovider` — 64 passed, 2 existing optional DB skips; `git diff --check` passes. GitHub CI status not yet checked for this commit.
-- Next: commit F43.2, then finish the Web report/status panel and parity before F43 acceptance.
+- Committed and pushed F43.2 as `07cb779 feat(F43.2): add durable advice analytics jobs`. `gh run list --commit 07cb779` returned `[]`; GitHub CI did not start.
+- Next: commit F43.3, then finish the Web report/status panel and parity before F43 acceptance.
 
 ## E4.72 F43.3 Go worker lifecycle — 2026-10-07
 
