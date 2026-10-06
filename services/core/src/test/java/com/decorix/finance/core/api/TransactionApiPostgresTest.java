@@ -5442,6 +5442,228 @@ class TransactionApiPostgresTest {
         org.assertj.core.api.Assertions.assertThat(countTenantRows("outbox_events", "aggregate_id", transactionId)).isEqualTo(3);
     }
 
+    @Test
+    void adviceAnalyticsUsesIdempotentInputWatermarksAndStalesOldJobs() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        UUID itemId = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            UUID transactionId = addReportTransaction(ownerId, subject, "expense", "100.00", "food",
+                    "2026-10-01T10:00:00Z");
+            return addConfirmedReceiptItem(ownerId, subject, transactionId, "Чипсы", "100.00", "harmful", "model", 1);
+        });
+
+        String first = mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.state").value("pending"))
+                .andExpect(jsonPath("$.inputWatermark").value("1"))
+                .andReturn().getResponse().getContentAsString();
+        String jobId = com.jayway.jsonpath.JsonPath.read(first, "$.id");
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.id").value(jobId))
+                .andExpect(jsonPath("$.inputWatermark").value("1"));
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE receipt_items SET verdict = 'unnecessary', version = version + 1 WHERE tenant_id = ? AND id = ?",
+                    tenantId, itemId);
+        });
+        String refreshed = mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.inputWatermark").value("2"))
+                .andReturn().getResponse().getContentAsString();
+        org.junit.jupiter.api.Assertions.assertNotEquals(jobId,
+                com.jayway.jsonpath.JsonPath.read(refreshed, "$.id"));
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}", tenantId, jobId).with(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("stale"))
+                .andExpect(jsonPath("$.report").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void adviceAnalyticsIsMemberScopedAndViewerCanOnlyRead() throws Exception {
+        String viewerSubject = "keycloak|advice-viewer-" + UUID.randomUUID();
+        addTenantMember(viewerSubject, "Advice viewer", "viewer");
+        var ownerAuth = jwt().jwt(token -> token.subject(subject));
+        var viewerAuth = jwt().jwt(token -> token.subject(viewerSubject));
+
+        String ownerJob = mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(ownerAuth))
+                .andExpect(status().isAccepted())
+                .andReturn().getResponse().getContentAsString();
+        String jobId = com.jayway.jsonpath.JsonPath.read(ownerJob, "$.id");
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(viewerAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(viewerAuth))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}", tenantId, jobId).with(viewerAuth))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void adviceAnalyticsRejectsOverflowWithoutTruncatingOrCreatingAJob() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            UUID transactionId = addReportTransaction(ownerId, subject, "expense", "1.00", "food",
+                    "2026-10-01T10:00:00Z");
+            addConfirmedReceiptItem(ownerId, subject, transactionId, "Product", "1.00", "harmful", "model", 1);
+            UUID receiptId = jdbc.queryForObject("SELECT id FROM receipts WHERE tenant_id = ? AND transaction_id = ?",
+                    UUID.class, tenantId, transactionId);
+            jdbc.update("""
+                    INSERT INTO receipt_items (tenant_id, receipt_id, ordinal, name, quantity, line_sum)
+                    SELECT ?, ?, ordinal, 'Product ' || ordinal, 1, 1.00
+                    FROM generate_series(2, 50001) AS generated(ordinal)
+                    """, tenantId, receiptId);
+        });
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.reasonCode").value("too_many_items"));
+        Integer jobCount = jdbc.queryForObject("SELECT count(*) FROM advice_analytics_jobs WHERE tenant_id = ?", Integer.class, tenantId);
+        org.junit.jupiter.api.Assertions.assertEquals(0, jobCount);
+    }
+
+    @Test
+    void adviceAnalyticsWorkerRequiresCredentialAndDuplicateResultIsIdempotent() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        // The isolated test database is reused between Gradle runs; retire orphaned test leases first.
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.analytics_worker', 'true', true)", String.class);
+            jdbc.update("UPDATE advice_analytics_jobs SET state='failed', lease_token=NULL, lease_expires_at=NULL "
+                    + "WHERE state IN ('pending','processing')");
+        });
+        mvc.perform(post("/internal/v1/analytics/advice-jobs/claim"))
+                .andExpect(status().isUnauthorized());
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isAccepted());
+        String claim = mvc.perform(post("/internal/v1/analytics/advice-jobs/claim")
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String jobId = com.jayway.jsonpath.JsonPath.read(claim, "$.id");
+        String leaseToken = com.jayway.jsonpath.JsonPath.read(claim, "$.leaseToken");
+        String watermark = com.jayway.jsonpath.JsonPath.read(claim, "$.inputWatermark");
+        String algorithm = com.jayway.jsonpath.JsonPath.read(claim, "$.algorithmVersion");
+        String result = """
+                {"leaseToken":"%s","inputWatermark":"%s","algorithmVersion":"%s","errorCode":null,
+                 "report":{"algorithmVersion":"%s","inputWatermark":"%s","completeness":"complete"}}
+                """.formatted(leaseToken, watermark, algorithm, algorithm, watermark);
+        mvc.perform(post("/internal/v1/analytics/advice-jobs/{jobId}/result", jobId)
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN).contentType("application/json").content(result))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/internal/v1/analytics/advice-jobs/{jobId}/result", jobId)
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN).contentType("application/json").content(result))
+                .andExpect(status().isNoContent());
+        Integer completedRows = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT count(*) FROM advice_analytics_jobs WHERE tenant_id=? AND owner_user_id=? AND id=? AND state='ready'",
+                    Integer.class, tenantId, userIdFor(subject), UUID.fromString(jobId));
+        });
+        org.junit.jupiter.api.Assertions.assertEquals(1, completedRows);
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}", tenantId, jobId).with(auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("ready"));
+    }
+
+    @Test
+    void adviceAnalyticsRetryReleasesLeaseAndRejectsLateAttemptResult() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.analytics_worker', 'true', true)", String.class);
+            jdbc.update("UPDATE advice_analytics_jobs SET state='failed', lease_token=NULL, lease_expires_at=NULL "
+                    + "WHERE state IN ('pending','processing')");
+        });
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isAccepted());
+        String first = mvc.perform(post("/internal/v1/analytics/advice-jobs/claim")
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String jobId = com.jayway.jsonpath.JsonPath.read(first, "$.id");
+        String firstToken = com.jayway.jsonpath.JsonPath.read(first, "$.leaseToken");
+        String watermark = com.jayway.jsonpath.JsonPath.read(first, "$.inputWatermark");
+        String algorithm = com.jayway.jsonpath.JsonPath.read(first, "$.algorithmVersion");
+        String failure = """
+                {"leaseToken":"%s","inputWatermark":"%s","algorithmVersion":"%s","report":null,"errorCode":"temporary_failure"}
+                """.formatted(firstToken, watermark, algorithm);
+        mvc.perform(post("/internal/v1/analytics/advice-jobs/{jobId}/result", jobId)
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN).contentType("application/json").content(failure))
+                .andExpect(status().isNoContent());
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.analytics_worker', 'true', true)", String.class);
+            jdbc.update("UPDATE advice_analytics_jobs SET next_attempt_at=now() WHERE id=?", UUID.fromString(jobId));
+        });
+        String retry = mvc.perform(post("/internal/v1/analytics/advice-jobs/claim")
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String retryToken = com.jayway.jsonpath.JsonPath.read(retry, "$.leaseToken");
+        org.junit.jupiter.api.Assertions.assertNotEquals(firstToken, retryToken);
+        org.junit.jupiter.api.Assertions.assertEquals(2, (int) com.jayway.jsonpath.JsonPath.read(retry, "$.attemptCount"));
+        mvc.perform(post("/internal/v1/analytics/advice-jobs/{jobId}/result", jobId)
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN).contentType("application/json").content(failure))
+                .andExpect(status().isConflict());
+        String success = """
+                {"leaseToken":"%s","inputWatermark":"%s","algorithmVersion":"%s","errorCode":null,
+                 "report":{"algorithmVersion":"%s","inputWatermark":"%s","completeness":"complete"}}
+                """.formatted(retryToken, watermark, algorithm, algorithm, watermark);
+        mvc.perform(post("/internal/v1/analytics/advice-jobs/{jobId}/result", jobId)
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN).contentType("application/json").content(success))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void adviceAnalyticsRejectsCompletionAfterMemberInputsAdvance() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        clearPendingAdviceJobsForTest();
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isAccepted());
+        String claim = mvc.perform(post("/internal/v1/analytics/advice-jobs/claim")
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String jobId = com.jayway.jsonpath.JsonPath.read(claim, "$.id");
+        String leaseToken = com.jayway.jsonpath.JsonPath.read(claim, "$.leaseToken");
+        String watermark = com.jayway.jsonpath.JsonPath.read(claim, "$.inputWatermark");
+        String algorithm = com.jayway.jsonpath.JsonPath.read(claim, "$.algorithmVersion");
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE member_profiles SET timezone='Europe/Moscow' WHERE tenant_id=? AND user_id=?",
+                    tenantId, userIdFor(subject));
+        });
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(auth))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.inputWatermark").value("2"));
+        String staleResult = """
+                {"leaseToken":"%s","inputWatermark":"%s","algorithmVersion":"%s","errorCode":null,
+                 "report":{"algorithmVersion":"%s","inputWatermark":"%s","completeness":"complete"}}
+                """.formatted(leaseToken, watermark, algorithm, algorithm, watermark);
+        mvc.perform(post("/internal/v1/analytics/advice-jobs/{jobId}/result", jobId)
+                        .header("X-Analytics-Service-Token", ANALYTICS_SERVICE_TOKEN).contentType("application/json").content(staleResult))
+                .andExpect(status().isConflict());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}", tenantId, jobId).with(auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("stale"));
+    }
+
+    @Test
+    void adviceAnalyticsBffUsesSameMemberJobAndRequiresCsrfForRefresh() throws Exception {
+        var apiAuth = jwt().jwt(token -> token.subject(subject));
+        var bffAuth = oidcLogin().idToken(token -> token.subject(subject));
+        String created = mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(apiAuth))
+                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+        String jobId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        mvc.perform(get("/bff/tenants/{tenantId}/analytics/advice", tenantId).with(bffAuth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(jobId));
+        mvc.perform(post("/bff/tenants/{tenantId}/analytics/advice", tenantId).with(bffAuth))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/bff/tenants/{tenantId}/analytics/advice", tenantId).with(bffAuth).with(csrf()))
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.id").value(jobId));
+        mvc.perform(get("/bff/tenants/{tenantId}/analytics/advice/jobs/{jobId}", tenantId, jobId).with(bffAuth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(jobId));
+    }
+
     private int countTenantRows(String table, String column, UUID transactionId) {
         return transactions.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
@@ -5526,6 +5748,14 @@ class TransactionApiPostgresTest {
         } catch (Exception exception) {
             throw new ExceptionInInitializerError(exception);
         }
+    }
+
+    private void clearPendingAdviceJobsForTest() {
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.analytics_worker', 'true', true)", String.class);
+            jdbc.update("UPDATE advice_analytics_jobs SET state='failed', lease_token=NULL, lease_expires_at=NULL "
+                    + "WHERE state IN ('pending','processing')");
+        });
     }
 
     private static HttpServer startAiServer() {

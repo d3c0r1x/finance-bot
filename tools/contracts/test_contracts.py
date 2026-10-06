@@ -496,6 +496,36 @@ def test_telegram_recalculation_has_separate_service_scoped_preview_and_apply():
     assert "412" in apply["responses"]
 
 
+def test_f43_routes_are_member_scoped_and_worker_is_service_token_protected():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    paths = spec["paths"]
+    public = paths["/api/v1/tenants/{tenantId}/analytics/advice"]
+    assert "get" in public and "post" in public
+    assert paths["/api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}"]["get"]
+    assert "post" in paths["/bff/tenants/{tenantId}/analytics/advice"]
+    assert "get" in paths["/bff/tenants/{tenantId}/analytics/advice/jobs/{jobId}"]
+    claim = paths["/internal/v1/analytics/advice-jobs/claim"]["post"]
+    result = paths["/internal/v1/analytics/advice-jobs/{jobId}/result"]["post"]
+    assert claim["security"] == [] and result["security"] == []
+    assert claim["parameters"][0]["name"] == "X-Analytics-Service-Token"
+    assert result["parameters"][0]["name"] == "X-Analytics-Service-Token"
+    assert spec["components"]["schemas"]["AdviceAnalyticsJob"]["properties"]["state"]["enum"] == [
+        "pending", "processing", "ready", "failed", "stale", None
+    ]
+
+
+def test_f43_durable_job_tables_keep_member_rls_and_worker_lease_bounds():
+    migrations = sorted((ROOT / "services/core/src/main/resources/db/migration").glob("V*.sql"))
+    f43 = "\n".join(path.read_text("utf-8").lower() for path in migrations if path.name.startswith(("V37", "V38")))
+    assert "create table advice_analytics_versions" in f43
+    assert "create table advice_analytics_jobs" in f43
+    assert "unique (tenant_id, owner_user_id, input_watermark, algorithm_version)" in f43
+    assert "attempt_count between 0 and 5" in f43
+    assert "create policy advice_analytics_member" in f43
+    assert "create policy advice_analytics_worker" in f43
+    assert "completed_lease_token" in f43
+
+
 def test_repeat_warnings_only_describe_prior_confirmed_item_evidence():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for path in ("/api/v1/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings",

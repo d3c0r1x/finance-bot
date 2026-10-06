@@ -23,6 +23,7 @@ import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import com.decorix.finance.core.api.ReceiptProcessingApi.ReceiptProcessingJob;
+import com.decorix.finance.core.api.AdviceAnalyticsApi.Job;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -64,13 +65,15 @@ public class WebBffController {
     private final ReceiptProcessingService receiptProcessing;
     private final ReceiptReadingService receiptReadings;
     private final AdviceEvidenceService evidence;
+    private final AdviceAnalyticsService adviceAnalytics;
 
     public WebBffController(TenantService tenants, TransactionService transactions, MemberProfileService profiles,
                             NotificationPreferencesService notificationPreferences, BudgetService budgets,
                             DebtService debts, ReportService reports, TransactionDraftService drafts,
                             ReceiptService receipts, TelegramLinkService telegramLinks,
                             ProductPriceHistoryService productPriceHistory, ReceiptProcessingService receiptProcessing,
-                            ReceiptReadingService receiptReadings, AdviceEvidenceService evidence) {
+                            ReceiptReadingService receiptReadings, AdviceEvidenceService evidence,
+                            AdviceAnalyticsService adviceAnalytics) {
         this.tenants = tenants;
         this.transactions = transactions;
         this.profiles = profiles;
@@ -85,6 +88,7 @@ public class WebBffController {
         this.receiptProcessing = receiptProcessing;
         this.receiptReadings = receiptReadings;
         this.evidence = evidence;
+        this.adviceAnalytics = adviceAnalytics;
     }
 
     @GetMapping("/csrf")
@@ -105,6 +109,28 @@ public class WebBffController {
     ReceiptProcessingJob getReceiptJob(@PathVariable UUID tenantId, @PathVariable UUID jobId,
             @AuthenticationPrincipal OidcUser user) {
         return receiptProcessing.get(tenantId, user.getSubject(), jobId);
+    }
+
+    @GetMapping("/tenants/{tenantId}/analytics/advice")
+    Job getAdviceAnalytics(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
+        return adviceAnalytics.latest(tenantId, user.getSubject());
+    }
+
+    @PostMapping("/tenants/{tenantId}/analytics/advice")
+    ResponseEntity<?> requestAdviceAnalytics(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
+        try { return ResponseEntity.accepted().body(adviceAnalytics.request(tenantId, user.getSubject())); }
+        catch (org.springframework.web.server.ResponseStatusException exception) {
+            if (exception.getStatusCode() == org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE)
+                return ResponseEntity.status(org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE)
+                        .body(new AdviceAnalyticsApi.Error("too_many_items"));
+            throw exception;
+        }
+    }
+
+    @GetMapping("/tenants/{tenantId}/analytics/advice/jobs/{jobId}")
+    Job getAdviceAnalyticsJob(@PathVariable UUID tenantId, @PathVariable UUID jobId,
+                              @AuthenticationPrincipal OidcUser user) {
+        return adviceAnalytics.get(tenantId, user.getSubject(), jobId);
     }
 
     @GetMapping("/tenants/{tenantId}/receipts/{receiptId}/readings")

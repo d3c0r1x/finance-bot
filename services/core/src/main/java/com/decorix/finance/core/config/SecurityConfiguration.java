@@ -18,13 +18,14 @@ public class SecurityConfiguration {
         return http
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
-                        .ignoringRequestMatchers("/api/**", "/internal/v1/telegram/**")
+                        .ignoringRequestMatchers("/api/**", "/internal/v1/telegram/**", "/internal/v1/analytics/**")
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers("/actuator/health").permitAll()
                         .requestMatchers("/bff/session", "/bff/csrf").permitAll()
                         .requestMatchers("/internal/v1/telegram/**").permitAll()
+                        .requestMatchers("/internal/v1/analytics/**").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .oauth2Login(Customizer.withDefaults())

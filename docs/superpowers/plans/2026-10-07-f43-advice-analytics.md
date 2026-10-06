@@ -65,23 +65,22 @@
 - Create: `services/core/src/main/java/com/decorix/finance/core/api/AdviceAnalyticsService.java`
 - Create: `services/core/src/main/java/com/decorix/finance/core/api/AdviceAnalyticsController.java`
 - Create: `services/core/src/main/java/com/decorix/finance/core/api/AdviceAnalyticsInternalController.java`
-- Create: `services/core/src/test/java/com/decorix/finance/core/api/AdviceAnalyticsServiceTest.java`
-- Create: `services/core/src/test/java/com/decorix/finance/core/api/AdviceAnalyticsPostgresTest.java`
+- Modify: `services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java` (reuse the existing isolated PostgreSQL/JWT integration fixture rather than boot a second Spring context)
 - Modify: `contracts/openapi/finance-api-v1.yaml`
 - Test: `tools/contracts/test_core_migration.py`, `tools/contracts/test_contracts.py`
 
 **Interfaces:**
-- Public member route: `GET /api/v1/tenants/{tenantId}/analytics/advice` returns the latest job/report for the active member; `POST` on the same route requests current inputs and returns `202` with job state, watermark and poll location.
+- Public member routes: `GET /api/v1/tenants/{tenantId}/analytics/advice` returns the latest job/report for the active member; `POST` on the same route requests current inputs and returns `202` with job state and watermark; `GET /api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}` polls one member-owned job. Provide matching BFF routes for Web.
 - Internal worker routes: authenticated `POST /internal/v1/analytics/advice-jobs/claim` atomically leases one eligible job and returns its bounded input; authenticated `POST /internal/v1/analytics/advice-jobs/{jobId}/result` records success/failure only for the current job lease.
-- Core response state is `pending | processing | ready | failed | stale`; stored result includes `inputWatermark`, `algorithmVersion`, `complete | partial`, and explicit reasons.
+- Core response state is `pending | processing | ready | failed | stale`; stored result includes `inputWatermark`, `algorithmVersion`, `complete | partial`, and explicit reasons. More than 50,000 source items returns `413` with `too_many_items` and never creates a truncated job.
 
-- [ ] **Step 1: Add PostgreSQL acceptance tests first** for active-member scope, viewer denial, same-input idempotence, changed-input watermark advance, 50,000-item cap plus one (return `too_many_items`, no truncation), atomic job claim/lease, retry eligibility, duplicate result delivery, and rejection of stale job completion.
-- [ ] **Step 2: Run the focused PostgreSQL tests** using the established isolated Core test database; observe expected missing-route/schema failures. Confirm required DB environment is set so tests exercise PostgreSQL rather than skip.
-- [ ] **Step 3: Add V37 tables and indexes** for per-member input watermark, durable jobs, attempts/lease, and stored report; apply existing tenant RLS conventions and keep member ownership explicit.
-- [ ] **Step 4: Implement `AdviceAnalyticsService`** to resolve active membership/role, select only that member's confirmed expenses and receipt positions plus allowed decisions/profile/timezone/F42 changes, detect incomplete amounts, and generate canonical input hash. Reuse the latest watermark/job when the canonical input is unchanged; advance watermark when input changes.
-- [ ] **Step 5: Implement public and internal controllers** with the specified authorization, idempotent enqueue, atomic lease/retry limits, result validation, and compare-current-watermark write guard. Expose typed status/report DTOs.
-- [ ] **Step 6: Run focused service and PostgreSQL tests;** all authorization, overflow, retry, idempotence and stale-write assertions pass; existing data and receipt totals remain unchanged.
-- [ ] **Step 7: Run `:services:core:check` with PostgreSQL enabled** from repository root and `python -m pytest tools/contracts/test_core_migration.py tools/contracts/test_contracts.py -q`; require no new skips in the F43 PostgreSQL gate.
+- [x] **Step 1: Add PostgreSQL acceptance tests first** for active-member scope, viewer denial, same-input idempotence, changed-input watermark advance, 50,000-item cap plus one (return `too_many_items`, no truncation), atomic job claim/lease, retry eligibility, duplicate result delivery, and rejection of stale job completion.
+- [x] **Step 2: Run the focused PostgreSQL tests** using the established isolated Core test database; the first feature run observed 404 for missing routes, and the later lease test observed duplicate delivery rejection before idempotence was implemented. Tests ran against the isolated database without skips.
+- [x] **Step 3: Add V37 tables and indexes** for per-member input watermark, durable jobs, attempts/lease, and stored report; V38 adds the completed-lease token for idempotent delivery. Both use tenant RLS and a separate analytics-worker policy.
+- [x] **Step 4: Implement `AdviceAnalyticsService`** to resolve active membership/role, select only that member's confirmed expenses and receipt positions plus allowed decisions/profile/timezone/F42 changes, cap inputs before enqueue, and generate a canonical input hash. Reuse unchanged watermark/job; advance and stale older jobs when inputs change.
+- [x] **Step 5: Implement public, BFF and internal controllers** with member/viewer authorization, idempotent enqueue, service-token auth via `X-Analytics-Service-Token`, atomic leases/retry limits, result validation, and current-watermark write guard.
+- [x] **Step 6: Run focused PostgreSQL tests;** member scope, viewer denial, overflow, retry, duplicate delivery, stale completion and Web BFF routes pass. No financial rows are written.
+- [x] **Step 7: Run `:services:core:check` with PostgreSQL enabled** from repository root and `python -m pytest tools/contracts/test_core_migration.py tools/contracts/test_contracts.py -q`; Core check and F43 PostgreSQL cases pass; contracts pass 64 with 2 existing optional DB skips.
 - [ ] **Step 8: Commit** as `feat(F43.2): add durable member analytics jobs` after focused and regression gates pass.
 
 ### Task 3: Existing Go analytics-api worker lifecycle and result delivery
@@ -98,12 +97,12 @@
 - `F43CoreClient` claims one Core job, submits `F43Request`, and reports typed result/error for a leased job using service authentication and bounded HTTP timeouts.
 - `F43Worker.Run(ctx)` polls with configured delay, processes one lease at a time, honors shutdown, and relies on Core lease expiry/retry after process failure.
 
-- [ ] **Step 1: Write fake-Core worker tests** for no available work, successful claim/calculate/result, transient Core failure, report failure delivery, cancellation during idle poll, and no duplicate concurrent processing in one worker instance.
-- [ ] **Step 2: Run `go test ./advice -run 'TestF43Worker|TestF43CoreClient' -count=1`;** observe RED for absent worker/client behavior.
-- [ ] **Step 3: Implement the Core HTTP client and worker** with strict response decoding, existing service token configuration, finite request timeout, cancellable poll delay, and no direct database or ClickHouse writes.
-- [ ] **Step 4: Wire worker into existing `analytics-api` lifecycle**; missing Core URL/token or invalid poll configuration must fail startup when worker mode is enabled; shutdown waits for in-flight work within server shutdown bounds.
-- [ ] **Step 5: Run focused worker tests and contract tests**; retries are delegated to Core lease policy and a late result cannot replace a newer watermark.
-- [ ] **Step 6: Run `go test ./...` and `go vet ./...`;** all Go regressions pass.
+- [x] **Step 1: Write fake-Core worker tests** for no available work, successful claim/calculate/result, transient Core failure, invalid calculation delivery, cancellation during idle poll, and serialized processing in one worker instance.
+- [x] **Step 2: Run the focused tests;** observed compile RED on missing `F43LeasedJob`, `F43JobResult`, and `NewF43CoreClient` symbols before implementation.
+- [x] **Step 3: Implement the Core HTTP client and worker** with strict response decoding, service-token header, finite HTTP timeout, cancellable poll delay, and no direct database or ClickHouse writes.
+- [x] **Step 4: Wire worker into existing `analytics-api` lifecycle** behind opt-in `ADVICE_ANALYTICS_WORKER_ENABLED`; enabled mode requires Core URL/token and validates poll configuration; process cancellation stops active requests.
+- [x] **Step 5: Run focused worker tests;** Core lease policy owns retries and duplicate/stale writes are handled by Core.
+- [x] **Step 6: Run `go test ./...` and `go vet ./...`;** all Go packages pass and vet reports no issues.
 - [ ] **Step 7: Commit** as `feat(F43.3): process durable advice jobs` after focused and regression gates pass.
 
 ### Task 4: Web report, state polling, contracts and optional Telegram reuse

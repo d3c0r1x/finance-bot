@@ -1279,3 +1279,18 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 - The first `go test` could not start because Go was absent from PATH. Downloaded Go 1.27.1 to the temporary directory and used it per-command; no system PATH or installed settings changed. First feature run showed compile RED for missing F43 symbols. A later behavior test exposed missing recalculation marking when only one trend window had data; fixed and covered it.
 - GREEN: `go test ./...` and `go vet ./...` from `services/analytics-go`; contract suite via `.venv\Scripts\python.exe -m pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` — 48 passed; `git diff --check` passed.
 - F43.1 committed and pushed as `08ea1af` (`feat(F43.1): add advice analytics calculation`). `gh run list --commit 08ea1af` returned `[]`; remote GitHub CI did not start and is unverified. Next: Core durable member snapshot/job/query API with PostgreSQL acceptance tests before implementation.
+
+## E4.71 F43.2 Core durable jobs and member API — 2026-10-07
+
+- Observed PostgreSQL RED first: all new F43 public routes returned 404. Added V37 member watermark/job tables and RLS; V38 adds a completed-lease token so exact duplicate worker deliveries are acknowledged without reopening a job.
+- Core snapshots only the active member's confirmed posted expense receipt positions, allowed-product decisions, profile timezone/income, personal total limit and applied F42 annotations. A canonical member input hash reuses unchanged jobs; changed inputs advance the watermark and stale older work. The 50,001-row bound returns `413 too_many_items` before persisting a partial snapshot.
+- Added public and same-origin BFF latest/enqueue/poll routes, explicit viewer read-only behavior, and internal claim/result routes protected by `X-Analytics-Service-Token`. Claims use `FOR UPDATE SKIP LOCKED`, five bounded attempts, expiring leases and delayed retry; result writes compare lease, algorithm, watermark and current member watermark.
+- PostgreSQL integration covers member isolation, viewer denial, unchanged-input idempotency, changed-input watermark/stale reads, no-truncation overflow, service-token enforcement, successful result and duplicate delivery, retry token rotation/late result rejection, stale completion after new inputs, and BFF session/CSRF.
+- GREEN: focused F43 PostgreSQL tests pass; full `:services:core:check` passes with PostgreSQL enabled; `pytest tools/contracts/test_core_migration.py tools/contracts/test_contracts.py -q -p no:cacheprovider` — 64 passed, 2 existing optional DB skips; `git diff --check` passes. GitHub CI status not yet checked for this commit.
+- Next: commit F43.2, then finish the Web report/status panel and parity before F43 acceptance.
+
+## E4.72 F43.3 Go worker lifecycle — 2026-10-07
+
+- Added strict bounded Core HTTP client, service-token claim/result calls, a single-instance cancellable worker, and opt-in integration in the existing `analytics-api`. Worker mode validates its Core URL, service token and poll interval; disabled mode preserves current startup behavior.
+- Tests cover no work, calculation/result flow, invalid input delivery for Core retry, transient Core errors, cancellation during idle poll, completion failure, serialized processing, strict claim decoding, HTTP 204/5xx handling and startup configuration.
+- GREEN: `go test ./... -count=1` and `go vet ./...` from `services/analytics-go`; focused Go worker/client/config tests pass. Next: commit F43.3 and implement Task 4 Web report/status polling.

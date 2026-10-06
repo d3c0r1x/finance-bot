@@ -4076,6 +4076,99 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/analytics/advice:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getAdviceAnalytics
+      responses:
+        '200': { description: Latest member-owned F43 job and report, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      operationId: requestAdviceAnalytics
+      responses:
+        '202': { description: Durable member-scoped calculation accepted, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { description: Source history exceeds the F43 safety bound, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsError' } } } }
+  /api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getAdviceAnalyticsJob
+      responses:
+        '200': { description: Member-owned calculation status and stored report, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/analytics/advice:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserAdviceAnalytics
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Latest member-owned F43 job and report, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: requestBrowserAdviceAnalytics
+      security: [{ bffSession: [] }]
+      responses:
+        '202': { description: Durable member-scoped calculation accepted, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { description: Source history exceeds the F43 safety bound }
+  /bff/tenants/{tenantId}/analytics/advice/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getBrowserAdviceAnalyticsJob
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Member-owned calculation status and stored report, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /internal/v1/analytics/advice-jobs/claim:
+    post:
+      operationId: claimAdviceAnalyticsJob
+      security: []
+      parameters:
+        - name: X-Analytics-Service-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 16 }
+      responses:
+        '200': { description: One atomic lease, content: { application/json: { schema: { $ref: '#/components/schemas/ClaimedAdviceAnalyticsJob' } } } }
+        '204': { description: No eligible job }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /internal/v1/analytics/advice-jobs/{jobId}/result:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: completeAdviceAnalyticsJob
+      security: []
+      parameters:
+        - name: X-Analytics-Service-Token
+          in: header
+          required: true
+          schema: { type: string, minLength: 16 }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsResult' } } }
+      responses:
+        '204': { description: Result persisted or duplicate delivery acknowledged }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { description: Report does not match the leased algorithm or watermark }
 components:
   securitySchemes:
     bffSession:
@@ -5790,3 +5883,45 @@ components:
         fieldErrors:
           type: object
           additionalProperties: { type: string }
+    AdviceAnalyticsJob:
+      type: object
+      additionalProperties: false
+      required: [id, state, inputWatermark, algorithmVersion, completeness, errorCode, report, updatedAt]
+      properties:
+        id: { type: [string, 'null'], format: uuid }
+        state: { type: [string, 'null'], enum: [pending, processing, ready, failed, stale, null] }
+        inputWatermark: { type: [string, 'null'], pattern: '^[1-9][0-9]*$' }
+        algorithmVersion: { type: [string, 'null'], const: advice-f43.v1 }
+        completeness: { type: [string, 'null'], enum: [complete, partial, null] }
+        errorCode: { type: [string, 'null'], maxLength: 64 }
+        report: { type: [object, 'null'], additionalProperties: true }
+        updatedAt: { type: string, format: date-time }
+    AdviceAnalyticsError:
+      type: object
+      additionalProperties: false
+      required: [reasonCode]
+      properties:
+        reasonCode: { type: string, const: too_many_items }
+    ClaimedAdviceAnalyticsJob:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, ownerUserId, inputWatermark, algorithmVersion, leaseToken, attemptCount, input]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        ownerUserId: { type: string, format: uuid }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]*$' }
+        algorithmVersion: { type: string, const: advice-f43.v1 }
+        leaseToken: { type: string, format: uuid }
+        attemptCount: { type: integer, minimum: 1, maximum: 5 }
+        input: { type: object, additionalProperties: true }
+    AdviceAnalyticsResult:
+      type: object
+      additionalProperties: false
+      required: [leaseToken, inputWatermark, algorithmVersion, report, errorCode]
+      properties:
+        leaseToken: { type: string, format: uuid }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]*$' }
+        algorithmVersion: { type: string, const: advice-f43.v1 }
+        report: { type: [object, 'null'], additionalProperties: true }
+        errorCode: { type: [string, 'null'], maxLength: 64 }
