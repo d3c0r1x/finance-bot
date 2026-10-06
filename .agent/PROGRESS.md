@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 02:23, Europe/Moscow.
+Updated: 2026-10-07 02:39, Europe/Moscow.
 
 ## Global plan
 
@@ -65,21 +65,23 @@ Updated: 2026-10-07 02:23, Europe/Moscow.
 | F42.4 | Calculate optional-spend impact in Go; persist exact report in Core preview; display it in Web | COMMITTED — local Go/Core/Web/contracts GREEN; pushed, but GitHub returned no run for the SHA | F42.3 | 659b537 |
 | F42.5 | Telegram `/recalculate` preview with actor-scoped explicit apply | COMMITTED — local gates GREEN; pushed, GitHub returned no run for the SHA | F42.4 | 1a484bb |
 | F43 | Advice analytics calculation, durable member job, Go worker, Web report | COMPLETE — F43.1–F43.4 pushed; local gates green; GitHub CI did not start | F42 | a911e27 |
-| F44 | Product/group goal candidates, count/sum, one active 30-day goal | IN PROGRESS — F44.1 and F44.2 pushed and locally green; Web surface remains | F43 | pending |
+| F44 | Product/group goal candidates, count/sum, one active 30-day goal | COMPLETE — F44.1–F44.3 locally green and pushed; GitHub did not start workflows | F43 | 2e5dce4 |
 | F44.1 | Deterministic Go product/group candidates and internal service API | COMPLETE — `959c750`; nullable-amount correction `d8591d3`; Go/contract gates pass | F44 | d8591d3 |
-| F44.2 | Member-scoped preference, accepted goal, Core API/BFF | COMPLETE — `88f868b`; isolated PostgreSQL, Core and contract gates pass | F44.1 | 88f868b |
+| F44.2 | Member-scoped preference, accepted goal, Core API/BFF | COMPLETE — `88f868b`; combined payload cap correction `e4d0d61`; isolated PostgreSQL, Core and contract gates pass | F44.1 | e4d0d61 |
+| F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
+| F45 | Goal progress, purchase note, completion, history, next candidate | IN PROGRESS — lifecycle contract and acceptance tests are next; no F45 code claimed | F44 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F44.3 — Web goal proposal and active-goal experience, RU/EN, viewer read-only.
-- Status: ANALYSIS — F44.1/F44.2 are locally green and pushed. Add Web component tests first, then render member-owned candidates, accept, active terms, remaining window, unavailable amounts and errors.
-- Acceptance: Core recalculates a current proposal; only a matching candidate key and watermark can be accepted; one active immutable 30-day goal per member; count preference preserves unknown money as null; sum proposals never fabricate missing values.
-- Changed files: F44.1 follow-up `d8591d3`; F44.2 `88f868b`; F44.3 code/tests not started.
+- ID and outcome: F45.1 — durable goal progress and completed-goal history with next-candidate access.
+- Status: ANALYSIS — F44 complete; inspect approved legacy behavior, specify F45 contract, then write focused Go/Core acceptance tests and observe RED.
+- Acceptance: progress uses only confirmed member-owned receipt facts in the immutable 30-day window; purchase updates are visible after refresh; closing an expired goal is idempotent; cancellation never creates a completed outcome; archive is retained independently of the active goal; legacy history retention is accounted for; user can reach next candidates after completion.
+- Changed files: F44.1 follow-up `d8591d3`; F44.2 `88f868b`, `e4d0d61`; F44.3 `2e5dce4`; F45 implementation not started.
 - User choices: maintain F01–F60 scope; personal MVP first; V2 deferred; preserve 30-day goal promise and one active goal per member.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `88f868b`; unrelated user-owned untracked files remain untouched.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `2e5dce4`; unrelated user-owned untracked files remain untouched.
 - Runtime: public HTTPS, persistent server and installed Android MVP remain unverified; no deployment or network configuration was changed.
-- Updated at: 2026-10-07 02:23 Europe/Moscow.
+- Updated at: 2026-10-07 02:39 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -192,7 +194,7 @@ Updated: 2026-10-07 02:23, Europe/Moscow.
 
 ## Next action
 
-- F44.3: add RU/EN Web goal proposal and active-goal component tests first. Preserve nullable monetary estimates, member/viewer controls, reload and stale/error behavior. Then run Web tests/build, contract regression, update parity and commit after GREEN. GitHub returned no workflow runs for F44.1 correction `d8591d3` or F44.2 `88f868b`.
+- F45.1: document lifecycle contract and acceptance matrix from the F45 global requirement plus verified `services/goals.py` legacy behavior. Then write a Go progress-calculation test and Core/PostgreSQL lifecycle acceptance test before implementation. F44 CI queries returned no runs for `e4d0d61` and `2e5dce4`.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
@@ -1330,3 +1332,11 @@ Updated: 2026-10-07 02:23, Europe/Moscow.
 - V39 adds RLS-protected goal storage and member count/sum preference. Core rebuilds the member-only snapshot and watermark before acceptance, stores immutable terms and audit/outbox events, and lets a preference change affect future proposals without rewriting the active goal. BFF writes use normal session CSRF protection.
 - F44.2 GREEN: focused PostgreSQL goal/API tests pass on isolated `finance_test_codex_20261004`; full `:services:core:check` passes; contract/migration suite 65 passed, 2 optional database skips; Go suite/vet and `git diff --check` pass.
 - Committed/pushed as `88f868b` (`feat(F44.2): add member goal persistence and API`). `gh run list --commit 88f868b` returned `[]`; GitHub CI did not start. Next: F44.3 Web tests first, then RU/EN candidate and active-goal UI.
+
+## E4.77 F44 completion and F45 start — 2026-10-07 02:39 MSK
+
+- F44.2 payload-bound follow-up: test first observed compile RED for missing overflow-safe combined decision/purchase bound; unit coverage verifies exact 50,000, over-limit, negative, and integer-max inputs. Full Core `check` passed; committed/pushed `e4d0d61`.
+- F44.3 GREEN and commit `2e5dce4`: RU/EN Web proposal/active-goal surface; 72/72 Web tests, production TypeScript/Vite build, full Core/PostgreSQL regression and `git diff --check` passed. F44 is complete locally and pushed.
+- `gh run list --commit e4d0d61` and `--commit 2e5dce4` returned no runs; remote CI did not start and is not reported as green.
+- Legacy F45 semantics inventoried in `services/goals.py`: 30-day fixed window; progress is bounded through the current time; category goals use the accepted member list; completion archives one summary, cancelled goals are not completed outcomes, history keeps newest first up to 24 and presents five; finished goals expose next candidates. F45 remains unimplemented in the rewrite.
+- Next: define F45.1 contract around per-member confirmed facts, progress/history persistence, exactly-once completion, cancellation exclusion, and candidate availability; write tests and observe RED before code.

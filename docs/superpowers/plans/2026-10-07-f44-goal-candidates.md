@@ -25,4 +25,4 @@
 - [x] Render Core candidates on `/goals`, support writer-only unit changes and explicit accept/cancel, show immutable terms and the remaining 30-day window, and keep viewer controls read-only.
 - [x] Show unknown money as an em dash, explain missing amounts, and refresh after a stale-watermark response; add RU/EN text and mobile layout.
 - [x] Run all Web tests (72/72), production TypeScript/Vite build, full Core/PostgreSQL regression and `git diff --check`.
-- [ ] Commit F44.3 separately and record parity/progress evidence. F44 completes only after F44.1–F44.3 gates pass.
+- [x] Commit F44.3 separately and record parity/progress evidence. F44.1–F44.3 gates pass; F44 is complete. F45 lifecycle/history and F46 outcome delivery remain separate.
