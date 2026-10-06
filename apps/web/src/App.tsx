@@ -75,6 +75,11 @@ const copy = {
     monthlyFamilyBudget: 'Семейный месячный лимит', monthlyPersonalBudget: 'Личный месячный лимит',
     reportWindow: 'Даты и часовой пояс',
     dailyExpenses: 'Расходы по дням', budgetUsage: 'Использование месячных лимитов',
+    optionalPurchases: 'Необязательные покупки', wasteOfReviewed: 'от проверенных', wasteReviewedItems: 'Проверенных позиций',
+    wasteOptionalItems: 'Необязательных позиций', wasteSource: 'Источник', wasteTopItems: 'Необязательные позиции',
+    wasteCorrected: 'Исправленные позиции', wasteMissingAmounts: 'Не все позиции чеков имеют сумму ({count}); итоги не рассчитаны.',
+    wasteNoReviewed: 'Нет проверенных позиций чеков за период.', wasteTooMany: 'Слишком много позиций чеков для анализа.',
+    wasteUnavailable: 'Аналитика временно недоступна.', wasteUnknown: 'Нет доступных итогов аналитики.',
   },
   en: {
     brand: 'Finance', login: 'Sign in', loginTitle: 'Money, clearly', loginText: 'One clear view of your personal and family finances.',
@@ -138,6 +143,11 @@ const copy = {
     monthlyFamilyBudget: 'Family monthly limit', monthlyPersonalBudget: 'Personal monthly limit',
     reportWindow: 'Dates and time zone',
     dailyExpenses: 'Daily expenses', budgetUsage: 'Monthly budget usage',
+    optionalPurchases: 'Optional purchases', wasteOfReviewed: 'of reviewed', wasteReviewedItems: 'Reviewed items',
+    wasteOptionalItems: 'Optional items', wasteSource: 'Source', wasteTopItems: 'Optional items',
+    wasteCorrected: 'Corrected items', wasteMissingAmounts: 'Some receipt items have no amount ({count}); totals not calculated.',
+    wasteNoReviewed: 'No reviewed receipt items for this period.', wasteTooMany: 'Too many receipt items to analyze.',
+    wasteUnavailable: 'Analytics is temporarily unavailable.', wasteUnknown: 'No analytics totals available.',
   },
 } as const;
 
@@ -875,6 +885,7 @@ function ReportPanel({ t, tenantId, language }: { t: Translations; tenantId: str
           </article>}
         </div>
         <RollingFoodSummary t={t} status={report.data.rolling7FoodStatus} format={format} />
+        <WasteSummary t={t} report={report.data.waste} format={format} language={language} />
         {report.data.monthlyBudgetLimit !== null && report.data.monthlyBudgetRemaining !== null && <p className="report-budget">
           {scope === 'family' ? t.monthlyFamilyBudget : t.monthlyPersonalBudget}: <strong>{format(report.data.monthlyBudgetLimit)}</strong>
           {' · '}{t.currentBudgetRemaining}: <strong>{format(report.data.monthlyBudgetRemaining)}</strong>
@@ -889,6 +900,40 @@ function ReportPanel({ t, tenantId, language }: { t: Translations; tenantId: str
         </div>
       </>}
   </section>;
+}
+
+function WasteSummary({ t, report, format, language }: {
+  t: Translations; report: FinanceReport['waste']; format: (amount: string) => string; language: Language;
+}) {
+  const unavailableMessage = report.reasonCode === 'missing_amounts'
+    ? t.wasteMissingAmounts.replace('{count}', String(report.missingAmountCount))
+    : report.reasonCode === 'no_reviewed_items' ? t.wasteNoReviewed
+      : report.reasonCode === 'too_many_items' ? t.wasteTooMany
+        : report.reasonCode === 'analytics_unavailable' ? t.wasteUnavailable : t.wasteUnknown;
+  const share = report.optionalShare === null ? null
+    : Number(report.optionalShare) * 100;
+  const shareText = share === null || !Number.isFinite(share) ? '—'
+    : `${share.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-US', { maximumFractionDigits: 1 })}%`;
+
+  return <article className="report-waste">
+    <h3>{t.optionalPurchases}</h3>
+    {!report.available ? <p>{unavailableMessage}</p> : <>
+      <p>{report.optionalSpend === null ? '—' : format(report.optionalSpend)} · {shareText} {t.wasteOfReviewed} {report.reviewedSpend === null ? '—' : format(report.reviewedSpend)}</p>
+      <p>{t.wasteReviewedItems}: {report.reviewedItemCount} · {t.wasteOptionalItems}: {report.optionalItemCount}</p>
+      {Object.keys(report.bySource).length > 0 && <>
+        <h4>{t.wasteSource}</h4><ul>{Object.entries(report.bySource).sort(([a], [b]) => a.localeCompare(b)).map(([source, amount]) =>
+          <li key={source}>{source}: <strong>{format(amount)}</strong></li>)}</ul>
+      </>}
+      {report.topItems.length > 0 && <>
+        <h4>{t.wasteTopItems}</h4><ul>{report.topItems.map((item) =>
+          <li key={`${item.name}-${item.source}`}>{item.name}: <strong>{format(item.amount)}</strong> · {item.source}</li>)}</ul>
+      </>}
+      {report.corrected.length > 0 && <>
+        <h4>{t.wasteCorrected}</h4><ul>{report.corrected.map((item) =>
+          <li key={`${item.productName}-${item.count}`}>{item.productName}: <strong>{format(item.amount)}</strong> · {item.count}</li>)}</ul>
+      </>}
+    </>}
+  </article>;
 }
 
 const budgetRows = [

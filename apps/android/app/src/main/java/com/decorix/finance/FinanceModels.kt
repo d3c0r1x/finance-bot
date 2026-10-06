@@ -121,7 +121,27 @@ data class FinanceReport(
     val monthlyBudgetRemaining: String?,
     val rolling7FoodStatus: RollingFoodStatus,
     val expenseByDay: Map<String, String> = emptyMap(),
+    val waste: FinanceWasteReport = FinanceWasteReport(false, "analytics_unavailable", "partial",
+        null, null, null, 0, 0, 0, emptyMap(), emptyList(), emptyList()),
 )
+
+data class FinanceWasteReport(
+    val available: Boolean,
+    val reasonCode: String,
+    val completeness: String,
+    val reviewedSpend: String?,
+    val optionalSpend: String?,
+    val optionalShare: String?,
+    val reviewedItemCount: Int,
+    val optionalItemCount: Int,
+    val missingAmountCount: Int,
+    val bySource: Map<String, String>,
+    val topItems: List<FinanceWasteItem>,
+    val corrected: List<FinanceWasteCorrection>,
+)
+
+data class FinanceWasteItem(val name: String, val amount: String, val verdict: String, val source: String)
+data class FinanceWasteCorrection(val productName: String, val count: Int, val amount: String)
 
 data class FinanceShoppingCandidate(
     val productName: String,
@@ -393,7 +413,38 @@ internal object FinanceModels {
         monthlyBudgetRemaining = nullableString(json, "monthlyBudgetRemaining"),
         rolling7FoodStatus = rollingFoodStatus(json),
         expenseByDay = stringMap(json, "expenseByDay"),
+        waste = wasteReport(json.getJSONObject("waste")),
     )
+
+    private fun wasteReport(json: JSONObject): FinanceWasteReport {
+        val topItems = json.getJSONArray("topItems").let { items ->
+            (0 until items.length()).map { index ->
+                val item = items.getJSONObject(index)
+                FinanceWasteItem(item.getString("name"), item.getString("amount"),
+                    item.getString("verdict"), item.getString("source"))
+            }
+        }
+        val corrected = json.getJSONArray("corrected").let { items ->
+            (0 until items.length()).map { index ->
+                val item = items.getJSONObject(index)
+                FinanceWasteCorrection(item.getString("productName"), item.getInt("count"), item.getString("amount"))
+            }
+        }
+        return FinanceWasteReport(
+            available = json.getBoolean("available"),
+            reasonCode = json.getString("reasonCode"),
+            completeness = json.getString("completeness"),
+            reviewedSpend = nullableString(json, "reviewedSpend"),
+            optionalSpend = nullableString(json, "optionalSpend"),
+            optionalShare = nullableString(json, "optionalShare"),
+            reviewedItemCount = json.getInt("reviewedItemCount"),
+            optionalItemCount = json.getInt("optionalItemCount"),
+            missingAmountCount = json.getInt("missingAmountCount"),
+            bySource = stringMap(json, "bySource"),
+            topItems = topItems,
+            corrected = corrected,
+        )
+    }
 
     fun shoppingList(json: JSONObject): FinanceShoppingList {
         val moneyPattern = Regex("^(?:0|[1-9]\\d{0,21})\\.\\d{2}$")

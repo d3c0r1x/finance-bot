@@ -345,6 +345,32 @@ class FinanceScreensTest {
         compose.onNodeWithText("2026-10-02: 0.00 RUB").assertIsDisplayed()
     }
 
+    @Test fun reportShowsWasteAmountsSourcesAndCorrectionsInBothLanguages() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), report = report()))
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithTag("report-results").performScrollToIndex(1)
+        compose.onNodeWithText("Необязательные покупки: 20.00 ₽ · 16.7% от проверенных 120.00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Источник model: 13.00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Сок: 13.00 RUB · model").assertIsDisplayed()
+        compose.onNodeWithText("Исправлено: Молоко · 30.00 ₽").assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("report-results").performScrollToIndex(1)
+        compose.onNodeWithText("Optional purchases: 20.00 RUB · 16.7% of reviewed 120.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("Source model: 13.00 RUB").assertIsDisplayed()
+    }
+
+    @Test fun reportUnavailableWasteShowsReasonWithoutZeroAmount() {
+        val unavailable = FinanceWasteReport(false, "missing_amounts", "partial", null, null, null,
+            2, 0, 1, emptyMap(), emptyList(), emptyList())
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            report = report().copy(waste = unavailable)))
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithTag("report-results").performScrollToIndex(1)
+        compose.onNodeWithText("Не все позиции чеков имеют сумму (1); итоги не рассчитаны.").assertIsDisplayed()
+        compose.onNodeWithText("0.00 ₽").assertDoesNotExist()
+    }
+
     @Test fun transactionTextCreatesDraftThenRequiresReviewBeforeConfirmation() {
         var submittedText: String? = null
         var edit: TransactionDraftEdit? = null
@@ -473,5 +499,9 @@ class FinanceScreensTest {
 
     private fun report() = FinanceReport("month", "family", "2026-10-01", "2026-10-01", "2026-10-01",
         "Europe/Moscow", "RUB", "120000.00", "64000.50", "3000.00", "250.00", 12,
-        mapOf("еда" to "15000.25"), null, "50000.00", "-14000.50", budget().rolling7FoodStatus)
+        mapOf("еда" to "15000.25"), null, "50000.00", "-14000.50", budget().rolling7FoodStatus,
+        waste = FinanceWasteReport(true, "available", "complete", "120.00", "20.00", "0.166667",
+            5, 2, 0, mapOf("model" to "13.00", "rule" to "7.00"),
+            listOf(FinanceWasteItem("Сок", "13.00", "optional", "model")),
+            listOf(FinanceWasteCorrection("Молоко", 1, "30.00"))))
 }

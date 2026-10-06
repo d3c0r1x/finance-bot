@@ -76,6 +76,10 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 .report-controls select, .report-controls input { min-width: 0; width: 100%; min-height: 43px; padding: 0 12px; color: #172338; border: 1px solid #dfe6ef; border-radius: 9px; background: white; }
 .report-window { color: #718097; font-size: 12px; }
 .report-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin: 18px 0; }
+.report-waste { margin-top: 16px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fbfcfe; }
+.report-waste h3, .report-waste h4 { margin: 0 0 8px; }
+.report-waste p { margin: 7px 0; color: #526177; }
+.report-waste ul { display: flex; flex-wrap: wrap; gap: 8px 20px; padding-left: 20px; color: #526177; }
 .report-budget { padding: 13px 15px; border-radius: 10px; color: #526177; background: #f5f8fb; }
 .report-categories { margin-top: 22px; }
 .report-categories h3 { font-size: 16px; }

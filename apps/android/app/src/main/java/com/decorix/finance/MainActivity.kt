@@ -1244,6 +1244,37 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                         }
                     }
                 }
+                item {
+                    val waste = report.waste
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(if (russian) "Необязательные покупки" else "Optional purchases",
+                                style = MaterialTheme.typography.titleMedium)
+                            if (!waste.available) {
+                                Text(wasteUnavailableMessage(waste, russian))
+                            } else {
+                                val share = waste.optionalShare?.toBigDecimalOrNull()?.multiply(java.math.BigDecimal(100))
+                                    ?.setScale(1, java.math.RoundingMode.HALF_UP)?.stripTrailingZeros()?.toPlainString() ?: "—"
+                                val optional = waste.optionalSpend ?: "—"
+                                val reviewed = waste.reviewedSpend ?: "—"
+                                Text(if (russian) "Необязательные покупки: $optional ₽ · $share% от проверенных $reviewed ₽"
+                                else "Optional purchases: $optional ${report.currency} · $share% of reviewed $reviewed ${report.currency}")
+                                Text(if (russian) "Проверено: ${waste.reviewedItemCount} · необязательных: ${waste.optionalItemCount}"
+                                else "Reviewed: ${waste.reviewedItemCount} · optional: ${waste.optionalItemCount}")
+                                waste.bySource.toSortedMap().forEach { (source, amount) ->
+                                    Text(if (russian) "Источник $source: $amount ₽" else "Source $source: $amount ${report.currency}")
+                                }
+                                waste.topItems.forEach { item ->
+                                    Text("${item.name}: ${item.amount} ${report.currency} · ${item.source}")
+                                }
+                                waste.corrected.forEach { item ->
+                                    Text(if (russian) "Исправлено: ${item.productName} · ${item.amount} ₽"
+                                    else "Corrected: ${item.productName} · ${item.amount} ${report.currency}")
+                                }
+                            }
+                        }
+                    }
+                }
                 items(report.expenseByCategory.toSortedMap().entries.toList()) { entry ->
                     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("${entry.key}: ${entry.value} ${report.currency}")
@@ -1265,6 +1296,14 @@ private fun ReportScreen(state: FinanceUiState, language: String,
             }
         }
     }
+}
+
+private fun wasteUnavailableMessage(waste: FinanceWasteReport, russian: Boolean): String = when (waste.reasonCode) {
+    "missing_amounts" -> if (russian) "Не все позиции чеков имеют сумму (${waste.missingAmountCount}); итоги не рассчитаны."
+        else "Some receipt items have no amount (${waste.missingAmountCount}); totals not calculated."
+    "no_reviewed_items" -> if (russian) "Нет проверенных позиций чеков за период." else "No reviewed receipt items for this period."
+    "too_many_items" -> if (russian) "Слишком много позиций чеков для анализа." else "Too many receipt items to analyze."
+    else -> if (russian) "Аналитика временно недоступна." else "Analytics is temporarily unavailable."
 }
 
 private fun amountFraction(value: String, maximum: String): Float {

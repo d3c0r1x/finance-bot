@@ -142,6 +142,15 @@ describe('web onboarding and transaction flow', () => {
           weekendSharePercent: 40, monthlyBudgetLimit: url.includes('period=month') ? (family ? '70000.00' : '55000.00') : null,
           monthlyBudgetRemaining: url.includes('period=month') ? (family ? '-4500.00' : '40500.00') : null,
           rolling7FoodStatus: foodStatusWithoutHistory,
+          waste: url.includes('period=custom')
+            ? { available: false, reasonCode: 'missing_amounts', completeness: 'partial', reviewedSpend: null,
+              optionalSpend: null, optionalShare: null, reviewedItemCount: 2, optionalItemCount: 0, missingAmountCount: 1,
+              bySource: {}, topItems: [], corrected: [] }
+            : { available: true, reasonCode: 'available', completeness: 'complete', reviewedSpend: '120.00',
+              optionalSpend: '20.00', optionalShare: '0.166667', reviewedItemCount: 5, optionalItemCount: 2,
+              missingAmountCount: 0, bySource: { model: '13.00', rule: '7.00' },
+              topItems: [{ name: 'Сок', amount: '13.00', verdict: 'optional', source: 'model' }],
+              corrected: [{ productName: 'Молоко', count: 1, amount: '30.00' }] },
         });
       }
       if (url.includes('/transactions?')) return json({ items: [], nextCursor: null });
@@ -165,6 +174,11 @@ describe('web onboarding and transaction flow', () => {
     expect(screen.getByText(/Остаток месячного лимита/).closest('p')).toHaveTextContent(/40\s*500,00/);
     expect(screen.getByRole('figure', { name: 'Использование месячных лимитов' }))
       .toHaveTextContent(/14\s*500,00.*55\s*000,00/);
+    expect(screen.getByText('Необязательные покупки').closest('article'))
+      .toHaveTextContent(/20,00.*16,7%.*120,00/);
+    expect(screen.getByText(/model:/).closest('li')).toHaveTextContent(/13,00/);
+    expect(screen.getByText(/Сок:/).closest('li')).toHaveTextContent(/13,00/);
+    expect(screen.getByText(/Молоко:/).closest('li')).toHaveTextContent(/30,00/);
     await user.selectOptions(screen.getByLabelText('Область отчёта'), 'family');
     await waitFor(() => expect(screen.getByText(/Остаток месячного лимита/).closest('p'))
       .toHaveTextContent(/Семейный месячный лимит.*70\s*000,00.*-4\s*500,00/));
@@ -172,11 +186,16 @@ describe('web onboarding and transaction flow', () => {
       .toHaveTextContent(/74\s*500,00.*70\s*000,00/);
     expect(screen.getByRole('figure', { name: 'Использование месячных лимитов' }).querySelector('.chart-bar'))
       .toHaveStyle({ width: '100%' });
+    await user.click(screen.getByRole('button', { name: 'EN' }));
+    expect(screen.getByText('Optional purchases').closest('article')).toHaveTextContent(/20\.00.*16\.7%.*120\.00/);
+    await user.click(screen.getByRole('button', { name: 'RU' }));
     await user.selectOptions(screen.getByLabelText('Период отчёта'), 'custom');
     await user.type(screen.getByLabelText('С даты отчёта'), '2026-10-01');
     await user.type(screen.getByLabelText('По дату отчёта'), '2026-10-03');
     await waitFor(() => expect(reportRequests.some((url) => url.includes('period=custom')
       && url.includes('from=2026-10-01') && url.includes('to=2026-10-03'))).toBe(true));
+    expect(await screen.findByText(/Не все позиции чеков имеют сумму/)).toBeInTheDocument();
+    expect(screen.getByText('Необязательные покупки').closest('article')).not.toHaveTextContent(/0,00/);
     expect(reportRequests.some((url) => url.includes('/reports/family?period=month'))).toBe(true);
     await waitFor(() => expect(screen.queryByRole('figure', { name: 'Использование месячных лимитов' })).not.toBeInTheDocument());
     expect(screen.getByRole('figure', { name: 'Расходы по дням' })).toBeInTheDocument();

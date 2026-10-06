@@ -98,7 +98,95 @@ def _validated_report(report: Mapping[str, object]) -> tuple[
         budget = (_money(raw_limit, "monthlyBudgetLimit"),
                   _signed_money(raw_remaining, "monthlyBudgetRemaining"))
     food_status = _validated_rolling_food_status(report.get("rolling7FoodStatus"))
+    _validated_waste(report.get("waste"), present="waste" in report)
     return from_date, to_date, categories, days, budget, food_status
+
+
+def _validated_waste(value: object, *, present: bool) -> Mapping[str, object] | None:
+    if not present:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError("waste must be an object")
+    if type(value.get("available")) is not bool:
+        raise ValueError("waste.available must be boolean")
+    for field in ("reviewedItemCount", "optionalItemCount", "missingAmountCount"):
+        if type(value.get(field)) is not int or value[field] < 0:
+            raise ValueError(f"waste.{field} must be a non-negative integer")
+    reason = value.get("reasonCode")
+    completeness = value.get("completeness")
+    if reason not in {"available", "no_reviewed_items", "missing_amounts", "too_many_items", "analytics_unavailable"}:
+        raise ValueError("waste.reasonCode is invalid")
+    if completeness not in {"complete", "partial"}:
+        raise ValueError("waste.completeness is invalid")
+    if value["available"]:
+        if reason != "available":
+            raise ValueError("available waste must have available reason")
+        _money(value.get("reviewedSpend"), "waste.reviewedSpend")
+        _money(value.get("optionalSpend"), "waste.optionalSpend")
+        share_value = value.get("optionalShare")
+        if not isinstance(share_value, str) or not re.fullmatch(r"(?:0|1)(?:\.\d{1,6})?", share_value):
+            raise ValueError("waste.optionalShare must be a decimal ratio")
+        if Decimal(share_value) > 1:
+            raise ValueError("waste.optionalShare must be between zero and one")
+        sources = value.get("bySource")
+        if not isinstance(sources, Mapping):
+            raise ValueError("waste.bySource must be an object")
+        for source, amount in sources.items():
+            if not isinstance(source, str) or not source or len(source) > 64:
+                raise ValueError("waste source labels must be non-empty strings up to 64 characters")
+            _money(amount, f"waste.bySource.{source}")
+        for field in ("topItems", "corrected"):
+            if not isinstance(value.get(field), list):
+                raise ValueError(f"waste.{field} must be an array")
+        for item in value["topItems"]:
+            if not isinstance(item, Mapping):
+                raise ValueError("waste.topItems entries must be objects")
+            for field in ("name", "verdict", "source"):
+                if not isinstance(item.get(field), str) or not item[field]:
+                    raise ValueError(f"waste.topItems.{field} is required")
+            _money(item.get("amount"), "waste.topItems.amount")
+        for item in value["corrected"]:
+            if not isinstance(item, Mapping):
+                raise ValueError("waste.corrected entries must be objects")
+            if not isinstance(item.get("productName"), str) or not item["productName"]:
+                raise ValueError("waste.corrected.productName is required")
+            if type(item.get("count")) is not int or item["count"] <= 0:
+                raise ValueError("waste.corrected.count must be positive")
+            _money(item.get("amount"), "waste.corrected.amount")
+    else:
+        if reason == "available" or any(value.get(field) is not None
+                                        for field in ("reviewedSpend", "optionalSpend", "optionalShare")):
+            raise ValueError("unavailable waste cannot include totals")
+    return value
+
+
+def _waste_lines(waste: Mapping[str, object] | None, currency: str) -> list[str]:
+    if waste is None:
+        return []
+    if not waste["available"]:
+        reason = waste["reasonCode"]
+        missing_count = waste["missingAmountCount"]
+        if reason == "missing_amounts":
+            noun = "item has" if missing_count == 1 else "items have"
+            return [f"Optional purchases unavailable: {missing_count} receipt {noun} no amount; totals not calculated"]
+        messages = {
+            "no_reviewed_items": "No reviewed receipt items in this period; no optional-spend total",
+            "too_many_items": "Optional-spend analysis unavailable: too many receipt items",
+            "analytics_unavailable": "Optional-spend analysis temporarily unavailable",
+        }
+        return [messages.get(str(reason), f"Optional-spend analysis unavailable ({reason})")]
+
+    share = Decimal(str(waste["optionalShare"])) * 100
+    lines = [f"Optional purchases: {waste['optionalSpend']} {currency} "
+             f"({share:.1f}% of reviewed {waste['reviewedSpend']} {currency})",
+             f"Reviewed items: {waste['reviewedItemCount']} · optional items: {waste['optionalItemCount']}"]
+    lines.extend(f"Source {source}: {amount} {currency}"
+                 for source, amount in sorted(waste["bySource"].items()))
+    lines.extend(f"{item['name']}: {item['amount']} {currency} ({item['source']})"
+                 for item in waste["topItems"][:5])
+    lines.extend(f"Corrected: {item['productName']} · {item['amount']} {currency}"
+                 for item in waste["corrected"][:5])
+    return lines
 
 
 def _validated_rolling_food_status(value: object) -> Mapping[str, object] | None:
@@ -154,12 +242,14 @@ def _required_text(report: Mapping[str, object], field: str) -> str:
 
 def render_report_png(report: Mapping[str, object]) -> bytes:
     from_date, to_date, categories, days, budget, _food_status = _validated_report(report)
+    waste = _validated_waste(report.get("waste"), present="waste" in report)
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as error:
         raise RendererUnavailable("Pillow is unavailable") from error
 
-    image = Image.new("RGB", PNG_SIZE, "#f7f9fc")
+    waste_lines = _waste_lines(waste, _required_text(report, "currency"))
+    image = Image.new("RGB", (PNG_SIZE[0], PNG_SIZE[1] + (160 if waste is not None else 0)), "#f7f9fc")
     draw = ImageDraw.Draw(image)
     font = ImageFont.load_default(size=17)
     title_font = ImageFont.load_default(size=30)
@@ -230,6 +320,28 @@ def render_report_png(report: Mapping[str, object]) -> bytes:
     end_label = to_date.isoformat()
     draw.text((right - 94, 506), end_label, fill="#68778e", font=subtitle_font)
 
+    if waste_lines:
+        draw.text((38, 552), "Optional spending", fill="#25354b", font=font)
+        if waste is None or not waste["available"]:
+            draw.text((38, 582), waste_lines[0][:110], fill="#526177", font=subtitle_font)
+        else:
+            draw.text((38, 578), waste_lines[0][:110], fill="#25354b", font=subtitle_font)
+            draw.text((38, 601), waste_lines[1], fill="#68778e", font=subtitle_font)
+            sources = [f"{key}: {amount}" for key, amount in sorted(waste["bySource"].items())]
+            top_items = [f"{item['name'][:18]}{'…' if len(item['name']) > 18 else ''}: "
+                         f"{item['amount']} ({item['source']})" for item in waste["topItems"][:5]]
+            corrected = [f"{item['productName'][:18]}{'…' if len(item['productName']) > 18 else ''}: "
+                         f"{item['amount']} · {item['count']}"
+                         for item in waste["corrected"][:5]]
+            columns = [(38, "Sources", sources), (350, "Top optional items", top_items),
+                       (660, "Allowed corrections", corrected)]
+            for x, title, rows in columns:
+                draw.text((x, 628), title, fill="#25354b", font=subtitle_font)
+                if not rows:
+                    draw.text((x, 650), "None", fill="#8290a5", font=subtitle_font)
+                for index, row in enumerate(rows):
+                    draw.text((x, 650 + index * 22), row[:40], fill="#526177", font=subtitle_font)
+
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()
@@ -287,6 +399,7 @@ def report_text(report: Mapping[str, object]) -> str:
     if budget is not None:
         lines.append(f"Monthly budget: {budget[0]:.2f} {currency}; remaining: {budget[1]:.2f} {currency}")
     lines.extend(rolling_food_lines(food_status, currency))
+    lines.extend(_waste_lines(_validated_waste(report.get("waste"), present="waste" in report), currency))
     return "\n".join(lines)
 
 

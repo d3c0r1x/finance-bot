@@ -78,6 +78,14 @@ export type Debt = {
 };
 export type DebtPage = { items: Debt[] };
 export type DebtForecast = { debtId: string; monthsToPayoff: number | null; estimateBasis: string };
+export type FinanceWasteReport = {
+  available: boolean; reasonCode: string; completeness: 'complete' | 'partial';
+  reviewedSpend: string | null; optionalSpend: string | null; optionalShare: string | null;
+  reviewedItemCount: number; optionalItemCount: number; missingAmountCount: number;
+  bySource: Record<string, string>;
+  topItems: Array<{ name: string; amount: string; verdict: string; source: string }>;
+  corrected: Array<{ productName: string; count: number; amount: string }>;
+};
 export type FinanceReport = {
   period: 'month' | 'week' | '90d' | 'custom'; scope: 'personal' | 'family'; fromDate: string; toDate: string;
   asOfDate: string; timezone: string; currency: 'RUB'; incomeTotal: string; expenseTotal: string;
@@ -85,6 +93,7 @@ export type FinanceReport = {
   expenseByDay: Record<string, string>;
   weekendSharePercent: number | null; monthlyBudgetLimit: string | null; monthlyBudgetRemaining: string | null;
   rolling7FoodStatus: RollingFoodStatus;
+  waste: FinanceWasteReport;
 };
 export type CreateTransaction = Pick<Transaction, 'type' | 'amount' | 'currency' | 'categoryCode' | 'description' | 'source' | 'occurredAt'>
   & { subcategoryCode?: string | null; ownerUserId?: string | null };

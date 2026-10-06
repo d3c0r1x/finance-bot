@@ -43,15 +43,15 @@ Updated: 2026-10-06 06:02, Europe/Moscow.
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 | F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
 | F39 | Mute and restore recurring series | COMPLETE — local gates and GitHub rerun pass | F38 | b1e64c4 + 2de08d9 |
-| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1 and F40.2 complete; client presentation remains | F39 | pending |
+| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1/F40.2 GREEN; F40.3 commit pending | F39 | pending |
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
-| F40.3 | Web, Android and Telegram optional-spend presentation | ANALYSIS — preserve explicit availability states across existing report surfaces | F40.2 | pending |
+| F40.3 | Web, Android and Telegram optional-spend presentation | COMMIT_PENDING — client gates GREEN; record feature commit next | F40.2 | pending |
 
 ## Current goal
 
 - ID and outcome: F40.3 — present real optional-spend totals, verdict sources and allowed corrections consistently in Web, Android and Telegram.
-- Status: ANALYSIS — F40.2 is committed and GitHub-verified; add client acceptance tests before implementation.
+- Status: COMMIT_PENDING — Web, Telegram and Android client gates are GREEN; commit F40.3, then record its SHA.
 - Acceptance: available results show exact optional/reviewed amounts, share, source breakdown, top optional items and allowed corrections; partial/unavailable results show reason/count only without fabricated totals; Telegram PNG keeps text fallback useful; RU/EN Web and Android agree with Core values.
 - F40 boundary: Core resolves report window, tenant/member scope, confirmed receipt lines and per-owner allowed decisions. Go aggregates; Web, Android and Telegram render shared Core DTO. Missing line amounts produce unavailable partial data, never fabricated totals. F31 later renders the real daily optional-spend series.
 - Design: reuse report window/timezone and per-member `user_product_decisions`; send bounded authorized facts to stateless Go advice analytics; keep approved financial data in PostgreSQL.
@@ -115,6 +115,14 @@ Updated: 2026-10-06 06:02, Europe/Moscow.
 - F40.2 commit `68253b7e8e3fe5444ed0acf83e85f9fa27dbf848` is on `origin/feat/saas-rewrite`.
 - GitHub Core/PostgreSQL (`37406496536`), Python/contracts (`37406496576`), Telegram/bot (`37406496591`) and private receipt storage (`37406496544`) workflows pass. S3/ClamAV passed after rerunning its first HTTP timeout.
 - F40.2 is complete. F40.3 begins with client acceptance tests for available data, correction/source disclosure and honest unavailable states.
+
+## E3.40 F40.3 client presentation GREEN — 2026-10-06 06:31 MSK
+
+- Observed RED in Web, Telegram renderer/caption and Android acceptance before implementation. Available state now shows exact optional/reviewed totals, ratio, source totals, top optional goods and allowed corrections. Partial states show reason/count and never invented sums.
+- Web report panel is localized RU/EN and uses only the Core waste DTO. Android parses nullable totals and renders the same details and availability states. Telegram PNG grows to include source/top/correction columns; text fallback and caption preserve partial reasons.
+- GREEN: Web 49/49 and TypeScript/Vite production build; Python presentation/Telegram 112 passed; Android test compile and debug APK build passed; Android instrumentation 45/45 on isolated `FinanceBotF38` / `emulator-5556`; installed and launched. APK SHA-256 `87D8757BA4FE4D9356476F620109B4797088FCAA2DBA973331FFE7047CF09F89`. `git diff --check` passes.
+- Local Android used SHA-256-verified portable Temurin 17 from the per-user cache and Unity Android SDK; no project SDK configuration changed. Existing `Quest_Test` emulator was not touched.
+- Current Git commit is pending; do not start F31 until F40.3 is committed and pushed.
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
 

@@ -1155,7 +1155,13 @@ def test_report_command_uses_shared_report_dto_and_renders_photo_with_family_sco
                   "fromDate": "2026-09-28", "toDate": "2026-10-04", "limit": "1000.00",
                   "spent": "430.00", "remaining": "570.00", "limitStatus": "normal",
                   "usualWeeklySpend": None, "historyWeeks": 0,
-                  "paceStatus": "insufficient_history", "paceShare": None}}
+                  "paceStatus": "insufficient_history", "paceShare": None},
+              "waste": {"available": True, "reasonCode": "available", "completeness": "complete",
+                  "reviewedSpend": "120.00", "optionalSpend": "20.00", "optionalShare": "0.166667",
+                  "reviewedItemCount": 5, "optionalItemCount": 2, "missingAmountCount": 0,
+                  "bySource": {"model": "13.00"},
+                  "topItems": [{"name": "Сок", "amount": "13.00", "verdict": "optional", "source": "model"}],
+                  "corrected": [{"productName": "Молоко", "count": 1, "amount": "30.00"}]}}
 
     class FakeCore:
         async def get_report(self, token, *, period, month=None, from_date=None, to_date=None, scope="personal"):
@@ -1194,6 +1200,7 @@ def test_report_command_uses_shared_report_dto_and_renders_photo_with_family_sco
     assert "Остаток лимита еды: 570.00 RUB" in sent[0].caption
     assert "Недостаточно истории для темпа" in sent[0].caption
     assert "Обычный недельный расход: 0.00 RUB" not in sent[0].caption
+    assert "Необязательные покупки: 20.00 RUB · 16.7% от проверенных 120.00 RUB" in sent[0].caption
     assert sent[0].reply_markup.keyboard[0][0].text == "Меню"
 
 
@@ -1240,6 +1247,18 @@ def test_report_command_accepts_custom_dates_and_text_fallback(monkeypatch):
     assert len(sent) == 1
     assert sent[0].text == "report text"
     assert sent[0].reply_markup.keyboard[0][0].text == "Меню"
+
+
+def test_report_caption_discloses_partial_waste_without_fabricated_totals():
+    caption = telegram_app._report_caption({
+        "scope": "personal", "fromDate": "2026-10-01", "toDate": "2026-10-03",
+        "incomeTotal": "0.00", "expenseTotal": "12.00", "currency": "RUB",
+        "waste": {"available": False, "reasonCode": "missing_amounts", "missingAmountCount": 1,
+                  "reviewedSpend": None, "optionalSpend": None, "optionalShare": None},
+    })
+
+    assert "Нет суммы у позиций: 1; итоги не рассчитаны" in caption
+    assert "Необязательные покупки: 0.00" not in caption
 
 
 @pytest.mark.parametrize(("arguments", "expected"), [

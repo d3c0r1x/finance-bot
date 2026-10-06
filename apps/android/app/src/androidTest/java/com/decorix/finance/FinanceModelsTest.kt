@@ -114,7 +114,13 @@ class FinanceModelsTest {
              "weekendSharePercent":null,"monthlyBudgetLimit":"50000.00","monthlyBudgetRemaining":"-14000.50",
              "rolling7FoodStatus":{"fromDate":"2026-09-25","toDate":"2026-10-01","limit":"1000.00",
                "spent":"350.25","remaining":"649.75","limitStatus":"normal","usualWeeklySpend":"400.00",
-               "historyWeeks":2,"paceStatus":"normal","paceShare":"0.88"}}
+               "historyWeeks":2,"paceStatus":"normal","paceShare":"0.88"},
+             "waste":{"available":true,"reasonCode":"available","completeness":"complete",
+               "reviewedSpend":"120.00","optionalSpend":"20.00","optionalShare":"0.166667",
+               "reviewedItemCount":5,"optionalItemCount":2,"missingAmountCount":0,
+               "bySource":{"model":"13.00","rule":"7.00"},
+               "topItems":[{"name":"Сок","amount":"13.00","verdict":"optional","source":"model"}],
+               "corrected":[{"productName":"Молоко","count":1,"amount":"30.00"}]}}
         """.trimIndent()))
 
         assertEquals("family", report.scope)
@@ -125,6 +131,31 @@ class FinanceModelsTest {
         assertEquals("0.00", report.expenseByDay["2026-10-02"])
         assertNull(report.weekendSharePercent)
         assertEquals("-14000.50", report.monthlyBudgetRemaining)
+        assertEquals("20.00", report.waste.optionalSpend)
+        assertEquals("13.00", report.waste.bySource["model"])
+        assertEquals("Сок", report.waste.topItems.single().name)
+        assertEquals("Молоко", report.waste.corrected.single().productName)
+    }
+
+    @Test fun parsesUnavailableWasteWithoutInventingTotals() {
+        val report = FinanceModels.report(JSONObject("""
+            {"period":"month","scope":"personal","fromDate":"2026-10-01","toDate":"2026-10-01",
+             "asOfDate":"2026-10-01","timezone":"Europe/Moscow","currency":"RUB",
+             "incomeTotal":"0.00","expenseTotal":"0.00","debtPaymentTotal":"0.00","refundTotal":"0.00",
+             "transactionCount":0,"expenseByCategory":{},"expenseByDay":{},"weekendSharePercent":null,
+             "monthlyBudgetLimit":null,"monthlyBudgetRemaining":null,
+             "rolling7FoodStatus":{"fromDate":"2026-09-25","toDate":"2026-10-01","limit":"0.00",
+               "spent":"0.00","remaining":null,"limitStatus":"disabled","usualWeeklySpend":null,
+               "historyWeeks":0,"paceStatus":"insufficient_history","paceShare":null},
+             "waste":{"available":false,"reasonCode":"missing_amounts","completeness":"partial",
+               "reviewedSpend":null,"optionalSpend":null,"optionalShare":null,"reviewedItemCount":2,
+               "optionalItemCount":0,"missingAmountCount":1,"bySource":{},"topItems":[],"corrected":[]}}
+        """.trimIndent()))
+
+        assertEquals(false, report.waste.available)
+        assertEquals("missing_amounts", report.waste.reasonCode)
+        assertNull(report.waste.optionalSpend)
+        assertEquals(1, report.waste.missingAmountCount)
     }
 
     @Test fun parsesBudgetOverviewAndRollingFoodStatusWithoutRecomputingMoney() {

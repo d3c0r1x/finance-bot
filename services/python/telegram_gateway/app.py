@@ -1336,6 +1336,26 @@ def _report_caption(report: dict) -> str:
         elif food.get("usualWeeklySpend") is not None:
             lines.append(f"Обычный недельный расход: {food['usualWeeklySpend']} {report['currency']} "
                          f"({food['historyWeeks']} недель)")
+    waste = report.get("waste")
+    if isinstance(waste, dict):
+        if waste.get("available") is True and waste.get("optionalShare") is not None:
+            share = Decimal(str(waste["optionalShare"])) * 100
+            lines.append(f"Необязательные покупки: {waste['optionalSpend']} {report['currency']} · "
+                         f"{share:.1f}% от проверенных {waste['reviewedSpend']} {report['currency']}")
+        elif waste.get("reasonCode") == "missing_amounts":
+            missing_count = waste.get("missingAmountCount")
+            if isinstance(missing_count, int) and missing_count >= 0:
+                lines.append(f"Нет суммы у позиций: {missing_count}; итоги не рассчитаны")
+            else:
+                lines.append("Некоторые позиции чеков без суммы; итоги не рассчитаны")
+        elif waste.get("reasonCode") == "no_reviewed_items":
+            lines.append("Нет проверенных позиций чеков")
+        elif waste.get("reasonCode") == "too_many_items":
+            lines.append("Слишком много позиций для анализа необязательных покупок")
+        elif waste.get("reasonCode") == "analytics_unavailable":
+            lines.append("Аналитика необязательных покупок временно недоступна")
+        elif waste.get("available") is False:
+            lines.append("Итоги необязательных покупок недоступны")
     return "\n".join(lines)
 
 
