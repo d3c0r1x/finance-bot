@@ -7,6 +7,7 @@ import { api, type BudgetAlert, type BudgetOverview, type BudgetProposal, type C
 import { ReceiptsPanel } from './ReceiptsPanel';
 import { ProductCatalogPanel } from './ProductCatalogPanel';
 import { ShoppingPanel } from './ShoppingPanel';
+import { DoNotBuyPanel } from './DoNotBuyPanel';
 import { PersonalInflationPanel } from './PersonalInflationPanel';
 import { RecurringPanel } from './RecurringPanel';
 import { ImportsPanel } from './ImportsPanel';
@@ -560,7 +561,9 @@ export function App() {
           <Route path="/receipts" element={<ReceiptsPanel tenantId={activeTenant.tenantId}
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
           <Route path="/products" element={<ProductCatalogPanel tenantId={activeTenant.tenantId} language={language} />} />
-          <Route path="/shopping" element={<ShoppingPanel tenantId={activeTenant.tenantId} language={language} />} />
+          <Route path="/shopping" element={<><ShoppingPanel tenantId={activeTenant.tenantId} language={language} />
+            <DoNotBuyPanel tenantId={activeTenant.tenantId} language={language}
+              canWrite={activeTenant.role !== 'viewer'} /></>} />
           <Route path="/inflation" element={<PersonalInflationPanel tenantId={activeTenant.tenantId} language={language} />} />
           <Route path="/recurring" element={<RecurringPanel tenantId={activeTenant.tenantId} language={language} />} />
           <Route path="/imports" element={<ImportsPanel tenantId={activeTenant.tenantId} language={language} />} />

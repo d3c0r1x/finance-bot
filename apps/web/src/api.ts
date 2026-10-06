@@ -175,7 +175,8 @@ export type ShoppingCandidate = {
   productName: string; productKey: string; purchaseCount: number; medianIntervalDays: number; usualUnitPrice: string;
   estimatedCost: string; lastPurchasedAt: string; dueAt: string; daysUntilDue: number;
 };
-export type BlockedShoppingCandidate = { productKey: string; productName: string; reasonCode: 'confirmed_not_to_buy' };
+export type BlockedShoppingCandidate = { productKey: string; productName: string;
+  reasonCode: 'confirmed_not_to_buy' | 'rule_backed_not_to_buy' };
 export type ShoppingList = {
   candidates: ShoppingCandidate[]; estimatedListCost: string; inventoryTracked: false;
   boughtCandidates: ShoppingCandidate[]; mutedCandidates: ShoppingCandidate[];
@@ -207,7 +208,17 @@ export type ReceiptRepeatWarning = {
   count: number; lastSum: string | null; advice: string | null;
 };
 export type ReceiptRepeatWarnings = { warnings: ReceiptRepeatWarning[] };
-export type ProductDecisionKeys = { productKeys: string[] };
+export type ProductDecisionKeys = { productKeys: string[]; confirmedProductKeys: string[] };
+export type AdviceEvidenceGroup = {
+  productKey: string; productName: string; count: number; amount: string | null; missingAmountCount: number;
+  ruleCount: number; modelCount: number; unmarkedCount: number; modelOnly: boolean;
+  latestVerdict: 'harmful' | 'unnecessary'; latestAdvice: string; lastPurchasedAt: string;
+};
+export type AdviceEvidenceReport = {
+  available: boolean; reasonCode: 'available' | 'no_optional_items' | 'too_many_items' | 'analytics_unavailable';
+  algorithmVersion: 'advice-evidence.v1' | null; inputVersion: string | null;
+  banned: AdviceEvidenceGroup[]; guesses: AdviceEvidenceGroup[];
+};
 export type ReceiptDuplicateCandidate = { id: string; cashTotal: string; merchant: string | null; createdAt: string };
 export type ReceiptDuplicateCandidates = {
   receiptId: string; decision: Receipt['duplicateDecision']; candidates: ReceiptDuplicateCandidate[];
@@ -400,6 +411,9 @@ export const api = {
   getAllowedProductDecisions: (tenantId: string) => request<ProductDecisionKeys>(
     `/bff/tenants/${tenantId}/products/decisions`,
   ),
+  getDoNotBuyList: (tenantId: string) => request<AdviceEvidenceReport>(
+    `/bff/tenants/${tenantId}/products/do-not-buy`,
+  ),
   getReceiptPriceHistory: (tenantId: string, receiptId: string, itemId: string) => {
     const query = new URLSearchParams({ receiptId, itemId });
     return request<ProductPriceComparison>(`/bff/tenants/${tenantId}/products/price-history?${query}`);
@@ -433,6 +447,10 @@ export const api = {
   allowReceiptProduct: (tenantId: string, productKey: string) => request<{ productKey: string; decision: 'allowed'; version: number; updatedAt: string }>(
     `/bff/tenants/${tenantId}/products/${encodeURIComponent(productKey)}/decision`,
     { method: 'PUT', body: JSON.stringify({ decision: 'allowed' }) },
+  ),
+  confirmNotToBuyProduct: (tenantId: string, productKey: string) => request<{ productKey: string; decision: 'confirmed'; version: number; updatedAt: string }>(
+    `/bff/tenants/${tenantId}/products/${encodeURIComponent(productKey)}/decision`,
+    { method: 'PUT', body: JSON.stringify({ decision: 'confirmed' }) },
   ),
   revokeReceiptProduct: (tenantId: string, productKey: string) => request<void>(
     `/bff/tenants/${tenantId}/products/${encodeURIComponent(productKey)}/decision`, { method: 'DELETE' },

@@ -77,11 +77,13 @@ describe('shopping suggestions', () => {
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     vi.stubGlobal('fetch', vi.fn(async () => json({ ...shopping,
       mutedCandidates: [{ ...shopping.candidates[0], productKey: 'tea' }],
-      blockedCandidates: [{ productKey: 'candy', productName: 'Конфеты', reasonCode: 'confirmed_not_to_buy' }],
+      blockedCandidates: [{ productKey: 'candy', productName: 'Конфеты', reasonCode: 'confirmed_not_to_buy' },
+        { productKey: 'chips', productName: 'Чипсы', reasonCode: 'rule_backed_not_to_buy' }],
     })));
     show();
 
     expect(await screen.findByText(/вы отметили этот товар/i)).toBeInTheDocument();
+    expect(screen.getByText(/отмечено правилами проверки чеков/i)).toBeInTheDocument();
     expect(screen.getByText(/вы скрыли эту подсказку/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Скопировать список' }));
 

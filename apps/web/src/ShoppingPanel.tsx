@@ -14,7 +14,8 @@ const copy = {
     copyError: 'Не удалось скопировать список.', noActive: 'Активных подсказок пока нет.',
     boughtTitle: 'Уже куплено', boughtReason: 'Отметка действует до следующего обычного интервала покупки.',
     mutedTitle: 'Скрытые подсказки', mutedReason: 'Вы скрыли эту подсказку.', blockedTitle: 'Не брать',
-    blockedReason: 'Вы отметили этот товар «не брать».', actionError: 'Не удалось сохранить решение. Повторите попытку.',
+    blockedReason: 'Вы отметили этот товар «не брать».', ruleBlockedReason: 'Отмечено правилами проверки чеков.',
+    actionError: 'Не удалось сохранить решение. Повторите попытку.',
   },
   en: {
     title: 'Shopping list', loading: 'Loading…', error: 'Shopping suggestions are temporarily unavailable.', retry: 'Retry',
@@ -27,7 +28,8 @@ const copy = {
     copyError: 'Could not copy the list.', noActive: 'No active suggestions right now.',
     boughtTitle: 'Already bought', boughtReason: 'This mark expires after the next usual purchase interval.',
     mutedTitle: 'Hidden suggestions', mutedReason: 'You hid this suggestion.', blockedTitle: 'Do not buy',
-    blockedReason: 'You marked this product as do not buy.', actionError: 'Could not save this decision. Try again.',
+    blockedReason: 'You marked this product as do not buy.', ruleBlockedReason: 'Flagged by receipt review rules.',
+    actionError: 'Could not save this decision. Try again.',
   },
 } as const;
 
@@ -96,7 +98,8 @@ export function ShoppingPanel({ tenantId, language }: { tenantId: string; langua
           </section>}
           {shopping.data.blockedCandidates.length > 0 && <section className="shopping-hidden" aria-labelledby="shopping-blocked-title">
             <h3 id="shopping-blocked-title">{t.blockedTitle}</h3>
-            {shopping.data.blockedCandidates.map((candidate) => <p key={candidate.productKey}>{candidate.productName} · {t.blockedReason}</p>)}
+            {shopping.data.blockedCandidates.map((candidate) => <p key={candidate.productKey}>{candidate.productName} ·
+              {' '}{candidate.reasonCode === 'rule_backed_not_to_buy' ? t.ruleBlockedReason : t.blockedReason}</p>)}
           </section>}
           {decision.isError && <p role="alert">{t.actionError}</p>}
           <p aria-live="polite" className="shopping-copy-status">{copyStatus}</p>
