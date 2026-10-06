@@ -10,7 +10,7 @@
 - [x] Extend F44 group proposals with a deterministic eligible member-key snapshot. Test confirmed decisions are included and user-allowed products are excluded.
 - [x] Add OpenAPI schemas and strict contract acceptance tests for F45 progress and group membership.
 - [x] Run Go tests/vet, all contract/migration tests, and `git diff --check`.
-- [ ] Commit F45.1 and record evidence in `.agent/PROGRESS.md`.
+- [x] Commit F45.1 as `37f84ba`; record evidence in `.agent/PROGRESS.md` (`37f84ba`), pushed to `origin/feat/saas-rewrite`. GitHub created no workflow run for this SHA.
 
 ## F45.2 Core durable progress and lifecycle
 

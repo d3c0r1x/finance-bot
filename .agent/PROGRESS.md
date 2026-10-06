@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 02:39, Europe/Moscow.
+Updated: 2026-10-07 02:48, Europe/Moscow.
 
 ## Global plan
 
@@ -74,14 +74,14 @@ Updated: 2026-10-07 02:39, Europe/Moscow.
 
 ## Current goal
 
-- ID and outcome: F45.1 — durable goal progress and completed-goal history with next-candidate access.
-- Status: ANALYSIS — F44 complete; inspect approved legacy behavior, specify F45 contract, then write focused Go/Core acceptance tests and observe RED.
-- Acceptance: progress uses only confirmed member-owned receipt facts in the immutable 30-day window; purchase updates are visible after refresh; closing an expired goal is idempotent; cancellation never creates a completed outcome; archive is retained independently of the active goal; legacy history retention is accounted for; user can reach next candidates after completion.
-- Changed files: F44.1 follow-up `d8591d3`; F44.2 `88f868b`, `e4d0d61`; F44.3 `2e5dce4`; F45 implementation not started.
+- ID and outcome: F45.2 — Core member-scoped progress, accepted group membership snapshot, durable completion/history.
+- Status: ANALYSIS — F45.1 Go progress endpoint is GREEN and pushed as `37f84ba`; now add isolated PostgreSQL/API acceptance tests and observe RED before Core changes.
+- Acceptance: progress uses only confirmed member-owned receipt facts in the immutable 30-day window; purchase updates are visible after refresh; closing an expired goal is idempotent; cancellation never creates a completed outcome; archive is retained independently of active goal; legacy history retention is accounted for; candidates remain visible after close/cancel.
+- Changed files: F44 correction and F45.1 Go calculator/API, OpenAPI contract, tests, `.agent/specs/F45-goal-lifecycle.md`, and `docs/superpowers/plans/2026-10-07-f45-goal-lifecycle.md` in `37f84ba`.
 - User choices: maintain F01–F60 scope; personal MVP first; V2 deferred; preserve 30-day goal promise and one active goal per member.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `2e5dce4`; unrelated user-owned untracked files remain untouched.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `37f84ba`; unrelated user-owned untracked files remain untouched.
 - Runtime: public HTTPS, persistent server and installed Android MVP remain unverified; no deployment or network configuration was changed.
-- Updated at: 2026-10-07 02:39 Europe/Moscow.
+- Updated at: 2026-10-07 02:48 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -194,7 +194,7 @@ Updated: 2026-10-07 02:39, Europe/Moscow.
 
 ## Next action
 
-- F45.1: document lifecycle contract and acceptance matrix from the F45 global requirement plus verified `services/goals.py` legacy behavior. Then write a Go progress-calculation test and Core/PostgreSQL lifecycle acceptance test before implementation. F44 CI queries returned no runs for `e4d0d61` and `2e5dce4`.
+- F45.2: add isolated PostgreSQL acceptance tests first for captured eligible group keys, member-scoped progress, unknown sums, completion exactly once, cancelled-goal exclusion and history. Observe RED before Java/migration changes. Go progress endpoint is green; remote CI did not start for `37f84ba`.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
@@ -1340,3 +1340,12 @@ Updated: 2026-10-07 02:39, Europe/Moscow.
 - `gh run list --commit e4d0d61` and `--commit 2e5dce4` returned no runs; remote CI did not start and is not reported as green.
 - Legacy F45 semantics inventoried in `services/goals.py`: 30-day fixed window; progress is bounded through the current time; category goals use the accepted member list; completion archives one summary, cancelled goals are not completed outcomes, history keeps newest first up to 24 and presents five; finished goals expose next candidates. F45 remains unimplemented in the rewrite.
 - Next: define F45.1 contract around per-member confirmed facts, progress/history persistence, exactly-once completion, cancellation exclusion, and candidate availability; write tests and observe RED before code.
+
+## E4.78 F45.1 Go progress calculation — 2026-10-07 02:48 MSK
+
+- Test-first RED: new tests failed to compile because F45 request, progress DTO, calculator and handler were missing. A second RED showed category proposals did not expose member keys.
+- Added strict internal Go endpoint `/internal/v1/analytics/goals/progress`; exact decimal count/sum calculation, immutable 30-day validation, member-key group filtering, null unknown money, future-fact/as-of boundaries, service-token auth and malformed/oversized input rejection.
+- F44 group correction now snapshots sorted eligible product keys and excludes products marked allowed or unconfirmed model-only. Needed so later category-rule changes cannot rewrite the accepted goal.
+- GREEN: Go `test ./... -count=1`, `go vet ./...`; all contract/migration tests 66 passed, 2 optional DB skips; focused F44/F45 contract tests passed; `gofmt -d` and `git diff --check` passed.
+- Committed/pushed `37f84ba` (`feat(F45.1): calculate goal progress`). GitHub returned no workflow run for the commit; CI is unverified.
+- Next: add Core/PostgreSQL RED tests for group membership persistence, owner/viewer boundaries, progress from member receipts, cancel exclusion, idempotent completion and history retention, then implement Core integration.
