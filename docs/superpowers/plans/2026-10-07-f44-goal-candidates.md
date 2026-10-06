@@ -17,7 +17,7 @@
 - [x] Add V39 RLS-protected member preference and goal persistence; persist exact 30-day `ends_at`, keep accepted terms immutable, and allow unknown count-goal money without inventing zero.
 - [x] Add Core Go-client validation, member API, same-origin BFF routes, audit/outbox events and OpenAPI contract.
 - [x] Run focused Core PostgreSQL/API acceptance, full `:services:core:check`, contract/migration suite and `git diff --check`.
-- [ ] Commit F44.2 after GREEN; update `.agent/PROGRESS.md`.
+- [x] Commit F44.2 after GREEN; update `.agent/PROGRESS.md`.
 
 ## F44.3 Web surface
 
