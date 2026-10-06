@@ -152,7 +152,8 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
         await message.answer(
             "Команды: /start, /menu, /help, /link <код>, /add <описание операции>, /history, /debts, "
             "/price [название товара], /shopping, /nobuy, /inflation, /budget [set <family|personal> <category|total|food_week> <amount>|reset|propose|suggest <income>], "
-            "/report. /budget propose строит предложение по истории, /budget suggest <income> — по доходу. "
+            "/report, /recalculate. /recalculate показывает старый и новый разбор чека; применение — отдельной кнопкой. "
+            "/budget propose строит предложение по истории, /budget suggest <income> — по доходу. "
             "Для финансов сначала привяжите аккаунт и выберите пространство.",
             reply_markup=MAIN_MENU,
         )
@@ -344,6 +345,80 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
         await state.update_data(telegram_nobuy_decision=_nobuy_selection(report, decisions, actor, revision, can_write))
         await message.answer(text, reply_markup=_nobuy_keyboard(report, decisions, revision, can_write),
                              parse_mode=None)
+
+    async def show_recalculation(message: Message, state: FSMContext) -> None:
+        if message.chat.type != "private":
+            await message.answer("Пересчёт доступен только в личном чате.", reply_markup=MAIN_MENU)
+            return
+        actor = (await state.get_data()).get("telegram_actor_context")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await message.answer("Сначала выберите пространство командой /menu.", reply_markup=MAIN_MENU)
+            return
+        if actor.get("role") == "viewer":
+            await message.answer("У вашей роли только просмотр; пересчёт недоступен.", reply_markup=MAIN_MENU)
+            return
+        try:
+            preview = await core.preview_receipt_recalculation(actor["token"])
+        except TelegramCoreError as error:
+            if error.code == "unauthorized":
+                await state.clear()
+            await message.answer({"unauthorized": "Сессия истекла. Выберите пространство командой /menu.",
+                                  "forbidden": "У вашей роли нет права пересчитывать разборы чеков."}.get(
+                error.code, "Пересчёт временно недоступен. Попробуйте позже."), reply_markup=MAIN_MENU)
+            return
+        except (TypeError, ValueError, KeyError):
+            await message.answer("Отчёт пересчёта получен в неверном формате. Попробуйте позже.",
+                                 reply_markup=MAIN_MENU)
+            return
+        revision = secrets.token_urlsafe(6)
+        await state.update_data(telegram_recalculation_preview={
+            "revision": revision, "tenantId": actor["tenantId"], "runId": preview["runId"],
+        })
+        chunks = _telegram_text_chunks(_telegram_recalculation_text(preview))
+        keyboard = _telegram_recalculation_keyboard(revision, preview["updateCount"] > 0)
+        for index, chunk in enumerate(chunks):
+            await message.answer(chunk, reply_markup=keyboard if index == len(chunks) - 1 else None,
+                                 parse_mode=None)
+
+    async def apply_recalculation(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = (callback.data or "").split(":")
+        if len(parts) != 3 or parts[0] != "recalc" or parts[2] != "apply":
+            await callback.answer("Действие устарело. Запустите /recalculate снова.", show_alert=True)
+            return
+        if callback.message is None or callback.message.chat.type != "private" or callback.from_user is None:
+            await callback.answer("Подтверждение доступно только в личном чате.", show_alert=True)
+            return
+        data = await state.get_data()
+        actor, selection = data.get("telegram_actor_context"), data.get("telegram_recalculation_preview")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            return
+        if actor.get("role") == "viewer":
+            await callback.answer("У вашей роли нет права применять пересчёт.", show_alert=True)
+            return
+        if not isinstance(selection, dict) or selection.get("revision") != parts[1] \
+                or selection.get("tenantId") != actor.get("tenantId"):
+            await callback.answer("Предпросмотр устарел. Запустите /recalculate снова.", show_alert=True)
+            return
+        try:
+            result = await core.apply_receipt_recalculation(actor["token"], selection["runId"])
+        except TelegramCoreError as error:
+            if error.code == "unauthorized":
+                await state.clear()
+                await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            elif error.code == "stale":
+                await state.update_data(telegram_recalculation_preview=None)
+                await callback.answer("Чек изменился. Запустите /recalculate заново.", show_alert=True)
+            else:
+                await callback.answer("Не удалось применить пересчёт. Предпросмотр сохранён.", show_alert=True)
+            return
+        except (TypeError, ValueError, KeyError):
+            await callback.answer("Результат пересчёта получен в неверном формате.", show_alert=True)
+            return
+        await state.update_data(telegram_recalculation_preview=None)
+        await callback.message.edit_text(_telegram_recalculation_text(result, applied=True),
+                                         reply_markup=None, parse_mode=None)
+        await callback.answer("Пересчёт применён")
 
     async def decide_do_not_buy(callback: CallbackQuery, state: FSMContext) -> None:
         parts = (callback.data or "").split(":")
@@ -1124,6 +1199,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(show_product_catalog, Command("price"))
     router.message.register(show_shopping, Command("shopping"))
     router.message.register(show_do_not_buy, Command("nobuy"))
+    router.message.register(show_recalculation, Command("recalculate"))
     router.message.register(show_personal_inflation, Command("inflation"))
     router.message.register(show_recurring, Command("recurring"))
     router.message.register(show_debts, Command("debts"))
@@ -1136,6 +1212,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.callback_query.register(decide_transaction_draft, F.data.startswith("draft:"))
     router.callback_query.register(decide_shopping, F.data.startswith("shopping:"))
     router.callback_query.register(decide_do_not_buy, F.data.startswith("nobuy:"))
+    router.callback_query.register(apply_recalculation, F.data.startswith("recalc:"))
     router.callback_query.register(decide_recurring, F.data.startswith("recurring:"))
     router.callback_query.register(decide_transaction_history, F.data.startswith("history:"))
     router.callback_query.register(decide_budget_proposal, F.data.startswith("budget_proposal:"))
@@ -1527,6 +1604,50 @@ def _nobuy_keyboard(report: dict, decisions: dict, revision: str, can_write: boo
             buttons.append([InlineKeyboardButton(text=f"{labels[action]} · {name[:24]}",
                                                 callback_data=f"nobuy:{revision}:{action}:{index}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+
+def _telegram_recalculation_text(result: dict, *, applied: bool = False) -> str:
+    impact = result.get("impact") or {}
+    lines = ["Пересчёт старых разборов применён." if applied
+             else "Предпросмотр пересчёта. Изменения пока не сохранены."]
+    lines.append(f"Проверено: {result['checked']} · к обновлению: {result['updateCount']} · изменится: {result['changedCount']}")
+    currency = impact.get("currency") or ""
+    suffix = f" {currency}" if currency else ""
+    if impact.get("reasonCode") == "available":
+        lines.extend((f"Необязательные покупки до: {impact['optionalSpendBefore']}{suffix}",
+                      f"После: {impact['optionalSpendAfter']}{suffix}",
+                      f"Изменение: {impact['optionalSpendDelta']}{suffix}"))
+    else:
+        reason = {
+            "no_reviewed_items": "нет проверенных позиций",
+            "missing_amounts": "в чеках не хватает сумм",
+            "analytics_unavailable": "аналитика временно недоступна",
+        }.get(impact.get("reasonCode"), "расчёт недоступен")
+        lines.append(f"Дельта не рассчитана: {reason}.")
+    changes = result.get("changes", [])
+    if not changes:
+        lines.append("Позиций для пересчёта нет.")
+    else:
+        lines.append("Позиции: старый verdict → новый verdict")
+        for change in changes[:12]:
+            amount = change.get("lineSum") or "сумма неизвестна"
+            before = change.get("beforeVerdict") or "—"
+            after = change.get("afterVerdict") or "—"
+            before_reason = f" ({change['beforeReason']})" if change.get("beforeReason") else ""
+            after_reason = f" ({change['afterReason']})" if change.get("afterReason") else ""
+            lines.append(f"{change['name']} · {amount}: {before}{before_reason} → {after}{after_reason}")
+        if len(changes) > 12:
+            lines.append(f"Ещё позиций: {len(changes) - 12}. Полный список — в Web.")
+    lines.append("Суммы чеков и операций не меняются.")
+    return "\n".join(lines)
+
+
+def _telegram_recalculation_keyboard(revision: str, can_apply: bool) -> InlineKeyboardMarkup | None:
+    if not can_apply:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text="Применить пересчёт", callback_data=f"recalc:{revision}:apply",
+    )]])
 
 
 def _recurring_keyboard(projection: dict) -> InlineKeyboardMarkup | None:

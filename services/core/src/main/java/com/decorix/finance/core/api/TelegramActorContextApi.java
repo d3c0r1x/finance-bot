@@ -29,6 +29,9 @@ final class TelegramActorContextApi {
     record ProductCatalogRequest(String token, String query) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
+    record TelegramRecalculationApplyRequest(String token, UUID runId) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record ReportRequest(String token, String period, YearMonth month, LocalDate from, LocalDate to, String scope) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)

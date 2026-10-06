@@ -18,6 +18,9 @@ import com.decorix.finance.core.api.TelegramActorContextApi.ProductCatalogReques
 import com.decorix.finance.core.api.TelegramActorContextApi.RepeatTransactionRequest;
 import com.decorix.finance.core.api.TelegramActorContextApi.TransactionHistoryResponse;
 import com.decorix.finance.core.api.TelegramActorContextApi.VoidLatestTransactionRequest;
+import com.decorix.finance.core.api.TelegramActorContextApi.TelegramRecalculationApplyRequest;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyResult;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.Preview;
 import com.decorix.finance.core.api.TransactionApi.DashboardSummary;
 import com.decorix.finance.core.api.TransactionApi.TransactionResponse;
 import com.decorix.finance.core.api.ReportApi.Report;
@@ -76,6 +79,22 @@ public class TelegramActionController {
             @RequestBody ProductCatalogRequest request) {
         requireServiceToken(suppliedToken);
         return actions.productCatalog(request);
+    }
+
+    @PostMapping("/actions/review-recalculations/preview")
+    Preview previewReceiptRecalculation(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.previewReceiptRecalculation(request);
+    }
+
+    @PostMapping("/actions/review-recalculations/apply")
+    ApplyResult applyReceiptRecalculation(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @RequestBody TelegramRecalculationApplyRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.applyReceiptRecalculation(request);
     }
 
     @PostMapping("/shopping")

@@ -4852,6 +4852,84 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void telegramReceiptRecalculationUsesActorContextAndSeparateApplyRequest() throws Exception {
+        when(recalculationImpactClient.calculate(any())).thenReturn(new Impact(
+                "receipt-recalculation-impact.v1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "available", "complete", "75.00", "0.00", "-75.00"));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            UUID transactionId = addReportTransaction(ownerId, subject, "expense", "75.00", "food",
+                    "2026-10-04T10:00:00Z");
+            addConfirmedReceiptItem(ownerId, subject, transactionId, "Soda", "75.00", "harmful", "model", 1);
+        });
+        long telegramUserId = newTelegramUserId();
+        String code = com.jayway.jsonpath.JsonPath.read(mvc.perform(post("/api/v1/me/telegram-link")
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.code");
+        mvc.perform(post("/internal/v1/telegram/link-codes/redeem")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"code\":\"" + code + "\",\"telegramUserId\":" + telegramUserId + "}"))
+                .andExpect(status().isOk());
+        String context = mvc.perform(post("/internal/v1/telegram/actor-contexts")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + telegramUserId + ",\"tenantId\":\"" + tenantId + "\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String token = com.jayway.jsonpath.JsonPath.read(context, "$.token");
+        String route = "/internal/v1/telegram/actions/review-recalculations";
+        String body = "{\"token\":\"" + token + "\"}";
+        mvc.perform(post(route + "/preview").contentType("application/json").content(body))
+                .andExpect(status().isUnauthorized());
+        var previewResponse = mvc.perform(post(route + "/preview")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("previewed"))
+                .andExpect(jsonPath("$.impact.optionalSpendDelta").value("-75.00"))
+                .andExpect(jsonPath("$.impact.currency").value("RUB"))
+                .andReturn();
+        String runId = com.jayway.jsonpath.JsonPath.read(previewResponse.getResponse().getContentAsString(), "$.runId");
+        mvc.perform(post(route + "/apply").header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content("{\"token\":\"" + token
+                                + "\",\"runId\":\"" + runId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("applied"))
+                .andExpect(jsonPath("$.impact.optionalSpendDelta").value("-75.00"));
+
+        String viewerSubject = "keycloak|recalc-viewer-" + UUID.randomUUID();
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID viewerId = jdbc.queryForObject("INSERT INTO users DEFAULT VALUES RETURNING id", UUID.class);
+            jdbc.update("INSERT INTO external_identities (user_id, provider, subject) VALUES (?, 'keycloak', ?)",
+                    viewerId, viewerSubject);
+            jdbc.update("INSERT INTO memberships (tenant_id, subject, role, user_id) VALUES (?, ?, 'viewer', ?)",
+                    tenantId, viewerSubject, viewerId);
+            jdbc.update("INSERT INTO member_profiles (tenant_id, user_id, display_name) VALUES (?, ?, 'Viewer')",
+                    tenantId, viewerId);
+        });
+        long viewerTelegramId = newTelegramUserId();
+        String viewerCode = com.jayway.jsonpath.JsonPath.read(mvc.perform(post("/api/v1/me/telegram-link")
+                        .with(jwt().jwt(value -> value.subject(viewerSubject))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(), "$.code");
+        mvc.perform(post("/internal/v1/telegram/link-codes/redeem")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"code\":\"" + viewerCode + "\",\"telegramUserId\":" + viewerTelegramId + "}"))
+                .andExpect(status().isOk());
+        String viewerContext = mvc.perform(post("/internal/v1/telegram/actor-contexts")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + viewerTelegramId + ",\"tenantId\":\"" + tenantId + "\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String viewerToken = com.jayway.jsonpath.JsonPath.read(viewerContext, "$.token");
+        mvc.perform(post(route + "/preview").header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content("{\"token\":\"" + viewerToken + "\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void doNotBuyListSeparatesModelGuessesAndScopesReceiptEvidenceToMember() throws Exception {
         var auth = jwt().jwt(token -> token.subject(subject));
         String otherSubject = "keycloak|evidence-other-" + UUID.randomUUID();

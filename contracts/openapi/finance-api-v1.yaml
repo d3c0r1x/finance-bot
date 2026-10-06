@@ -1346,6 +1346,50 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /internal/v1/telegram/actions/review-recalculations/preview:
+    post:
+      operationId: previewTelegramReceiptRecalculation
+      security:
+        - telegramServiceToken: []
+      description: Requires receipt.write.own and previews only the bound member's receipt verdict changes; no receipt values are written.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Durable preview and Go-calculated optional-spend impact
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptRecalculationPreview' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: Receipt history exceeds the recalculation bound }
+  /internal/v1/telegram/actions/review-recalculations/apply:
+    post:
+      operationId: applyTelegramReceiptRecalculation
+      security:
+        - telegramServiceToken: []
+      description: Requires receipt.write.own and explicitly applies a run created for this actor; retries are idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelegramRecalculationApplyRequest' }
+      responses:
+        '200':
+          description: Applied durable recalculation report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReceiptRecalculationApplyResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '412': { description: Receipt history changed since preview }
   /internal/v1/telegram/actions/do-not-buy/{productKey}/{action}:
     parameters:
       - name: productKey
@@ -4180,6 +4224,13 @@ components:
       required: [token]
       properties:
         token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+    TelegramRecalculationApplyRequest:
+      type: object
+      additionalProperties: false
+      required: [token, runId]
+      properties:
+        token: { type: string, minLength: 43, maxLength: 43, pattern: '^[A-Za-z0-9_-]{43}$' }
+        runId: { type: string, format: uuid }
     TelegramReportRequest:
       type: object
       additionalProperties: true

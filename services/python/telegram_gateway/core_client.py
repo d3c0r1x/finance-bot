@@ -20,6 +20,8 @@ _PRODUCT_KEY = re.compile(r"[a-zа-я0-9]{1,256}\Z")
 _PERSONAL_INFLATION_MONEY = re.compile(r"(?:0|[1-9]\d{0,29})\.\d{2}\Z")
 _PERSONAL_INFLATION_PERCENT = re.compile(r"-?(?:0|[1-9]\d{0,29})\.\d{2}\Z")
 _BUDGET_STATES = {"disabled", "normal", "near", "exceeded"}
+_RECALC_VERDICTS = {"useful", "neutral", "harmful", "unnecessary"}
+_RECALC_SOURCES = {"rule", "model", "default", "unknown", "human"}
 
 
 class TelegramCoreError(Exception):
@@ -370,6 +372,93 @@ class TelegramCoreClient:
             f"actions/do-not-buy/{quote(product_key, safe='')}/{action}",
             {"token": actor_context_token}, expected_status=200)
         return self._validated_do_not_buy(body)
+
+    async def preview_receipt_recalculation(self, actor_context_token: str) -> dict:
+        if not isinstance(actor_context_token, str) or not actor_context_token:
+            raise TelegramCoreError("unavailable")
+        body = await self._post_json("actions/review-recalculations/preview",
+                                     {"token": actor_context_token}, expected_status=200)
+        return self._validated_recalculation(body, applied=False)
+
+    async def apply_receipt_recalculation(self, actor_context_token: str, run_id: str) -> dict:
+        if not isinstance(actor_context_token, str) or not actor_context_token:
+            raise TelegramCoreError("unavailable")
+        try:
+            normalized_run_id = str(uuid.UUID(run_id))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise TelegramCoreError("not_found") from error
+        body = await self._post_json("actions/review-recalculations/apply", {
+            "token": actor_context_token, "runId": normalized_run_id,
+        }, expected_status=200)
+        return self._validated_recalculation(body, applied=True)
+
+    @staticmethod
+    def _validated_recalculation(body: dict, *, applied: bool) -> dict:
+        state = "applied" if applied else "previewed"
+        required = ("runId", "algorithmVersion", "state", "checked", "updateCount", "changedCount", "impact", "changes")
+        if any(key not in body for key in required) or body.get("algorithmVersion") != "receipt-basket.v1" \
+                or body.get("state") != state:
+            raise TelegramCoreError("unavailable")
+        try:
+            str(uuid.UUID(body["runId"]))
+        except (ValueError, TypeError, AttributeError) as error:
+            raise TelegramCoreError("unavailable") from error
+        counts = (body.get("checked"), body.get("updateCount"), body.get("changedCount"))
+        if any(type(value) is not int or value < 0 or value > 50000 for value in counts) \
+                or body["changedCount"] > body["updateCount"]:
+            raise TelegramCoreError("unavailable")
+        if applied and (type(body.get("appliedCount")) is not int or body["appliedCount"] != body["updateCount"]):
+            raise TelegramCoreError("unavailable")
+        changes = body.get("changes")
+        if not isinstance(changes, list) or len(changes) != body["updateCount"] or len(changes) > 50000:
+            raise TelegramCoreError("unavailable")
+        for change in changes:
+            if not isinstance(change, dict):
+                raise TelegramCoreError("unavailable")
+            try:
+                str(uuid.UUID(change.get("itemId")))
+            except (ValueError, TypeError, AttributeError) as error:
+                raise TelegramCoreError("unavailable") from error
+            before_verdict, before_source = change.get("beforeVerdict"), change.get("beforeSource")
+            if not isinstance(change.get("name"), str) or not change["name"].strip() or len(change["name"]) > 200 \
+                    or type(change.get("itemVersion")) is not int or change["itemVersion"] < 1 \
+                    or before_verdict is not None and (not isinstance(before_verdict, str)
+                                                       or before_verdict not in _RECALC_VERDICTS) \
+                    or not isinstance(change.get("afterVerdict"), str) \
+                    or change["afterVerdict"] not in _RECALC_VERDICTS \
+                    or before_source is not None and (not isinstance(before_source, str)
+                                                      or before_source not in _RECALC_SOURCES) \
+                    or change.get("afterSource") != "rule" or type(change.get("changed")) is not bool:
+                raise TelegramCoreError("unavailable")
+            line_sum = change.get("lineSum")
+            if line_sum is not None and (not isinstance(line_sum, str) or not _BUDGET_ALERT_AMOUNT.fullmatch(line_sum)):
+                raise TelegramCoreError("unavailable")
+            for field in ("beforeReason", "beforeAction", "afterReason", "afterAction"):
+                if change.get(field) is not None and (not isinstance(change[field], str) or len(change[field]) > 500):
+                    raise TelegramCoreError("unavailable")
+        impact = body.get("impact")
+        if impact is None and applied:
+            return body  # previews created before impact snapshots remain applicable.
+        if not isinstance(impact, dict) or impact.get("algorithmVersion") != "receipt-recalculation-impact.v1" \
+                or not isinstance(impact.get("inputVersion"), str) or not re.fullmatch(r"[0-9a-f]{64}", impact["inputVersion"]) \
+                or not isinstance(impact.get("reasonCode"), str) \
+                or impact["reasonCode"] not in {"available", "no_reviewed_items", "missing_amounts", "analytics_unavailable"} \
+                or not isinstance(impact.get("completeness"), str) or impact["completeness"] not in {"complete", "partial"} \
+                or impact.get("currency") is not None and (not isinstance(impact["currency"], str)
+                                                              or not re.fullmatch(r"[A-Z]{3}", impact["currency"])):
+            raise TelegramCoreError("unavailable")
+        amounts = (impact.get("optionalSpendBefore"), impact.get("optionalSpendAfter"), impact.get("optionalSpendDelta"))
+        if impact["reasonCode"] == "available":
+            if impact["completeness"] != "complete" or any(not isinstance(value, str) for value in amounts) \
+                    or not _PERSONAL_INFLATION_MONEY.fullmatch(amounts[0]) \
+                    or not _PERSONAL_INFLATION_MONEY.fullmatch(amounts[1]) \
+                    or not _PERSONAL_INFLATION_PERCENT.fullmatch(amounts[2]):
+                raise TelegramCoreError("unavailable")
+        elif any(value is not None for value in amounts):
+            raise TelegramCoreError("unavailable")
+        if body.get("impact") is not None:
+            return body
+        raise TelegramCoreError("unavailable")
 
     async def get_personal_inflation(self, actor_context_token: str) -> dict:
         if not isinstance(actor_context_token, str) or not actor_context_token:

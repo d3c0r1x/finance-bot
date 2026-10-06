@@ -478,6 +478,24 @@ def test_telegram_do_not_buy_actions_require_actor_and_service_credentials():
         == ["confirm", "allow", "revoke"]
 
 
+def test_telegram_recalculation_has_separate_service_scoped_preview_and_apply():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    preview = spec["paths"]["/internal/v1/telegram/actions/review-recalculations/preview"]["post"]
+    apply = spec["paths"]["/internal/v1/telegram/actions/review-recalculations/apply"]["post"]
+    for operation in (preview, apply):
+        assert operation["security"] == [{"telegramServiceToken": []}]
+        assert "receipt.write.own" in operation["description"]
+    assert preview["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ResolveTelegramActorContext")
+    assert preview["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ReceiptRecalculationPreview")
+    assert apply["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "TelegramRecalculationApplyRequest")
+    assert apply["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ReceiptRecalculationApplyResult")
+    assert "412" in apply["responses"]
+
+
 def test_repeat_warnings_only_describe_prior_confirmed_item_evidence():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for path in ("/api/v1/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings",

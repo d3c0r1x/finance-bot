@@ -31,6 +31,10 @@ import com.decorix.finance.core.api.ProductApi.ProductDecisionSelection;
 import com.decorix.finance.core.api.ProductApi.ProductDecisionKeys;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyRequest;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyResult;
+import com.decorix.finance.core.api.ReceiptRecalculationApi.Preview;
+import com.decorix.finance.core.api.TelegramActorContextApi.TelegramRecalculationApplyRequest;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -50,12 +54,14 @@ public class TelegramActionService {
     private final ProductPriceHistoryService productHistory;
     private final AdviceEvidenceService evidence;
     private final ReceiptService receipts;
+    private final ReceiptRecalculationService recalculations;
 
     @org.springframework.beans.factory.annotation.Autowired
     public TelegramActionService(TelegramActorContextService actorContexts, TransactionService transactions,
                                  TransactionDraftService drafts, DebtService debts, BudgetService budgets, ReportService reports,
                                  TransactionTemplate transaction, ProductPriceHistoryService productHistory,
-                                 AdviceEvidenceService evidence, ReceiptService receipts) {
+                                 AdviceEvidenceService evidence, ReceiptService receipts,
+                                 ReceiptRecalculationService recalculations) {
         this.actorContexts = actorContexts;
         this.transactions = transactions;
         this.drafts = drafts;
@@ -66,12 +72,13 @@ public class TelegramActionService {
         this.productHistory = productHistory;
         this.evidence = evidence;
         this.receipts = receipts;
+        this.recalculations = recalculations;
     }
 
     TelegramActionService(TelegramActorContextService actorContexts, TransactionService transactions,
                           TransactionDraftService drafts, DebtService debts, BudgetService budgets, ReportService reports,
                           TransactionTemplate transaction, ProductPriceHistoryService productHistory) {
-        this(actorContexts, transactions, drafts, debts, budgets, reports, transaction, productHistory, null, null);
+        this(actorContexts, transactions, drafts, debts, budgets, reports, transaction, productHistory, null, null, null);
     }
 
     public DashboardSummary dashboardSummary(String actorToken) {
@@ -104,6 +111,20 @@ public class TelegramActionService {
             ActorContext actor = actorContexts.require(request.token(), "receipt.read");
             return productHistory.catalog(actor.tenantId(), actor.userId(), request.query());
         });
+    }
+
+    public Preview previewReceiptRecalculation(ResolveRequest request) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Recalculation request is required");
+        ActorContext actor = transaction.execute(status -> actorContexts.require(request.token(), "receipt.write.own"));
+        return recalculations.preview(actor.tenantId(), actor.keycloakSubject());
+    }
+
+    public ApplyResult applyReceiptRecalculation(TelegramRecalculationApplyRequest request) {
+        if (request == null || request.runId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Recalculation run is required");
+        }
+        ActorContext actor = transaction.execute(status -> actorContexts.require(request.token(), "receipt.write.own"));
+        return recalculations.apply(actor.tenantId(), actor.keycloakSubject(), new ApplyRequest(request.runId()));
     }
 
     public ShoppingList shopping(ResolveRequest request) {

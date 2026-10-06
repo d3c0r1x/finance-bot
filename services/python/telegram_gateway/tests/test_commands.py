@@ -766,6 +766,99 @@ def test_do_not_buy_command_separates_guesses_and_callback_uses_saved_key(monkey
     assert "По правилам" in edit.text
 
 
+def test_recalculate_command_previews_then_requires_explicit_apply_callback(monkeypatch):
+    sent, calls = [], []
+    preview = {
+        "runId": "0199b81a-4a9c-7000-8000-000000000001", "algorithmVersion": "receipt-basket.v1",
+        "state": "previewed", "checked": 2, "updateCount": 1, "changedCount": 1,
+        "impact": {"algorithmVersion": "receipt-recalculation-impact.v1", "inputVersion": "a" * 64,
+                    "reasonCode": "available", "completeness": "complete", "optionalSpendBefore": "125.00",
+                    "optionalSpendAfter": "0.00", "optionalSpendDelta": "-125.00", "currency": "RUB"},
+        "changes": [{"itemId": "0199b81a-4a9c-7000-8000-000000000002", "name": "Chips",
+                     "lineSum": "125.00", "itemVersion": 3, "beforeVerdict": "harmful",
+                     "beforeReason": "Old", "beforeAction": None, "beforeSource": "model",
+                     "afterVerdict": "neutral", "afterReason": None, "afterAction": None,
+                     "afterSource": "rule", "changed": True}],
+    }
+    applied = {**preview, "state": "applied", "appliedCount": 1}
+
+    class FakeCore:
+        async def preview_receipt_recalculation(self, token):
+            calls.append(("preview", token))
+            return preview
+
+        async def apply_receipt_recalculation(self, token, run_id):
+            calls.append(("apply", token, run_id))
+            return applied
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(message_id=963, date=datetime(2026, 10, 6, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"), from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/recalculate", entities=[MessageEntity(type="bot_command", offset=0, length=12)])
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "owner"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=963, message=message)))
+        assert calls == [("preview", "opaque-context")]
+        preview_message = next(method for method in sent if method.__class__.__name__ == "SendMessage")
+        assert "Необязательные покупки до: 125.00 RUB" in preview_message.text
+        assert "После: 0.00 RUB" in preview_message.text
+        assert "Изменение: -125.00 RUB" in preview_message.text
+        assert "harmful" in preview_message.text and "neutral" in preview_message.text
+        button = next(button for row in preview_message.reply_markup.inline_keyboard for button in row)
+        stale = CallbackQuery(id="recalculate-stale", from_user=message.from_user,
+                              chat_instance="chat-instance", message=message,
+                              data="recalc:old-revision:apply")
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=964, callback_query=stale)))
+        assert calls == [("preview", "opaque-context")]
+        callback = CallbackQuery(id="recalculate-apply", from_user=message.from_user,
+                                 chat_instance="chat-instance", message=message, data=button.callback_data)
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=967, callback_query=callback)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    assert calls == [("preview", "opaque-context"),
+                     ("apply", "opaque-context", "0199b81a-4a9c-7000-8000-000000000001")]
+    edit = next(method for method in sent if method.__class__.__name__ == "EditMessageText")
+    assert "Пересчёт старых разборов применён" in edit.text
+    assert edit.reply_markup is None
+
+
+def test_recalculate_viewer_gets_no_preview_or_apply_controls(monkeypatch):
+    sent = []
+
+    class FakeCore:
+        async def preview_receipt_recalculation(self, token):
+            raise AssertionError("viewer must not start a recalculation")
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(message_id=965, date=datetime(2026, 10, 6, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"), from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/recalculate", entities=[MessageEntity(type="bot_command", offset=0, length=12)])
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "viewer"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=965, message=message)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    response = next(method for method in sent if method.__class__.__name__ == "SendMessage")
+    assert "только просмотр" in response.text.lower()
+    assert not getattr(response.reply_markup, "inline_keyboard", None)
+
+
 def test_do_not_buy_viewer_has_no_decision_controls(monkeypatch):
     sent = []
 

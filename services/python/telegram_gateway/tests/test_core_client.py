@@ -576,6 +576,57 @@ def test_do_not_buy_actions_use_actor_token_and_validate_evidence():
         "/internal/v1/telegram/actions/do-not-buy/decisions")]
 
 
+def test_receipt_recalculation_uses_actor_context_and_validates_preview_apply():
+    seen = []
+    preview = {
+        "runId": "0199b81a-4a9c-7000-8000-000000000001", "algorithmVersion": "receipt-basket.v1",
+        "state": "previewed", "checked": 2, "updateCount": 1, "changedCount": 1,
+        "impact": {"algorithmVersion": "receipt-recalculation-impact.v1", "inputVersion": "a" * 64,
+                    "reasonCode": "available", "completeness": "complete", "optionalSpendBefore": "125.00",
+                    "optionalSpendAfter": "0.00", "optionalSpendDelta": "-125.00", "currency": "RUB"},
+        "changes": [{"itemId": "0199b81a-4a9c-7000-8000-000000000002", "name": "Chips",
+                     "lineSum": "125.00", "itemVersion": 3, "beforeVerdict": "harmful",
+                     "beforeReason": "Old", "beforeAction": None, "beforeSource": "model",
+                     "afterVerdict": "neutral", "afterReason": None, "afterAction": None,
+                     "afterSource": "rule", "changed": True}],
+    }
+    applied = {**preview, "state": "applied", "appliedCount": 1}
+
+    async def action(request):
+        seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
+        return web.json_response(preview if request.path.endswith("preview") else applied)
+
+    async def exercise():
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/actions/review-recalculations/preview", action)
+        app.router.add_post("/internal/v1/telegram/actions/review-recalculations/apply", action)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "telegram-service-secret")
+            return await client.preview_receipt_recalculation("opaque-context"), \
+                await client.apply_receipt_recalculation("opaque-context", preview["runId"])
+
+    assert asyncio.run(exercise()) == (preview, applied)
+    assert seen == [
+        ("/internal/v1/telegram/actions/review-recalculations/preview", "telegram-service-secret",
+         {"token": "opaque-context"}),
+        ("/internal/v1/telegram/actions/review-recalculations/apply", "telegram-service-secret",
+         {"token": "opaque-context", "runId": preview["runId"]}),
+    ]
+
+
+def test_receipt_recalculation_rejects_preview_with_invented_delta():
+    result = {
+        "runId": "0199b81a-4a9c-7000-8000-000000000001", "algorithmVersion": "receipt-basket.v1",
+        "state": "previewed", "checked": 0, "updateCount": 0, "changedCount": 0,
+        "impact": {"algorithmVersion": "receipt-recalculation-impact.v1", "inputVersion": "a" * 64,
+                    "reasonCode": "missing_amounts", "completeness": "partial", "optionalSpendBefore": None,
+                    "optionalSpendAfter": None, "optionalSpendDelta": "0.00", "currency": "RUB"},
+        "changes": [],
+    }
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_recalculation(result, applied=False)
+
+
 def test_do_not_buy_validation_rejects_mixed_guess_and_block():
     group = {"productKey": "tea", "productName": "Tea", "count": 2, "amount": None,
              "missingAmountCount": 2, "ruleCount": 0, "modelCount": 2, "unmarkedCount": 0,
