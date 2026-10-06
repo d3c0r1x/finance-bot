@@ -3251,7 +3251,7 @@ paths:
         required: true
         schema: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]+$' }
     put:
-      operationId: allowProduct
+      operationId: decideProduct
       requestBody:
         required: true
         content:
@@ -3259,7 +3259,7 @@ paths:
             schema: { $ref: '#/components/schemas/ProductDecisionSelection' }
       responses:
         '200':
-          description: User allowed this product across receipt advice
+          description: Member allowed this product or confirmed a personal do-not-buy decision
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProductDecision' }
@@ -4777,7 +4777,7 @@ components:
       additionalProperties: false
       required: [decision]
       properties:
-        decision: { type: string, const: allowed }
+        decision: { type: string, enum: [allowed, confirmed] }
     ProductDecision:
       type: object
       additionalProperties: false
@@ -4790,9 +4790,13 @@ components:
     ProductDecisionKeys:
       type: object
       additionalProperties: false
-      required: [productKeys]
+      required: [productKeys, confirmedProductKeys]
       properties:
         productKeys:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1, maxLength: 256 }
+        confirmedProductKeys:
           type: array
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 256 }

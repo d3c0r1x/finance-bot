@@ -10,7 +10,7 @@ public final class ProductApi {
 
     public record ProductDecisionResponse(String productKey, String decision, long version, Instant updatedAt) {}
 
-    public record ProductDecisionKeys(List<String> productKeys) {}
+    public record ProductDecisionKeys(List<String> productKeys, List<String> confirmedProductKeys) {}
 
     public record ProductCatalogRequest(String tenantId, String ownerUserId, String query) {}
 

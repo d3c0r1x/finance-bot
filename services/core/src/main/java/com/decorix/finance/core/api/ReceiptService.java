@@ -403,15 +403,17 @@ public class ReceiptService {
     public ProductDecisionResponse allowProduct(UUID tenantId, String subject, String productKey,
                                                 ProductDecisionSelection selection) {
         String key = validateProductKey(productKey);
-        if (selection == null || !"allowed".equals(selection.decision())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only allowed product decisions are supported");
+        if (selection == null || !("allowed".equals(selection.decision())
+                || "confirmed".equals(selection.decision()))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Product decision is invalid");
         }
+        String decision = selection.decision();
         return transaction.execute(status -> {
             UUID userId = requireMember(tenantId, subject);
             requireWritePermission(tenantId, userId);
             lockMembership(tenantId, userId);
             List<ProductDecisionState> previous = productDecisionState(tenantId, userId, key, true);
-            if (!previous.isEmpty() && "allowed".equals(previous.get(0).decision())) {
+            if (!previous.isEmpty() && decision.equals(previous.get(0).decision())) {
                 ProductDecisionState current = previous.get(0);
                 return new ProductDecisionResponse(key, current.decision(), current.version(), current.updatedAt());
             }
@@ -419,22 +421,23 @@ public class ReceiptService {
             if (previous.isEmpty()) {
                 saved = jdbc.queryForObject("""
                         INSERT INTO user_product_decisions (tenant_id, user_id, product_key, decision)
-                        VALUES (?, ?, ?, 'allowed') RETURNING decision, version, updated_at
+                        VALUES (?, ?, ?, ?) RETURNING decision, version, updated_at
                         """, (rs, row) -> new ProductDecisionState(rs.getString("decision"), rs.getLong("version"),
-                        rs.getTimestamp("updated_at").toInstant()), tenantId, userId, key);
+                        rs.getTimestamp("updated_at").toInstant()), tenantId, userId, key, decision);
             } else {
                 saved = jdbc.queryForObject("""
-                        UPDATE user_product_decisions SET decision = 'allowed', version = version + 1, updated_at = now()
+                        UPDATE user_product_decisions SET decision = ?, version = version + 1, updated_at = now()
                         WHERE tenant_id = ? AND user_id = ? AND product_key = ?
                         RETURNING decision, version, updated_at
                         """, (rs, row) -> new ProductDecisionState(rs.getString("decision"), rs.getLong("version"),
-                        rs.getTimestamp("updated_at").toInstant()), tenantId, userId, key);
+                        rs.getTimestamp("updated_at").toInstant()), decision, tenantId, userId, key);
             }
             jdbc.update("""
                     INSERT INTO user_product_decision_events
                       (tenant_id, user_id, product_key, before_decision, after_decision, actor_subject, action)
-                    VALUES (?, ?, ?, ?, 'allowed', ?, 'allowed')
-                    """, tenantId, userId, key, previous.isEmpty() ? null : previous.get(0).decision(), subject);
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, tenantId, userId, key, previous.isEmpty() ? null : previous.get(0).decision(),
+                    decision, subject, decision);
             return new ProductDecisionResponse(key, saved.decision(), saved.version(), saved.updatedAt());
         });
     }
@@ -442,10 +445,15 @@ public class ReceiptService {
     public ProductDecisionKeys allowedProducts(UUID tenantId, String subject) {
         return transaction.execute(status -> {
             UUID userId = requireMember(tenantId, subject);
-            List<String> keys = jdbc.query("SELECT product_key FROM user_product_decisions "
-                            + "WHERE tenant_id = ? AND user_id = ? AND decision = 'allowed' ORDER BY product_key",
-                    (rs, row) -> rs.getString("product_key"), tenantId, userId);
-            return new ProductDecisionKeys(List.copyOf(keys));
+            List<String> allowed = new java.util.ArrayList<>();
+            List<String> confirmed = new java.util.ArrayList<>();
+            jdbc.query("SELECT product_key, decision FROM user_product_decisions "
+                            + "WHERE tenant_id = ? AND user_id = ? ORDER BY product_key",
+                    (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+                        if ("allowed".equals(rs.getString("decision"))) allowed.add(rs.getString("product_key"));
+                        else if ("confirmed".equals(rs.getString("decision"))) confirmed.add(rs.getString("product_key"));
+                    }, tenantId, userId);
+            return new ProductDecisionKeys(List.copyOf(allowed), List.copyOf(confirmed));
         });
     }
 

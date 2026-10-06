@@ -436,6 +436,14 @@ def test_product_decision_is_user_scoped_reversible_and_disputed_items_are_paged
     assert browser_allowed["security"] == [{"bffSession": []}]
 
 
+def test_product_decisions_expose_separate_confirmed_and_allowed_keys():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    schemas = spec["components"]["schemas"]
+    assert schemas["ProductDecisionSelection"]["properties"]["decision"]["enum"] == ["allowed", "confirmed"]
+    assert set(schemas["ProductDecisionKeys"]["required"]) == {"productKeys", "confirmedProductKeys"}
+    assert schemas["ProductDecisionKeys"]["properties"]["confirmedProductKeys"]["uniqueItems"] is True
+
+
 def test_repeat_warnings_only_describe_prior_confirmed_item_evidence():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for path in ("/api/v1/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings",

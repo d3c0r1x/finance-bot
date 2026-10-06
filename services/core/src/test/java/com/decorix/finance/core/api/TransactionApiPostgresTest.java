@@ -4638,6 +4638,62 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void productDecisionCanConfirmModelGuessAndSwitchPerMemberWithAudit() throws Exception {
+        String key = "milkcocoa";
+        String path = "/api/v1/tenants/" + tenantId + "/products/" + key + "/decision";
+        var auth = jwt().jwt(token -> token.subject(subject));
+        String otherSubject = "keycloak|product-decision-other-" + UUID.randomUUID();
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID otherUser = jdbc.queryForObject("INSERT INTO users DEFAULT VALUES RETURNING id", UUID.class);
+            jdbc.update("INSERT INTO external_identities (user_id, provider, subject) VALUES (?, 'keycloak', ?)",
+                    otherUser, otherSubject);
+            jdbc.update("INSERT INTO memberships (tenant_id, subject, role, user_id) VALUES (?, ?, 'member', ?)",
+                    tenantId, otherSubject, otherUser);
+        });
+
+        mvc.perform(put(path).with(auth).contentType("application/json")
+                        .content("{\"decision\":\"confirmed\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("confirmed"))
+                .andExpect(jsonPath("$.version").value(1));
+        mvc.perform(put(path).with(auth).contentType("application/json")
+                        .content("{\"decision\":\"confirmed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
+        mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions").with(auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.productKeys").isEmpty())
+                .andExpect(jsonPath("$.confirmedProductKeys[0]").value(key));
+        mvc.perform(get("/bff/tenants/" + tenantId + "/products/decisions")
+                        .with(oidcLogin().idToken(token -> token.subject(subject))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.confirmedProductKeys[0]").value(key));
+        mvc.perform(put("/bff/tenants/" + tenantId + "/products/" + key + "/decision")
+                        .with(oidcLogin().idToken(token -> token.subject(subject))).with(csrf())
+                        .contentType("application/json").content("{\"decision\":\"confirmed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
+        mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions")
+                        .with(jwt().jwt(token -> token.subject(otherSubject))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.confirmedProductKeys").isEmpty());
+
+        mvc.perform(put(path).with(auth).contentType("application/json")
+                        .content("{\"decision\":\"allowed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(2));
+        mvc.perform(put(path).with(auth).contentType("application/json")
+                        .content("{\"decision\":\"confirmed\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(3));
+        mvc.perform(delete(path).with(auth)).andExpect(status().isNoContent());
+        mvc.perform(put(path).with(auth).contentType("application/json")
+                        .content("{\"decision\":\"rejected\"}"))
+                .andExpect(status().isBadRequest());
+        Integer events = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT count(*) FROM user_product_decision_events "
+                    + "WHERE tenant_id = ? AND product_key = ? AND user_id = ?", Integer.class,
+                    tenantId, key, userIdFor(subject));
+        });
+        org.junit.jupiter.api.Assertions.assertEquals(4, events);
+    }
+
+    @Test
     void allowedProductDecisionHidesMatchingDisputesAcrossPagesAndCanBeRevoked() throws Exception {
         StringBuilder items = new StringBuilder();
         for (int index = 0; index < 10; index++) {

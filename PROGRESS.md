@@ -49,19 +49,21 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
 | F40.3 | Web, Android and Telegram optional-spend presentation | COMPLETE — local client gates and GitHub regression GREEN | F40.2 | ec1a373 |
-| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — Go grouping local GREEN; Core and clients remain | F40 | pending |
-| F41.1 | Go evidence groups for the personal “do not buy” list | COMMIT_PENDING — full Go and contract gates GREEN | F40 facts | pending |
+| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — Go grouping and personal decision persistence verified; evidence overlay and clients remain | F40 | pending |
+| F41.1 | Go evidence groups for the personal “do not buy” list | COMPLETE — local and three GitHub workflows GREEN | F40 facts | bd8444f |
+| F41.2a | Confirm/allow/revoke member-local product decisions with audit | COMMIT_PENDING — PostgreSQL and contract gates GREEN | F41.1 | pending |
+| F41.2b | Core evidence API, personal policy overlay and shopping isolation | NOT_IMPLEMENTED | F41.2a | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F41.1 — Go groups receipt verdict evidence into stable product groups; F41.2 owns Core decisions and F41.3 client controls.
-- Status: COMMIT_PENDING — observed Go policy/API and contract RED; full Go tests/vet and contracts now GREEN. Review, commit, push, then verify CI.
-- Acceptance: two or more `harmful`/`unnecessary` verdicts on the same normalized key form a group; exclusively model-sourced groups are marked `modelOnly`; mixed/unknown provenance stays explicit; one-off evidence does not form a group; sums remain exact or nullable when evidence lacks amounts; request validation is strict and output order deterministic.
-- Data boundary: Go receives bounded, already authorized receipt facts and returns evidence only. Core/PostgreSQL later overlays personal `allowed`/`confirmed` decisions; Go never writes business tables or decides to hide purchases.
+- ID and outcome: F41.2a — Core stores per-member `confirmed`/`allowed` decisions and audits each change; F41.2b connects Go evidence to the list and shopping.
+- Status: COMMIT_PENDING — F41.1 GitHub workflows `37413587958`, `37413587940`, `37413587971` all completed successfully; F41.2a focused PostgreSQL acceptance, full Core check and 44 contract tests pass locally.
+- Acceptance: confirmed and allowed are separate personal states; repeated identical decisions are idempotent; switching increments version and writes audit; revoke removes the state; other members cannot see it; BFF requires CSRF.
+- Data boundary: Core/PostgreSQL owns human decisions; Go only groups evidence. F41.2b will bind the two without converting model-only guesses into automatic shopping blocks.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7a0f992`.
-- Updated at: 2026-10-06 07:23 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `bd8444f`.
+- Updated at: 2026-10-06 07:34 Europe/Moscow.
 
 ## Verification evidence
 
@@ -81,6 +83,10 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 | F41.1 Go regression | `go test ./... -count=1`; `go vet ./...` | F41.1 working tree, portable Go 1.27.1 | PASS | All Go packages and vet pass |
 | F41.1 Go build | `go build -o %TEMP%/finance-bot-analytics-f41.exe ./cmd/analytics-api` | F41.1 working tree | PASS | Analytics API binary built; registered evidence-groups route compiles |
 | F41.1 contracts | `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | F41.1 working tree | PASS, 43 tests | Authenticated internal path, strict request/response schemas and golden fixture validate |
+| F41.1 GitHub regression | Actions `37413587958`, `37413587940`, `37413587971` | commit `bd8444f` | PASS | Python/contracts/Go, Core PostgreSQL and bot workflows all completed successfully |
+| F41.2a observed RED | Focused `TransactionApiPostgresTest.productDecisionCanConfirmModelGuessAndSwitchPerMemberWithAudit`; contract schema test | isolated `finance_test_f41_20261006` before implementation | FAIL expected | `confirmed` returned HTTP 400; selection schema lacked `confirmed` |
+| F41.2a focused PostgreSQL | Same focused Java test with migration V34 | F41.2a worktree | PASS | Confirm, idempotence, version switch, revoke/audit, second-member isolation and BFF CSRF route |
+| F41.2a regression | `:services:core:check --rerun-tasks --no-daemon`; `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | F41.2a worktree | PASS; 44 contracts | Full Core suite on isolated PostgreSQL 18.6 and strict decision schemas |
 | F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
 | F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, commit `b1e64c4` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
 | F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
@@ -110,7 +116,7 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 
 ## Next action
 
-- Review the exact F41.1 staged paths, commit and push after local GREEN, then verify GitHub CI; continue with F41.2 Core member-scoped evidence/decisions.
+- Commit and push F41.2a after staged diff review; then start F41.2b Core evidence API and shopping overlay.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
