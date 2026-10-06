@@ -66,6 +66,7 @@ public class WebBffController {
     private final ReceiptReadingService receiptReadings;
     private final AdviceEvidenceService evidence;
     private final AdviceAnalyticsService adviceAnalytics;
+    private final GoalService goals;
 
     public WebBffController(TenantService tenants, TransactionService transactions, MemberProfileService profiles,
                             NotificationPreferencesService notificationPreferences, BudgetService budgets,
@@ -73,7 +74,7 @@ public class WebBffController {
                             ReceiptService receipts, TelegramLinkService telegramLinks,
                             ProductPriceHistoryService productPriceHistory, ReceiptProcessingService receiptProcessing,
                             ReceiptReadingService receiptReadings, AdviceEvidenceService evidence,
-                            AdviceAnalyticsService adviceAnalytics) {
+                            AdviceAnalyticsService adviceAnalytics, GoalService goals) {
         this.tenants = tenants;
         this.transactions = transactions;
         this.profiles = profiles;
@@ -89,6 +90,7 @@ public class WebBffController {
         this.receiptReadings = receiptReadings;
         this.evidence = evidence;
         this.adviceAnalytics = adviceAnalytics;
+        this.goals = goals;
     }
 
     @GetMapping("/csrf")
@@ -131,6 +133,31 @@ public class WebBffController {
     Job getAdviceAnalyticsJob(@PathVariable UUID tenantId, @PathVariable UUID jobId,
                               @AuthenticationPrincipal OidcUser user) {
         return adviceAnalytics.get(tenantId, user.getSubject(), jobId);
+    }
+
+    @GetMapping("/tenants/{tenantId}/goals")
+    GoalCandidatesApi.Overview getGoals(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
+        return goals.get(tenantId, user.getSubject());
+    }
+
+    @PostMapping("/tenants/{tenantId}/goals")
+    ResponseEntity<GoalCandidatesApi.Goal> acceptGoal(@PathVariable UUID tenantId,
+            @RequestBody GoalCandidatesApi.AcceptRequest request, @AuthenticationPrincipal OidcUser user) {
+        GoalCandidatesApi.Goal created = goals.accept(tenantId, user.getSubject(), request);
+        return ResponseEntity.created(java.net.URI.create("/bff/tenants/" + tenantId + "/goals/" + created.id()))
+                .body(created);
+    }
+
+    @PutMapping("/tenants/{tenantId}/goals/unit")
+    GoalCandidatesApi.GoalUnitResponse updateGoalUnit(@PathVariable UUID tenantId,
+            @RequestBody GoalCandidatesApi.GoalUnitRequest request, @AuthenticationPrincipal OidcUser user) {
+        return goals.updateUnit(tenantId, user.getSubject(), request);
+    }
+
+    @PostMapping("/tenants/{tenantId}/goals/{goalId}/cancel")
+    GoalCandidatesApi.Goal cancelGoal(@PathVariable UUID tenantId, @PathVariable UUID goalId,
+            @AuthenticationPrincipal OidcUser user) {
+        return goals.cancel(tenantId, user.getSubject(), goalId);
     }
 
     @GetMapping("/tenants/{tenantId}/receipts/{receiptId}/readings")

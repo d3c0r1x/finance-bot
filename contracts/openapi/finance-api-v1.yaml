@@ -4105,6 +4105,57 @@ paths:
         '200': { description: Member-owned calculation status and stored report, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/tenants/{tenantId}/goals:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getMemberGoals
+      responses:
+        '200': { description: 'Member-scoped candidates, preference and active goal', content: { application/json: { schema: { $ref: '#/components/schemas/GoalOverview' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { description: Confirmed history exceeds the calculation bound }
+    post:
+      operationId: acceptMemberGoal
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GoalAcceptRequest' } } }
+      responses:
+        '201': { description: Immutable 30-day member goal accepted, content: { application/json: { schema: { $ref: '#/components/schemas/MemberGoal' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Candidate is stale or member already has an active goal }
+        '413': { description: Confirmed history exceeds the calculation bound }
+  /api/v1/tenants/{tenantId}/goals/unit:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    put:
+      operationId: updateMemberGoalUnit
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GoalUnitRequest' } } }
+      responses:
+        '200': { description: Per-member preference updated; accepted goal terms remain unchanged, content: { application/json: { schema: { $ref: '#/components/schemas/GoalUnitRequest' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/tenants/{tenantId}/goals/{goalId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: goalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: cancelMemberGoal
+      responses:
+        '200': { description: Active goal cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/MemberGoal' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Goal is not active }
   /bff/tenants/{tenantId}/analytics/advice:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4134,6 +4185,52 @@ paths:
       responses:
         '200': { description: Member-owned calculation status and stored report, content: { application/json: { schema: { $ref: '#/components/schemas/AdviceAnalyticsJob' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/goals:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserMemberGoals
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: 'Member-scoped candidates, preference and active goal', content: { application/json: { schema: { $ref: '#/components/schemas/GoalOverview' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: acceptBrowserMemberGoal
+      security: [{ bffSession: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GoalAcceptRequest' } } }
+      responses:
+        '201': { description: Immutable member goal accepted, content: { application/json: { schema: { $ref: '#/components/schemas/MemberGoal' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Candidate is stale or member already has an active goal }
+  /bff/tenants/{tenantId}/goals/unit:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    put:
+      operationId: updateBrowserMemberGoalUnit
+      security: [{ bffSession: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/GoalUnitRequest' } } }
+      responses:
+        '200': { description: Per-member preference updated, content: { application/json: { schema: { $ref: '#/components/schemas/GoalUnitRequest' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /bff/tenants/{tenantId}/goals/{goalId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: goalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: cancelBrowserMemberGoal
+      security: [{ bffSession: [] }]
+      responses:
+        '200': { description: Active goal cancelled, content: { application/json: { schema: { $ref: '#/components/schemas/MemberGoal' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Goal is not active }
   /internal/v1/analytics/advice-jobs/claim:
     post:
       operationId: claimAdviceAnalyticsJob
@@ -5902,6 +5999,75 @@ components:
       required: [reasonCode]
       properties:
         reasonCode: { type: string, const: too_many_items }
+    GoalOverview:
+      type: object
+      additionalProperties: false
+      required: [unit, active, inputWatermark, candidates, groups, skipped]
+      properties:
+        unit: { type: string, enum: [count, sum] }
+        active: { oneOf: [{ $ref: '#/components/schemas/MemberGoal' }, { type: 'null' }] }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        candidates: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/GoalCandidate' } }
+        groups: { type: array, maxItems: 2, items: { $ref: '#/components/schemas/GoalCandidate' } }
+        skipped: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/GoalSkippedCandidate' } }
+    GoalCandidate:
+      type: object
+      additionalProperties: false
+      required: [key, productKey, name, unit, monthlyRate, countTarget, monthlySpend, monthlyLimit, estimatedReduction, purchaseCount, evidenceCount]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 300 }
+        productKey: { type: [string, 'null'], maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        unit: { type: string, enum: [count, sum] }
+        monthlyRate: { type: string, pattern: '^\d+\.\d{2}$' }
+        countTarget: { type: integer, minimum: 0 }
+        monthlySpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        monthlyLimit: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        estimatedReduction: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        purchaseCount: { type: integer, minimum: 2, maximum: 50000 }
+        evidenceCount: { type: integer, minimum: 1, maximum: 50000 }
+    GoalSkippedCandidate:
+      type: object
+      additionalProperties: false
+      required: [productKey, name, monthlySpend, reasonCode]
+      properties:
+        productKey: { type: string, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        monthlySpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        reasonCode: { type: string, enum: [minimum_savings, missing_amounts] }
+    GoalAcceptRequest:
+      type: object
+      additionalProperties: false
+      required: [candidateKey, inputWatermark]
+      properties:
+        candidateKey: { type: string, minLength: 1, maxLength: 300 }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+    GoalUnitRequest:
+      type: object
+      additionalProperties: false
+      required: [unit]
+      properties:
+        unit: { type: string, enum: [count, sum] }
+    MemberGoal:
+      type: object
+      additionalProperties: false
+      required: [id, key, scope, name, unit, monthlyRate, countTarget, monthlySpend, monthlyLimit, evidenceCount, inputWatermark, acceptedAt, endsAt, status, version]
+      properties:
+        id: { type: string, format: uuid }
+        key: { type: string, minLength: 1, maxLength: 300 }
+        scope: { type: string, enum: [product, group] }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        unit: { type: string, enum: [count, sum] }
+        monthlyRate: { type: string, pattern: '^\d+\.\d{2}$' }
+        countTarget: { type: integer, minimum: 0 }
+        monthlySpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        monthlyLimit: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        evidenceCount: { type: integer, minimum: 1 }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        acceptedAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        status: { type: string, enum: [active, cancelled, completed] }
+        version: { type: integer, minimum: 1 }
     ClaimedAdviceAnalyticsJob:
       type: object
       additionalProperties: false

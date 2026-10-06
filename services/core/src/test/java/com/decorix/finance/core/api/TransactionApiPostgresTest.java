@@ -69,6 +69,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.decorix.finance.core.api.AdviceRecalculationImpactApi.Impact;
+import com.decorix.finance.core.api.GoalCandidatesApi;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=${FINANCE_TEST_JDBC_URL:jdbc:postgresql://localhost:5432/finance_test}",
@@ -140,6 +141,7 @@ class TransactionApiPostgresTest {
     @MockitoBean private ReceiptOcrClient receiptOcrClient;
     @MockitoBean private ReceiptVisionClient receiptVisionClient;
     @MockitoBean private AdviceRecalculationImpactClient recalculationImpactClient;
+    @MockitoBean private GoalCandidatesClient goalCandidatesClient;
 
     private UUID tenantId;
     private String subject;
@@ -5484,6 +5486,162 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void goalsAreMemberScopedAndChangingPreferenceDoesNotRewriteAcceptedTerms() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            for (int index = 0; index < 4; index++) {
+                String date = "2026-10-0" + (index + 1) + "T10:00:00Z";
+                UUID transactionId = addReportTransaction(ownerId, subject, "expense", "100.00", "food", date);
+                addConfirmedReceiptItem(ownerId, subject, transactionId, "Чипсы", "100.00", "harmful", "rule", index + 1);
+            }
+        });
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> {
+            GoalCandidatesApi.Request request = invocation.getArgument(0);
+            return goalCandidates(request);
+        });
+
+        String overview = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.unit").value("count"))
+                .andExpect(jsonPath("$.candidates[0].key").value("snack"))
+                .andReturn().getResponse().getContentAsString();
+        var captor = org.mockito.ArgumentCaptor.forClass(GoalCandidatesApi.Request.class);
+        verify(goalCandidatesClient).calculate(captor.capture());
+        GoalCandidatesApi.Request sent = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertNotNull(sent);
+        org.junit.jupiter.api.Assertions.assertEquals("count", sent.unit());
+        org.junit.jupiter.api.Assertions.assertEquals(4, sent.purchases().size());
+        org.junit.jupiter.api.Assertions.assertEquals(1, sent.decisions().size());
+        org.junit.jupiter.api.Assertions.assertEquals(4, sent.decisions().get(0).harmfulCount());
+
+        String watermark = com.jayway.jsonpath.JsonPath.read(overview, "$.inputWatermark");
+        String accepted = mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json")
+                        .content("{\"candidateKey\":\"snack\",\"inputWatermark\":\"" + watermark + "\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.unit").value("count"))
+                .andExpect(jsonPath("$.countTarget").value(2))
+                .andReturn().getResponse().getContentAsString();
+        String goalId = com.jayway.jsonpath.JsonPath.read(accepted, "$.id");
+        Instant acceptedAt = Instant.parse(com.jayway.jsonpath.JsonPath.read(accepted, "$.acceptedAt"));
+        Instant endsAt = Instant.parse(com.jayway.jsonpath.JsonPath.read(accepted, "$.endsAt"));
+        org.junit.jupiter.api.Assertions.assertEquals(acceptedAt.plusSeconds(30L * 24 * 60 * 60), endsAt);
+        org.junit.jupiter.api.Assertions.assertEquals(1, countTenantRows("outbox_events", "aggregate_id", UUID.fromString(goalId)));
+
+        mvc.perform(put("/api/v1/tenants/{tenantId}/goals/unit", tenantId).with(auth)
+                        .contentType("application/json").content("{\"unit\":\"sum\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.unit").value("sum"));
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.unit").value("sum"))
+                .andExpect(jsonPath("$.active.id").value(goalId))
+                .andExpect(jsonPath("$.active.unit").value("count"))
+                .andExpect(jsonPath("$.active.countTarget").value(2));
+    }
+
+    @Test
+    void countGoalCanBeAcceptedWhenReceiptAmountsAreUnknownAndOldPreviewBecomesStale() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            for (int index = 0; index < 4; index++) {
+                UUID transactionId = addReportTransaction(ownerId, subject, "expense", "50.00", "food",
+                        "2026-10-0" + (index + 1) + "T10:00:00Z");
+                addConfirmedReceiptItem(ownerId, subject, transactionId, "Чипсы", null, "harmful", "rule", index + 1);
+            }
+        });
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> goalCandidates(invocation.getArgument(0)));
+
+        String preview = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.candidates[0].monthlySpend").value(org.hamcrest.Matchers.nullValue()))
+                .andReturn().getResponse().getContentAsString();
+        String watermark = com.jayway.jsonpath.JsonPath.read(preview, "$.inputWatermark");
+        String accepted = mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json").content("{\"candidateKey\":\"snack\",\"inputWatermark\":\"" + watermark + "\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.monthlySpend").value(org.hamcrest.Matchers.nullValue()))
+                .andReturn().getResponse().getContentAsString();
+        String goalId = com.jayway.jsonpath.JsonPath.read(accepted, "$.id");
+        java.math.BigDecimal storedBaseline = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT baseline_monthly_spend FROM goals WHERE tenant_id=? AND id=?",
+                    java.math.BigDecimal.class, tenantId, UUID.fromString(goalId));
+        });
+        org.junit.jupiter.api.Assertions.assertNull(storedBaseline);
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/goals/{goalId}/cancel", tenantId, goalId).with(auth))
+                .andExpect(status().isOk());
+        String nextPreview = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String staleWatermark = com.jayway.jsonpath.JsonPath.read(nextPreview, "$.inputWatermark");
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE receipt_items SET verdict='neutral', version=version+1 WHERE tenant_id=? "
+                    + "AND name='Чипсы' AND id=(SELECT id FROM receipt_items WHERE tenant_id=? AND name='Чипсы' ORDER BY id LIMIT 1)",
+                    tenantId, tenantId);
+        });
+        mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json").content("{\"candidateKey\":\"snack\",\"inputWatermark\":\"" + staleWatermark + "\"}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void goalsEnforceOneActiveGoalAndViewerCannotChangeThem() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        String viewerSubject = "keycloak|goals-viewer-" + UUID.randomUUID();
+        addTenantMember(viewerSubject, "Goal viewer", "viewer");
+        var viewerAuth = jwt().jwt(token -> token.subject(viewerSubject));
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> goalCandidates(invocation.getArgument(0)));
+
+        String overview = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String watermark = com.jayway.jsonpath.JsonPath.read(overview, "$.inputWatermark");
+        String body = "{\"candidateKey\":\"snack\",\"inputWatermark\":\"" + watermark + "\"}";
+        String goalId = mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        goalId = com.jayway.jsonpath.JsonPath.read(goalId, "$.id");
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isConflict());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(viewerAuth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.active").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(put("/api/v1/tenants/{tenantId}/goals/unit", tenantId).with(viewerAuth)
+                        .contentType("application/json").content("{\"unit\":\"sum\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(viewerAuth)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isForbidden());
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/goals/{goalId}/cancel", tenantId, goalId).with(auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("cancelled"));
+        mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void goalBffReadsTheSameMemberSnapshotAndRequiresCsrfForPreferenceChanges() throws Exception {
+        var apiAuth = jwt().jwt(token -> token.subject(subject));
+        var bffAuth = oidcLogin().idToken(token -> token.subject(subject));
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> goalCandidates(invocation.getArgument(0)));
+        String api = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(apiAuth))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String watermark = com.jayway.jsonpath.JsonPath.read(api, "$.inputWatermark");
+        mvc.perform(get("/bff/tenants/{tenantId}/goals", tenantId).with(bffAuth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.inputWatermark").value(watermark));
+        mvc.perform(put("/bff/tenants/{tenantId}/goals/unit", tenantId).with(bffAuth)
+                        .contentType("application/json").content("{\"unit\":\"sum\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/bff/tenants/{tenantId}/goals/unit", tenantId).with(bffAuth).with(csrf())
+                        .contentType("application/json").content("{\"unit\":\"sum\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.unit").value("sum"));
+    }
+
+    @Test
     void adviceAnalyticsIsMemberScopedAndViewerCanOnlyRead() throws Exception {
         String viewerSubject = "keycloak|advice-viewer-" + UUID.randomUUID();
         addTenantMember(viewerSubject, "Advice viewer", "viewer");
@@ -5670,6 +5828,16 @@ class TransactionApiPostgresTest {
             return jdbc.queryForObject("SELECT count(*) FROM " + table + " WHERE tenant_id = ? AND " + column + " = ?",
                     Integer.class, tenantId, transactionId);
         });
+    }
+
+    private static GoalCandidatesApi.CandidateReport goalCandidates(GoalCandidatesApi.Request request) {
+        boolean unknownAmounts = request.purchases().stream().anyMatch(purchase -> purchase.lineSum() == null);
+        var candidate = new GoalCandidatesApi.Candidate("snack", "snack", "Чипсы", request.unit(),
+                "4.00", "count".equals(request.unit()) ? 2 : 0, unknownAmounts ? null : "400.00",
+                "sum".equals(request.unit()) ? "200.00" : null,
+                unknownAmounts ? null : "200.00", 4, 4);
+        return new GoalCandidatesApi.CandidateReport("goal-candidates-f44.v1", request.inputWatermark(),
+                request.unit(), List.of(candidate), List.of(), List.of());
     }
 
     private static void ensureAppRole() {

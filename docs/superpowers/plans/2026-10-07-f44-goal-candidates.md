@@ -12,10 +12,12 @@
 
 ## F44.2 Core persistence and member API
 
-1. Write isolated-PostgreSQL acceptance tests for member/viewer boundaries, one-active-goal, a fixed 30-day period from acceptance, immutable target/unit, count/sum preference affecting future proposals only, cancel and idempotent request behavior.
-2. Observe behavioral RED, then add migration/RLS, member service, API/BFF contract and tests.
-3. Run Core PostgreSQL check and API contract suite; verify no receipt or transaction facts are written.
-4. Commit separately and record evidence.
+- [x] Write isolated-PostgreSQL acceptance tests for member/viewer boundaries, one active goal, fixed 30-day terms, immutable target/unit, preference changes, cancel, stale preview rejection, and nullable receipt amounts.
+- [x] Observe compile RED for missing F44 Core API types, then a migration RED because PostgreSQL rejects the timezone-sensitive generated `ends_at` expression as non-immutable.
+- [x] Add V39 RLS-protected member preference and goal persistence; persist exact 30-day `ends_at`, keep accepted terms immutable, and allow unknown count-goal money without inventing zero.
+- [x] Add Core Go-client validation, member API, same-origin BFF routes, audit/outbox events and OpenAPI contract.
+- [x] Run focused Core PostgreSQL/API acceptance, full `:services:core:check`, contract/migration suite and `git diff --check`.
+- [ ] Commit F44.2 after GREEN; update `.agent/PROGRESS.md`.
 
 ## F44.3 Web surface
 
