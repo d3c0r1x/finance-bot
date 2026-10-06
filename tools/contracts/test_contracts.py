@@ -856,6 +856,39 @@ def test_advice_waste_internal_contract_is_strict_and_fixture_matches_schema():
     Draft202012Validator(report_document, format_checker=FormatChecker()).validate(expected_report)
 
 
+def test_advice_f43_internal_contract_is_strict_and_fixture_matches_schemas():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+    operation = spec["paths"]["/internal/v1/analytics/advice/f43"]["post"]
+    assert operation["operationId"] == "buildAdviceF43Report"
+    assert operation["security"] == [{"serviceBearer": []}]
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/F43Request",
+    }
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/F43Report",
+    }
+    schemas = spec["components"]["schemas"]
+    for name in ("F43Request", "F43Item", "F43Recalculation", "F43Report", "F43SavingsReport",
+                 "F43SavingsGroup", "F43TrendReport", "F43TrendWeek", "F43EffectsReport", "F43Effect",
+                 "F43PendingEffect", "F43RecalculationReport", "F43RecalculationWindow"):
+        assert schemas[name]["additionalProperties"] is False
+    fixture = json.loads((ROOT / "contracts/analytics/advice-f43.v1.json").read_text("utf-8"))
+    request_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/F43Request",
+    }
+    report_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/F43Report",
+    }
+    Draft202012Validator(request_document, format_checker=FormatChecker()).validate(fixture["input"])
+    Draft202012Validator(report_document, format_checker=FormatChecker()).validate(fixture["expected"])
+    assert fixture["expected"]["effects"]["causalityClaim"] is False
+    assert fixture["expected"]["savings"]["label"] == "theoretical_ceiling_not_actual_savings"
+
+
 def test_advice_evidence_internal_contract_is_strict_and_fixture_matches_schema():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
     operation = spec["paths"]["/internal/v1/analytics/advice/evidence-groups"]["post"]

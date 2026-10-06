@@ -1,0 +1,56 @@
+{
+  "input": {
+    "inputWatermark": "202",
+    "asOf": "2026-10-07T12:00:00Z",
+    "timeZone": "UTC",
+    "items": [
+      {"itemId":"00000000-0000-4000-8000-000000000001","productKey":"soda","name":"Газировка","lineSum":"10.00","verdict":"harmful","advice":"Покупать реже","adviceGiven":false,"allowed":false,"purchasedAt":"2026-09-01T12:00:00Z"},
+      {"itemId":"00000000-0000-4000-8000-000000000002","productKey":"soda","name":"Газировка","lineSum":"20.00","verdict":"harmful","advice":"Покупать реже","adviceGiven":false,"allowed":false,"purchasedAt":"2026-09-15T12:00:00Z"},
+      {"itemId":"00000000-0000-4000-8000-000000000003","productKey":"soda","name":"Газировка","lineSum":"30.00","verdict":"harmful","advice":"Покупать реже","adviceGiven":true,"allowed":false,"purchasedAt":"2026-10-01T12:00:00Z"},
+      {"itemId":"00000000-0000-4000-8000-000000000004","productKey":"soda","name":"Газировка","lineSum":"40.00","verdict":"useful","advice":"","adviceGiven":false,"allowed":false,"purchasedAt":"2026-10-05T12:00:00Z"},
+      {"itemId":"00000000-0000-4000-8000-000000000005","productKey":"bread","name":"Хлеб","lineSum":"60.00","verdict":"useful","advice":"","adviceGiven":false,"allowed":false,"purchasedAt":"2026-09-17T12:00:00Z"},
+      {"itemId":"00000000-0000-4000-8000-000000000006","productKey":"candy","name":"Конфета","lineSum":"60.00","verdict":"harmful","advice":"Проверить привычку","adviceGiven":false,"allowed":false,"purchasedAt":"2026-10-05T13:00:00Z"}
+    ],
+    "recalculations": [
+      {"changedAt":"2026-10-05T14:00:00Z","changedItemCount":1,"optionalSpendDelta":"-12.00"}
+    ]
+  },
+  "expected": {
+    "algorithmVersion": "advice-f43.v1",
+    "inputWatermark": "202",
+    "completeness": "complete",
+    "reasonCode": "available",
+    "savings": {
+      "available": true,
+      "reasonCode": "available",
+      "label": "theoretical_ceiling_not_actual_savings",
+      "days": 90,
+      "monthlyCeiling": "20.00",
+      "shareOfIncome": null,
+      "shareOfLimit": null,
+      "groups": [{"productKey":"soda","name":"Газировка","count":3,"spend":"60.00","monthlyCeiling":"20.00"}]
+    },
+    "trend": {
+      "available": true,
+      "reasonCode": "available",
+      "delta": "-0.308",
+      "direction": "down",
+      "weeks": [
+        {"start":"2026-09-10","end":"2026-09-16","spend":"20.00","optionalSpend":"20.00","optionalShare":"1.000","itemCount":1,"recalculated":false},
+        {"start":"2026-09-17","end":"2026-09-23","spend":"60.00","optionalSpend":"0.00","optionalShare":"0.000","itemCount":1,"recalculated":false},
+        {"start":"2026-10-01","end":"2026-10-07","spend":"130.00","optionalSpend":"90.00","optionalShare":"0.692","itemCount":3,"recalculated":true}
+      ]
+    },
+    "effects": {
+      "effects": [],
+      "pending": [{"productKey":"soda","name":"Газировка","daysAfter":6,"daysLeft":15}],
+      "causalityClaim": false
+    },
+    "recalculation": {
+      "available": true,
+      "changedItemCount": 1,
+      "optionalSpendDelta": "-12.00",
+      "windows": [{"start":"2026-10-05","end":"2026-10-11","changedItemCount":1,"optionalSpendDelta":"-12.00"}]
+    }
+  }
+}

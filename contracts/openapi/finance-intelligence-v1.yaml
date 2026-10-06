@@ -118,6 +118,26 @@ paths:
         '400': { description: Request is malformed or contains invalid receipt facts }
         '401': { description: Internal service token is missing or invalid }
         '413': { description: Request exceeds the supported body size }
+  /internal/v1/analytics/advice/f43:
+    post:
+      operationId: buildAdviceF43Report
+      security:
+        - serviceBearer: []
+      description: Computes the savings ceiling, member-local weekly optional-spend trend and post-advice cadence from bounded, Core-authorized personal facts. Does not claim realized savings or causality.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/F43Request' }
+      responses:
+        '200':
+          description: Versioned analytics with separate F42 recalculation impact and explicit completeness
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/F43Report' }
+        '400': { description: Request is malformed or contains invalid purchase facts }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the supported body size }
   /internal/v1/analytics/recalculation-impact:
     post:
       operationId: calculateReceiptRecalculationImpact
@@ -627,6 +647,172 @@ components:
           maxItems: 50000
           items: { $ref: '#/components/schemas/WasteLine' }
       description: Core sends only confirmed expense receipt items in the authorized date and member scope; allowed is resolved against each receipt owner's current decision.
+    F43Request:
+      type: object
+      additionalProperties: false
+      required: [inputWatermark, asOf, timeZone, items, recalculations]
+      properties:
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$', description: Monotonically increasing Core snapshot version; encoded as text to avoid JS integer loss. }
+        asOf: { type: string, format: date-time }
+        timeZone: { type: string, minLength: 1, maxLength: 64, description: IANA timezone resolved by Core. }
+        income: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        monthlyLimit: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        items:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/F43Item' }
+        recalculations:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/F43Recalculation' }
+      description: Core sends only confirmed personal purchase facts and the member's F42 changes. AdviceGiven is true only for advice actually shown when the purchase was recorded.
+    F43Item:
+      type: object
+      additionalProperties: false
+      required: [itemId, productKey, name, lineSum, verdict, advice, adviceGiven, allowed, purchasedAt]
+      properties:
+        itemId: { type: string, format: uuid }
+        productKey: { type: string, maxLength: 256, pattern: '^[a-zа-я0-9]*$' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        lineSum: { type: [string, 'null'], pattern: '^\d{1,18}\.\d{2}$' }
+        verdict: { type: [string, 'null'], enum: [harmful, unnecessary, useful, neutral, null] }
+        advice: { type: string, maxLength: 500 }
+        adviceGiven: { type: boolean, description: False for verdicts introduced by F42 recalculation. }
+        allowed: { type: boolean, description: Current member decision; used for the savings ceiling only. }
+        purchasedAt: { type: string, format: date-time }
+    F43Recalculation:
+      type: object
+      additionalProperties: false
+      required: [changedAt, changedItemCount, optionalSpendDelta]
+      properties:
+        changedAt: { type: string, format: date-time }
+        changedItemCount: { type: integer, minimum: 0, maximum: 50000 }
+        optionalSpendDelta: { type: [string, 'null'], pattern: '^-?\d{1,18}\.\d{2}$' }
+    F43Report:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, inputWatermark, completeness, reasonCode, savings, trend, effects, recalculation]
+      properties:
+        algorithmVersion: { type: string, const: advice-f43.v1 }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        completeness: { type: string, enum: [complete, partial] }
+        reasonCode: { type: string, enum: [available, insufficient_history, missing_amounts, too_many_items, analytics_unavailable] }
+        savings: { $ref: '#/components/schemas/F43SavingsReport' }
+        trend: { $ref: '#/components/schemas/F43TrendReport' }
+        effects: { $ref: '#/components/schemas/F43EffectsReport' }
+        recalculation: { $ref: '#/components/schemas/F43RecalculationReport' }
+    F43SavingsReport:
+      type: object
+      additionalProperties: false
+      required: [available, reasonCode, label, days, monthlyCeiling, shareOfIncome, shareOfLimit, groups]
+      properties:
+        available: { type: boolean }
+        reasonCode: { type: string, enum: [available, insufficient_history, missing_amounts] }
+        label: { type: string, const: theoretical_ceiling_not_actual_savings }
+        days: { type: integer, const: 90 }
+        monthlyCeiling: { type: [string, 'null'], pattern: '^\d{1,18}\.\d{2}$' }
+        shareOfIncome: { type: [string, 'null'], pattern: '^\d{1,18}\.\d$' }
+        shareOfLimit: { type: [string, 'null'], pattern: '^\d{1,18}\.\d$' }
+        groups:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/F43SavingsGroup' }
+    F43SavingsGroup:
+      type: object
+      additionalProperties: false
+      required: [productKey, name, count, spend, monthlyCeiling]
+      properties:
+        productKey: { type: string, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        count: { type: integer, minimum: 2, maximum: 50000 }
+        spend: { type: string, pattern: '^\d{1,18}\.\d{2}$' }
+        monthlyCeiling: { type: string, pattern: '^\d{1,18}\.\d{2}$' }
+    F43TrendReport:
+      type: object
+      additionalProperties: false
+      required: [available, reasonCode, weeks, delta, direction]
+      properties:
+        available: { type: boolean }
+        reasonCode: { type: string, enum: [available, insufficient_history, missing_amounts] }
+        weeks:
+          type: array
+          maxItems: 4
+          items: { $ref: '#/components/schemas/F43TrendWeek' }
+        delta: { type: [string, 'null'], pattern: '^-?\d+\.\d{3}$' }
+        direction: { type: string, enum: ['', steady, down, up] }
+    F43TrendWeek:
+      type: object
+      additionalProperties: false
+      required: [start, end, spend, optionalSpend, optionalShare, itemCount, recalculated]
+      properties:
+        start: { type: string, format: date }
+        end: { type: string, format: date }
+        spend: { type: string, pattern: '^\d{1,18}\.\d{2}$' }
+        optionalSpend: { type: string, pattern: '^\d{1,18}\.\d{2}$' }
+        optionalShare: { type: string, pattern: '^\d+\.\d{3}$' }
+        itemCount: { type: integer, minimum: 1, maximum: 50000 }
+        recalculated: { type: boolean }
+    F43EffectsReport:
+      type: object
+      additionalProperties: false
+      required: [effects, pending, causalityClaim]
+      properties:
+        effects:
+          type: array
+          maxItems: 4
+          items: { $ref: '#/components/schemas/F43Effect' }
+        pending:
+          type: array
+          maxItems: 4
+          items: { $ref: '#/components/schemas/F43PendingEffect' }
+        causalityClaim: { type: boolean, const: false }
+    F43Effect:
+      type: object
+      additionalProperties: false
+      required: [productKey, name, advice, beforeCount, afterCount, daysBefore, daysAfter, intervalBefore, intervalAfter, change, direction, afterSpend]
+      properties:
+        productKey: { type: string, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        advice: { type: string, maxLength: 500 }
+        beforeCount: { type: integer, minimum: 2, maximum: 50000 }
+        afterCount: { type: integer, minimum: 0, maximum: 50000 }
+        daysBefore: { type: integer, minimum: 1 }
+        daysAfter: { type: integer, minimum: 21 }
+        intervalBefore: { type: string, pattern: '^\d+\.\d$' }
+        intervalAfter: { type: [string, 'null'], pattern: '^\d+\.\d$' }
+        change: { type: string, pattern: '^-?\d+\.\d{2}$' }
+        direction: { type: string, enum: [less_often, same_frequency, more_often] }
+        afterSpend: { type: [string, 'null'], pattern: '^\d{1,18}\.\d{2}$' }
+    F43PendingEffect:
+      type: object
+      additionalProperties: false
+      required: [productKey, name, daysAfter, daysLeft]
+      properties:
+        productKey: { type: string, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        daysAfter: { type: integer, minimum: 0, maximum: 20 }
+        daysLeft: { type: integer, minimum: 1, maximum: 21 }
+    F43RecalculationReport:
+      type: object
+      additionalProperties: false
+      required: [available, changedItemCount, optionalSpendDelta, windows]
+      properties:
+        available: { type: boolean }
+        changedItemCount: { type: integer, minimum: 0, maximum: 2500000000 }
+        optionalSpendDelta: { type: [string, 'null'], pattern: '^-?\d{1,18}\.\d{2}$' }
+        windows:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/F43RecalculationWindow' }
+    F43RecalculationWindow:
+      type: object
+      additionalProperties: false
+      required: [start, end, changedItemCount, optionalSpendDelta]
+      properties:
+        start: { type: string, format: date }
+        end: { type: string, format: date }
+        changedItemCount: { type: integer, minimum: 0, maximum: 2500000000 }
+        optionalSpendDelta: { type: [string, 'null'], pattern: '^-?\d{1,18}\.\d{2}$' }
     RecalculationImpactRequest:
       type: object
       additionalProperties: false

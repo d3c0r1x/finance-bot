@@ -64,6 +64,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	f43Analytics, err := advice.NewF43Handler(os.Getenv("FINANCE_ANALYTICS_SERVICE_TOKEN"))
+	if err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/internal/v1/prices/compare", priceHistory)
 	mux.Handle("/internal/v1/products/catalog", productCatalog)
@@ -73,6 +77,7 @@ func run() error {
 	mux.Handle("/internal/v1/analytics/waste", wasteAnalytics)
 	mux.Handle("/internal/v1/analytics/advice/evidence-groups", evidenceAnalytics)
 	mux.Handle("/internal/v1/analytics/recalculation-impact", recalculationImpact)
+	mux.Handle("/internal/v1/analytics/advice/f43", f43Analytics)
 	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
