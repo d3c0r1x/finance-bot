@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 00:15, Europe/Moscow.
+Updated: 2026-10-07 00:16, Europe/Moscow.
 
 ## Global plan
 
@@ -63,19 +63,19 @@ Updated: 2026-10-07 00:15, Europe/Moscow.
 | F42.2 | Persist preview, apply safely, audit and report changes through Core API | COMMITTED — local PostgreSQL/Core checks pass; contract pytest unavailable, GitHub run not found | F42.1 | d41888c |
 | F42.3 | Web preview and explicit apply flow for receipt verdict recalculation | COMMITTED — Web 57/57 and production build pass; GitHub run not found | F42.2 | 81267de |
 | F42.4 | Calculate optional-spend impact in Go; persist exact report in Core preview; display it in Web | COMMITTED — local Go/Core/Web/contracts GREEN; pushed, but GitHub returned no run for the SHA | F42.3 | 659b537 |
-| F42.5 | Telegram `/recalculate` preview with actor-scoped explicit apply | LOCAL GREEN — Core 244/0/2 skipped, gateway 95/95, contracts 47/47; commit pending | F42.4 | pending |
+| F42.5 | Telegram `/recalculate` preview with actor-scoped explicit apply | COMMITTED — local gates GREEN; pushed, GitHub returned no run for the SHA | F42.4 | 1a484bb |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F42.5 — add Telegram `/recalculate` with actor-scoped preview and separate explicit apply.
-- Status: LOCAL GREEN — RED reproduced for missing client, command handler and Core route. Full Core check (244 tests, 0 failures, 2 skipped), Telegram gateway (95/95), contracts (47/47), and `git diff --check` pass. Commit pending.
+- Status: COMMITTED — `1a484bb` pushed. RED reproduced for missing client, command handler and Core route. Full Core check (244 tests, 0 failures, 2 skipped), Telegram gateway (95/95), contracts (47/47), and `git diff --check` pass. `gh run list --commit 1a484bb` returned no run; remote CI is unverified.
 - Acceptance: private chat only; viewers cannot preview/apply; only current actor can preview/apply their own run; stale callback revisions do not call Core; preview shows changes and Go delta; only button applies; stale item is rejected.
 - Changed files: Core Telegram routes/permissions/PostgreSQL test, Python Core client, command and callback validation/tests, OpenAPI contract, contract test, parity and this progress log.
 - User choices: maintain F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, no placeholder financial data. Personal MVP takes priority; V2 remains deferred.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `5355e70`; F42.5 changes are uncommitted; unrelated user-owned untracked files remain untouched.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `1a484bb`; unrelated user-owned untracked files remain untouched.
 - Runtime: M2/MVP still BLOCKED; no durable backend/public HTTPS. This F42 work has not restarted or deployed a server.
-- Updated at: 2026-10-07 00:15 Europe/Moscow.
+- Updated at: 2026-10-07 00:16 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -1230,7 +1230,7 @@ Updated: 2026-10-07 00:15, Europe/Moscow.
 - Web shows before/after spend, signed delta and profile currency; when Go cannot calculate it, Web shows the reason and does not fabricate zero. Apply remains a separate explicit action.
 - GREEN: full Go `test ./...` and `vet ./...`; `:services:core:check` with PostgreSQL (243 tests, 0 failures, 2 skipped); all Web tests 59/59, `tsc --noEmit`, Vite production build; `tools/contracts/test_contracts.py` 46/46; `git diff --check`.
 - No remote CI run is available yet; F42.4 is not committed. M2 runtime stays BLOCKED; no persistent server or public HTTPS deploy was attempted.
-- Next: commit/push F42.5, then implement accessible recalculation run history and bounded batch behavior.
+- Next: implement accessible recalculation run history and bounded batch behavior.
 
 ## E4.65 F42.4 commit and remote status — 2026-10-07 00:02 MSK
 
@@ -1245,4 +1245,11 @@ Updated: 2026-10-07 00:15, Europe/Moscow.
 - Added private `/recalculate`: summary includes checked/prepared/changed counts, old/new verdict and reason, amounts and Go impact. It displays a separate Apply button only when there are candidate updates. Callback revision and tenant must match current FSM state; stale callbacks are rejected, and Core independently rejects stale receipt versions. Successful apply removes the button.
 - Core routes require the Telegram service credential and `receipt.write.own`; actor identity/tenant comes only from the signed opaque context. ReceiptRecalculationService is called after context resolution transaction ends; existing preview calls Go outside its own read transaction.
 - GREEN: focused RED→GREEN client/command tests 4/4; PostgreSQL route test includes missing service token, owner preview/apply and viewer 403; full Core check 244 tests, 0 failures, 2 skipped; Telegram gateway 95/95; contracts 47/47; `git diff --check`.
-- Next: commit/push this slice, then define bounded run history and batch execution behavior from F42's job/batch target.
+- Next: implement accessible run history and bounded batch execution from F42's job/batch target.
+
+## E4.67 F42.5 commit and remote status — 2026-10-07 00:16 MSK
+
+- Committed Telegram flow as `1a484bb` (`feat(F42.5): add Telegram recalculation flow`) and pushed `feat/saas-rewrite` successfully.
+- `gh run list --commit 1a484bb` returned `[]`; GitHub CI is unverified.
+- Worktree still contains only unrelated untracked user data; these files remain untouched.
+- Next: inspect the plan's job/batch target and add member-scoped run history with meaningful pagination and bounded batch behavior.
