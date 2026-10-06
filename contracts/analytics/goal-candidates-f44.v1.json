@@ -1,0 +1,31 @@
+{
+  "input": {
+    "inputWatermark": "8",
+    "asOf": "2026-10-07T12:00:00Z",
+    "unit": "count",
+    "decisions": [
+      {"productKey": "snack", "name": "Снеки", "harmfulCount": 2, "modelGuess": false, "confirmed": false, "allowed": false},
+      {"productKey": "guess", "name": "Гадание", "harmfulCount": 4, "modelGuess": true, "confirmed": false, "allowed": false}
+    ],
+    "purchases": [
+      {"productKey": "snack", "name": "Снеки", "lineSum": "100.00", "purchasedAt": "2026-09-07T12:00:00Z"},
+      {"productKey": "snack", "name": "Снеки", "lineSum": "100.00", "purchasedAt": "2026-09-17T12:00:00Z"},
+      {"productKey": "snack", "name": "Снеки", "lineSum": "100.00", "purchasedAt": "2026-09-27T12:00:00Z"},
+      {"productKey": "snack", "name": "Снеки", "lineSum": "100.00", "purchasedAt": "2026-10-07T12:00:00Z"},
+      {"productKey": "guess", "name": "Гадание", "lineSum": "500.00", "purchasedAt": "2026-09-07T12:00:00Z"},
+      {"productKey": "guess", "name": "Гадание", "lineSum": "500.00", "purchasedAt": "2026-10-07T12:00:00Z"}
+    ]
+  },
+  "expected": {
+    "algorithmVersion": "goal-candidates-f44.v1",
+    "inputWatermark": "8",
+    "unit": "count",
+    "products": [
+      {"key": "snack", "productKey": "snack", "name": "Снеки", "unit": "count", "monthlyRate": "4.00", "countTarget": 2, "monthlySpend": "400.00", "estimatedReduction": "200.00", "purchaseCount": 4, "evidenceCount": 2}
+    ],
+    "groups": [
+      {"key": "cat:снеки", "name": "Снеки и чипсы", "unit": "count", "monthlyRate": "4.00", "countTarget": 2, "monthlySpend": "400.00", "estimatedReduction": "200.00", "purchaseCount": 4, "evidenceCount": 2}
+    ],
+    "skipped": []
+  }
+}

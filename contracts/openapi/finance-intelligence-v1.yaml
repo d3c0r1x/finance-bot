@@ -138,6 +138,26 @@ paths:
         '400': { description: Request is malformed or contains invalid purchase facts }
         '401': { description: Internal service token is missing or invalid }
         '413': { description: Request exceeds the supported body size }
+  /internal/v1/analytics/goals/candidates:
+    post:
+      operationId: buildGoalCandidatesF44
+      security:
+        - serviceBearer: []
+      description: Computes member-scoped count or sum goal proposals from Core-authorized purchase facts and confirmed advice evidence. Does not create or update a goal.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/F44Request' }
+      responses:
+        '200':
+          description: Versioned product and count-only group goal candidates, plus skipped sum candidates with reasons
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/F44Report' }
+        '400': { description: Request is malformed or contains invalid purchase facts }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the supported body size }
   /internal/v1/analytics/recalculation-impact:
     post:
       operationId: calculateReceiptRecalculationImpact
@@ -813,6 +833,93 @@ components:
         end: { type: string, format: date }
         changedItemCount: { type: integer, minimum: 0, maximum: 2500000000 }
         optionalSpendDelta: { type: [string, 'null'], pattern: '^-?\d{1,18}\.\d{2}$' }
+    F44Request:
+      type: object
+      additionalProperties: false
+      required: [inputWatermark, asOf, unit, decisions, purchases]
+      properties:
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        asOf: { type: string, format: date-time }
+        unit: { type: string, enum: [count, sum], description: Member preference for future proposals only; accepted goals retain their own unit. }
+        decisions:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/F44Decision' }
+        purchases:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/F44Purchase' }
+      description: Core sends only the active member's confirmed purchase facts and current allowed/confirmed decision state; guesses need explicit confirmation. Combined decisions and purchases are capped at 50000 entries.
+    F44Decision:
+      type: object
+      additionalProperties: false
+      required: [productKey, name, harmfulCount, modelGuess, confirmed, allowed]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]*$' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        harmfulCount: { type: integer, minimum: 0, maximum: 100000 }
+        modelGuess: { type: boolean }
+        confirmed: { type: boolean }
+        allowed: { type: boolean }
+    F44Purchase:
+      type: object
+      additionalProperties: false
+      required: [productKey, name, lineSum, purchasedAt]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]*$' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        lineSum: { type: string, pattern: '^\d{1,15}\.\d{2}$' }
+        purchasedAt: { type: string, format: date-time }
+    F44Report:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, inputWatermark, unit, products, groups, skipped]
+      properties:
+        algorithmVersion: { type: string, const: goal-candidates-f44.v1 }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        unit: { type: string, enum: [count, sum] }
+        products:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/F44Candidate' }
+        groups:
+          type: array
+          maxItems: 2
+          items: { $ref: '#/components/schemas/F44Candidate' }
+        skipped:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/F44SkippedCandidate' }
+    F44Candidate:
+      type: object
+      additionalProperties: false
+      required: [key, name, unit, monthlyRate, countTarget, monthlySpend, estimatedReduction, purchaseCount, evidenceCount]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 300 }
+        productKey: { type: string, minLength: 1, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        unit: { type: string, enum: [count, sum] }
+        monthlyRate: { type: string, pattern: '^\d+\.\d{2}$' }
+        countTarget: { type: integer, minimum: 0 }
+        monthlySpend: { type: string, pattern: '^\d+\.\d{2}$' }
+        monthlyLimit: { type: string, pattern: '^\d+\.\d{2}$' }
+        estimatedReduction: { type: string, pattern: '^\d+\.\d{2}$' }
+        purchaseCount: { type: integer, minimum: 0, maximum: 50000 }
+        evidenceCount: { type: integer, minimum: 1, maximum: 50000 }
+      allOf:
+        - if:
+            properties: { unit: { const: sum } }
+          then:
+            required: [monthlyLimit]
+    F44SkippedCandidate:
+      type: object
+      additionalProperties: false
+      required: [productKey, name, monthlySpend, reasonCode]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        monthlySpend: { type: string, pattern: '^\d+\.\d{2}$' }
+        reasonCode: { type: string, enum: [minimum_savings] }
     RecalculationImpactRequest:
       type: object
       additionalProperties: false

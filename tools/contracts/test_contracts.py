@@ -919,6 +919,35 @@ def test_advice_f43_internal_contract_is_strict_and_fixture_matches_schemas():
     assert fixture["expected"]["savings"]["label"] == "theoretical_ceiling_not_actual_savings"
 
 
+def test_goal_candidates_f44_internal_contract_is_strict_and_fixture_matches_schemas():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+    operation = spec["paths"]["/internal/v1/analytics/goals/candidates"]["post"]
+    assert operation["operationId"] == "buildGoalCandidatesF44"
+    assert operation["security"] == [{"serviceBearer": []}]
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/F44Request",
+    }
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/F44Report",
+    }
+    schemas = spec["components"]["schemas"]
+    for name in ("F44Request", "F44Decision", "F44Purchase", "F44Report", "F44Candidate", "F44SkippedCandidate"):
+        assert schemas[name]["additionalProperties"] is False
+    fixture = json.loads((ROOT / "contracts/analytics/goal-candidates-f44.v1.json").read_text("utf-8"))
+    request_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/F44Request",
+    }
+    report_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/F44Report",
+    }
+    Draft202012Validator(request_document, format_checker=FormatChecker()).validate(fixture["input"])
+    Draft202012Validator(report_document, format_checker=FormatChecker()).validate(fixture["expected"])
+
+
 def test_advice_evidence_internal_contract_is_strict_and_fixture_matches_schema():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
     operation = spec["paths"]["/internal/v1/analytics/advice/evidence-groups"]["post"]

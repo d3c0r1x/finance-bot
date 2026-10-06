@@ -662,9 +662,13 @@ features:
     feature: "Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
     target: "J goals; G candidate features"
     acceptance: "30 дней от принятия; одна активная legacy-цель; новая единица не переписывает обещание"
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/analytics-go/advice/f44_test.go
+      - services/analytics-go/advice/f44_api_test.go
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "F44.1 Go candidate calculation and authenticated internal API are implemented with golden fixture, count/sum boundaries, confirmed-decision eligibility, group rules and limits. F44.2 Core persistence/one-active-goal/immutable accepted terms and F44.3 Web proposal UI remain open; F44 is not complete."
     intentional_differences: []
   - id: F45
     feature: "Ход цели, заметка при покупке, завершение, история, следующий кандидат"

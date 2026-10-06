@@ -64,18 +64,21 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 | F42.3 | Web preview and explicit apply flow for receipt verdict recalculation | COMMITTED — Web 57/57 and production build pass; GitHub run not found | F42.2 | 81267de |
 | F42.4 | Calculate optional-spend impact in Go; persist exact report in Core preview; display it in Web | COMMITTED — local Go/Core/Web/contracts GREEN; pushed, but GitHub returned no run for the SHA | F42.3 | 659b537 |
 | F42.5 | Telegram `/recalculate` preview with actor-scoped explicit apply | COMMITTED — local gates GREEN; pushed, GitHub returned no run for the SHA | F42.4 | 1a484bb |
+| F43 | Advice analytics calculation, durable member job, Go worker, Web report | COMPLETE — F43.1–F43.4 pushed; local gates green; GitHub CI did not start | F42 | a911e27 |
+| F44 | Product/group goal candidates, count/sum, one active 30-day goal | IN PROGRESS — F44.1 Go candidate API is locally green; Core persistence and Web surface remain | F43 | pending |
+| F44.1 | Deterministic Go product/group candidates and internal service API | COMMIT_PENDING — focused/full Go and contract gates pass; reviewed diff before commit | F44 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F42.5 — add Telegram `/recalculate` with actor-scoped preview and separate explicit apply.
-- Status: COMMITTED — `1a484bb` pushed. RED reproduced for missing client, command handler and Core route. Full Core check (244 tests, 0 failures, 2 skipped), Telegram gateway (95/95), contracts (47/47), and `git diff --check` pass. `gh run list --commit 1a484bb` returned no run; remote CI is unverified.
-- Acceptance: private chat only; viewers cannot preview/apply; only current actor can preview/apply their own run; stale callback revisions do not call Core; preview shows changes and Go delta; only button applies; stale item is rejected.
-- Changed files: Core Telegram routes/permissions/PostgreSQL test, Python Core client, command and callback validation/tests, OpenAPI contract, contract test, parity and this progress log.
-- User choices: maintain F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, no placeholder financial data. Personal MVP takes priority; V2 remains deferred.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `1a484bb`; unrelated user-owned untracked files remain untouched.
-- Runtime: M2/MVP still BLOCKED; no durable backend/public HTTPS. This F42 work has not restarted or deployed a server.
-- Updated at: 2026-10-07 00:16 Europe/Moscow.
+- ID and outcome: F44.1 — deterministic product/group goal candidates and service-authenticated Go API.
+- Status: COMMIT_PENDING — test-first RED reproduced as missing F44 calculator/API symbols; calculator and `/internal/v1/analytics/goals/candidates` are GREEN. Full Go and contract regression gates pass.
+- Acceptance: only established/confirmed harmful products; exclude allowed and model-only guesses; minimum two purchases per 30-day equivalent; count and sum targets follow legacy rounding/minimum-saving rules; groups are count-only and require combined confirmed evidence; stable sorting/limits; strict bounded request and service bearer auth.
+- Changed files: F44 Go calculation/handler/tests, analytics-api route, OpenAPI, analytics golden fixture, contract test, F44 specification/execution plan and parity.
+- User choices: maintain F01–F60 scope; personal MVP first; V2 deferred; preserve 30-day goal promise and one active goal per member.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `b867205` before F44.1 commit; unrelated user-owned untracked files remain untouched.
+- Runtime: public HTTPS, persistent server and installed Android MVP remain unverified; no deployment or network configuration was changed.
+- Updated at: 2026-10-07 01:58 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
