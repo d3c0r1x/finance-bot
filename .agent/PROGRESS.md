@@ -63,12 +63,22 @@ Updated: 2026-10-06 08:24, Europe/Moscow.
 ## Current goal
 
 - ID and outcome: F41.3c — Android RU/EN shows verified blocks and separate model guesses, human decisions and distinct shopping block reasons.
-- Status: COMMIT_PENDING — 49/49 connected instrumentation tests pass; debug APK installed and launched on emulator-5556; F41.3b2 `41ace8f` is pushed with four GitHub workflows GREEN.
+- Status: TESTING — earlier 49/49 instrumentation result predates current provenance corrections; rerun current-diff gates before commit.
 - Acceptance: model guess remains visible without blocking shopping; confirm/allow/revoke call member-scoped Core API; viewer has no write controls; unavailable evidence is explicit.
 - Data boundary: Android parses Core evidence and decision DTOs; tenant switch clears cached advice/decisions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
 - Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `41ace8f`.
 - Updated at: 2026-10-06 08:24 Europe/Moscow.
+
+## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
+
+- User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
+- Updated `PLAN.md` with binding MVP scope and added `docs/specs/PERSONAL_MVP_PLAN.md`: API 23 Android, public HTTPS without router port changes, persistent/autostart/recovering host runtime, open Keycloak/OIDC registration and real email verification, deployment/security gates, and end-to-end acceptance.
+- Captured user's Cloudflare screenshot accurately: Worker Build shows `main`, root `/`, `npx wrangler deploy`; this does not establish that `feat/saas-rewrite` or Java/PostgreSQL backend is deployed. Do not change nameservers from this screenshot.
+- Read-only environment check: two connected emulator processes report Android API 34, so neither proves API 23–26 compatibility. Unity-bundled SDK/ADB exists. Tailscale Windows service is running/automatic. No local listener was found on 5432, 8080, 8081, 5173, 4173, or 8443. Android build still has `minSdk = 26` and emulator-only API/OIDC values. F41.3c changes remain uncommitted and must be preserved.
+- Plan-document structural checks: PASS (F01–F60 preserved, V2 deferred, MVP link/API 23/Keycloak/email/TDD requirements present); `git diff --check` PASS (Git reports only existing LF/CRLF normalization notices).
+- Current-diff checks: Core `AdviceEvidencePolicyTest` PASS; Web `DoNotBuyPanel.test.tsx` 5/5 PASS; Python renderer/Core client 66/66 PASS. Android debug APK assemble PASS, but Android local unit suite FAILS in Gradle/JUnit discovery with `ClassNotFoundException: com.decorix.finance.DevelopmentConnectionBuilderTest`; compiled class exists and is listed on `testDebugUnitTest.classpath`, so root cause remains unresolved. Initial Java/Python command failures were missing PATH runtimes; Unity JDK/SDK and repo `.venv` resolve those setup gaps.
+- Next: isolate Android test discovery failure without changing product code; finish current F41.3c gates and commit. Then run MVP M0/M1. No claim of MVP runtime, public HTTPS, or email delivery yet.
 
 ## Verification evidence
 
