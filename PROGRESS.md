@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 04:24, Europe/Moscow.
+Updated: 2026-10-06 04:35, Europe/Moscow.
 
 ## Global plan
 
@@ -42,18 +42,18 @@ Updated: 2026-10-06 04:24, Europe/Moscow.
 | F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 | F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
-| F39 | Mute and restore recurring series | VERIFYING — local gates pass; GitHub PostgreSQL contract fix pending | F38 | b1e64c4 |
-| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | PLANNED | F39 | pending |
+| F39 | Mute and restore recurring series | COMPLETE — local gates and GitHub rerun pass | F38 | b1e64c4 + 2de08d9 |
+| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | ANALYSIS | F39 | pending |
 
 ## Current goal
 
-- ID and outcome: F39 — mute and restore recurring reminder series per tenant and member.
-- Status: VERIFYING — local feature gates pass; rerun GitHub PostgreSQL contract gate after schema-map fix.
-- Acceptance: muted IDs are series IDs scoped by tenant/member/`recurring`; muted series disappear from active, due, overdue, income and monthly totals; restore returns them; another member cannot mute/unmute them; transaction rows remain unchanged; stale IDs cannot be muted; authenticated API, CSRF BFF and Telegram actor actions; Web, Android and Telegram controls.
-- Design: reuse RLS-protected `muted_suggestions`; validate series existence against the member's current analytics projection; Core owns the overlay, clients call Core actions.
+- ID and outcome: F40 — report optional spending, verdict provenance and corrected receipt items.
+- Status: ANALYSIS — F39 fully verified; define F40 acceptance and minimal Go/Core/client data boundary before tests.
+- Acceptance: preserve legacy 90-day sums, denominator across all parsed positions, waste verdict totals/source breakdown, member-allowed product overlay, corrected-item visibility, unknown verdict/source semantics, and consistent Web/Android/Telegram output without fabricated data.
+- Design: follow approved ownership: Go computes versioned advice analytics; Java/Core supplies tenant/member-scoped receipt verdict rows and allowed-product decisions; clients render one Core-owned report DTO.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `4f15b33` plus schema-map fix.
-- Updated at: 2026-10-06 04:24 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `2de08d9`.
+- Updated at: 2026-10-06 04:34 Europe/Moscow.
 
 ## Verification evidence
 
@@ -70,7 +70,8 @@ Updated: 2026-10-06 04:24, Europe/Moscow.
 | F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
 | F39 Python/contracts | presentation + Telegram pytest; `tools/contracts` pytest | commit `b1e64c4` | PASS, 109 passed; 54 passed/2 optional skips | Client validation, callbacks, renderer, route security and muted-series schema |
 | F39 Android | `:app:connectedDebugAndroidTest`; launch debug APK | emulator `emulator-5556`, commit `b1e64c4` | PASS, 42/42 | APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E`; installed and launched |
-| F39 GitHub PostgreSQL | Actions run `37398375404`; persisted Core event schema check | commit `4f15b33` | FAIL; follow-up pending | New receipt acceptance emits `receipt.confirmed`; schema registry lacked the `receipt` aggregate mapping. Added `finance.receipt.v1.schema.json` to `test_core_migration.py`. |
+| F39 GitHub PostgreSQL | Actions run `37399400317`; persisted Core event schema check | commit `2de08d9` | PASS | Receipt event validates against `finance.receipt.v1.schema.json`; Core check passed. |
+| F39 GitHub regression | Actions runs `37399400129`, `37399400232` | commit `2de08d9` | PASS | Bot test suite and Python/contracts suite passed. |
 
 ## Failures and attempts
 
@@ -81,7 +82,7 @@ Updated: 2026-10-06 04:24, Europe/Moscow.
 
 ## Next action
 
-- Commit and push the F39 schema-registry correction; verify GitHub PostgreSQL job, then resume F40 analysis.
+- Complete F40 analysis: define acceptance cases, owned data path and RED-test commands before implementation.
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
 
@@ -102,6 +103,12 @@ Updated: 2026-10-06 04:24, Europe/Moscow.
 - Root cause: F39 PostgreSQL acceptance now emits a real `receipt.confirmed` event, while `test_core_migration.py` validated only transaction, budget and debt aggregate types.
 - Added the receipt v1 schema to the persisted-event validator and to F39's parity test inventory. Local `tools/contracts` remains green: 54 passed, 2 optional skips. Local DB cleanup leaves no persisted outbox event for the integration validator; CI rerun is required.
 - F39 remains in VERIFYING until the new GitHub PostgreSQL run passes. F40 implementation has not started.
+
+## E3.33 F39 GitHub verification — 2026-10-06 04:34 MSK
+
+- Follow-up commit `2de08d9` is pushed. GitHub Core PostgreSQL `37399400317`, Python/contracts `37399400232`, and bot tests `37399400129` all passed.
+- Receipt aggregate schema now validates the persisted `receipt.confirmed` event. F39 is COMPLETE after local gates, emulator delivery proof, and remote regression gates.
+- F40 is active in ANALYSIS. No F40 implementation has started. Next: lock acceptance and smallest independently testable end-to-end slice.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
