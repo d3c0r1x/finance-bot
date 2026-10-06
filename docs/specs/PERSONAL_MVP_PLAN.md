@@ -33,7 +33,7 @@
 ### M1. Android MVP на API 23+
 
 - **M1.1 совместимость API 23 — COMPLETE:** сборка объявляет `minSdk 23`; core library desugaring поддерживает `java.time` на Android 6. Полный instrumentation suite проходит на Android 6/API 23, Android 7.1/API 25 и Android 8.1/API 27.
-- **M1.2 адреса окружений и release-защита — TODO:** Core API и OIDC issuer настраиваются параметрами сборки; release принимает только публичные HTTPS URL, debug localhost остаётся отдельным. APK для реального телефона требует действующий внешний API/OIDC адрес.
+- **M1.2 адреса окружений и release-защита — CODE COMPLETE:** `-PfinanceApiBaseUrl=...` и `-PfinanceOidcIssuer=...` попадают в BuildConfig; release блокируется без HTTPS адресов и отклоняет loopback/private IP. Debug сохраняет адреса эмулятора. Сборка релизного APK для телефона ожидает реальный URL из M2/M3.
 - URL Core API и OIDC issuer задаются build config/environment, debug локальные значения отделены от production HTTPS.
 - Тесты доказывают корректность выбора debug/release endpoints, HTTPS ограничения для release и сериализацию важного текущего user flow.
 - Сначала запустить тесты и наблюдать ожидаемый RED для текущего несоответствия. Для M1.1 это было `minSdk 26` и отсутствие `java.time` на API 23; после исправлений получить GREEN, собрать debug APK и установить/запустить на API 23, 25 и 27.
@@ -83,7 +83,8 @@
 
 - M0: окружение проверено; подробности, команды и реальные blockers — `.agent/PROGRESS.md`.
 - M1.1: полная Android проверка 50/50 на API 23, 25, 27; debug APK `minSdk 23`, SHA-256 и ручной install/launch записаны в `.agent/PROGRESS.md`.
-- Следующее: завершить M1.2 и затем M2/M3. Сервер, внешний URL и регистрация ещё не готовы.
+- M1.2: проверено тестом BuildConfig; HTTP/private/missing URL блокируются для release. Внешний API/OIDC URL пока отсутствует.
+- Следующее: M2/M3. Сервер, публичный URL и регистрация ещё не готовы; APK с debug эмуляторным адресом годится для проверки интерфейса, не для телефона.
 
 ## Общие эксплуатационные ограничения
 

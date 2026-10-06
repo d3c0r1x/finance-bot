@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 13:05, Europe/Moscow.
+Updated: 2026-10-06 13:14, Europe/Moscow.
 
 ## Global plan
 
@@ -68,7 +68,7 @@ Updated: 2026-10-06 13:05, Europe/Moscow.
 - Data boundary: Android parses Core evidence and decision DTOs; tenant switch clears cached advice/decisions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
 - Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `cdc51c9`; F41.3c files modified in working tree.
-- Updated at: 2026-10-06 13:05 Europe/Moscow.
+- Updated at: 2026-10-06 13:14 Europe/Moscow.
 
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
@@ -94,6 +94,15 @@ Updated: 2026-10-06 13:05, Europe/Moscow.
 - Built debug APK: `apps/android/app/build/outputs/apk/debug/app-debug.apk`, SHA-256 `0D54F551950FFD5936BC9A8994ACF92702ABF0B7CE304A5C9ED9EB39CED4419E`. Installed and launched by package on Android 8.1 emulator; process observed. Debug BuildConfig still uses emulator-only API/OIDC endpoints.
 - Plan now splits M1.1 (API 23 compatibility, COMPLETE) from M1.2 (configurable endpoints and release HTTPS checks, TODO). M1 as a whole, public access, server autostart and email registration remain incomplete.
 - Next: write endpoint-configuration acceptance tests and finish M1.2 before making a phone-installable APK. Continue to M2/M3 only after checking local Docker/PostgreSQL/Keycloak and safe public HTTPS options. Never publish a backend before auth protects financial routes.
+
+## E4.59 Personal MVP M1.2 endpoint configuration — 2026-10-06 13:13 MSK
+
+- Observed RED: `BuildConfigEndpointTest` with injected HTTPS properties failed against the hard-coded emulator URL. Implemented `financeApiBaseUrl` and `financeOidcIssuer` Gradle properties with isolated emulator defaults for debug.
+- Release builds depend on `validateReleaseEndpoints`; it requires both values, HTTPS, public hosts, and a root origin for the Core API. Explicit checks: HTTPS endpoints pass; missing values, HTTP and `192.168.1.50` fail. The endpoint unit test passes for both injected and default debug values.
+- Regression: full Android instrumentation 50/50 passed on API 23/25/27 before this BuildConfig-only change; OIDC sign-in screen smoke 1/1 passed on API 27 after it. `testDebugUnitTest assembleDebug` succeeds with no properties. Debug APK installed and launched on API 27, SHA-256 `6BF718140D420BCA39A88CEF2DAE8AE9C3F2D2465B4C4AC5D17497364CCE8B93`; APK floor verifier passes (`minSdk 23`).
+- M1.2 code is complete; no actual public API/OIDC endpoint exists yet. Release APK for a phone therefore remains blocked on M2/M3. Tailscale service is running, but `tailscale funnel status` and `tailscale serve status` report `No serve config`; no Docker/Podman, PostgreSQL, Keycloak or service listeners are present. No public tunnel was opened.
+- Commit `10882fb` (`fix(android): support API 23 with desugaring`) pushed; GitHub tests workflow `37447430201` completed successfully. Endpoint configuration changes remain uncommitted pending regression and review.
+- Next: complete endpoint configuration commit after checks, inspect CI; M2 must provision a repeatable database/Core/Keycloak runtime, then M3 may configure Funnel only after auth is protected and external HTTPS can be tested.
 
 ## Verification evidence
 

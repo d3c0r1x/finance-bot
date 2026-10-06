@@ -1,7 +1,54 @@
+import java.net.URI
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+fun endpointBuildConfigValue(property: String, defaultValue: String): String {
+    val value = providers.gradleProperty(property).orElse(defaultValue).get()
+    require('\n' !in value && '\r' !in value) { "$property must be a single-line URL" }
+    return "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+}
+
+val validateReleaseEndpoints = tasks.register("validateReleaseEndpoints") {
+    doLast {
+        listOf("financeApiBaseUrl", "financeOidcIssuer").forEach { property ->
+            val value = providers.gradleProperty(property).orNull
+                ?: throw GradleException("Release requires -P$property=https://...")
+            val uri = runCatching { URI(value) }.getOrElse {
+                throw GradleException("$property must be an absolute public HTTPS URL")
+            }
+            val host = uri.host?.trim('[', ']')?.lowercase()
+            val octets = host?.split('.')?.mapNotNull(String::toIntOrNull).orEmpty()
+            val privateIpv4 = octets.size == 4 && (octets[0] == 0 || octets[0] == 10 ||
+                octets[0] == 127 || octets[0] == 192 && octets[1] == 168 ||
+                octets[0] == 172 && octets[1] in 16..31 ||
+                octets[0] == 169 && octets[1] == 254 ||
+                octets[0] == 100 && octets[1] in 64..127)
+            val privateIpv6 = host?.let {
+                it == "::" || it == "::1" || it.startsWith("fc") || it.startsWith("fd") || it.startsWith("fe80:")
+            } == true
+            if (uri.scheme != "https" || host.isNullOrBlank() || uri.userInfo != null ||
+                host == "localhost" || privateIpv4 || privateIpv6 ||
+                property == "financeApiBaseUrl" && !uri.path.isNullOrEmpty() && uri.path != "/") {
+                throw GradleException("$property must be an absolute public HTTPS URL")
+            }
+        }
+        logger.lifecycle("Release endpoints validated: HTTPS API and OIDC issuer configured")
+    }
+}
+
+tasks.configureEach {
+    if (name == "preReleaseBuild") dependsOn(validateReleaseEndpoints)
+}
+
+tasks.withType<Test>().configureEach {
+    systemProperty("expectedFinanceApiBaseUrl",
+        providers.gradleProperty("financeApiBaseUrl").orElse("http://10.0.2.2:8080").get())
+    systemProperty("expectedFinanceOidcIssuer",
+        providers.gradleProperty("financeOidcIssuer").orElse("http://localhost:8081/realms/finance").get())
 }
 
 android {
@@ -15,8 +62,8 @@ android {
         versionCode = 1
         versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "API_BASE_URL", "\"http://10.0.2.2:8080\"")
-        buildConfigField("String", "OIDC_REALM_URL", "\"http://localhost:8081/realms/finance\"")
+        buildConfigField("String", "API_BASE_URL", endpointBuildConfigValue("financeApiBaseUrl", "http://10.0.2.2:8080"))
+        buildConfigField("String", "OIDC_REALM_URL", endpointBuildConfigValue("financeOidcIssuer", "http://localhost:8081/realms/finance"))
         buildConfigField("String", "OIDC_CLIENT_ID", "\"finance-android\"")
         manifestPlaceholders["appAuthRedirectScheme"] = "com.decorix.finance"
     }
