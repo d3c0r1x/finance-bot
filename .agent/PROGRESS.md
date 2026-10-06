@@ -1270,3 +1270,12 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 - Full verification is GREEN: Core 245 tests, 0 failures, 2 skips; PostgreSQL 18.6 acceptance 102/102; Web 60/60 and production build; contracts 47/47; `git diff --check`.
 - F42 is complete at local feature acceptance and parity now records owner-scoped run history, stored changes, and bounded pages. `gh run list --commit 8b741c0` returned `[]`; remote CI did not start. Public HTTPS/alltime runtime are still not deployed.
 - Next plan goal is F43. First inspect acceptance and existing advice analytics; write a failing focused test before implementation.
+
+## E4.70 F43 design and Go calculation — 2026-10-07
+
+- User confirmed the F43 design with “Делай”. Saved the approved feature spec at `.agent/specs/F43-advice-analytics.md` and an implementation plan at `docs/superpowers/plans/2026-10-07-f43-advice-analytics.md`.
+- F43.1 adds Go calculation for the 90-day theoretical ceiling, four member-local seven-day spend-share windows, purchase cadence after an explicitly shown advice point, and a separate F42 recalculation annotation. Money uses `big.Rat` decimal strings; no financial rows are written.
+- Tests cover one-vs-repeat purchases, allowed products, denominator-only unknown verdicts, missing amounts, two-window minimum, exact 5-point trend boundary, 21-day pending, two prior purchases, exact 20% cadence boundary, zero post-advice purchases, member timezone, F42 independence, malformed input, strict internal bearer auth, and a versioned golden fixture.
+- The first `go test` could not start because Go was absent from PATH. Downloaded Go 1.27.1 to the temporary directory and used it per-command; no system PATH or installed settings changed. First feature run showed compile RED for missing F43 symbols. A later behavior test exposed missing recalculation marking when only one trend window had data; fixed and covered it.
+- GREEN: `go test ./...` and `go vet ./...` from `services/analytics-go`; contract suite via `.venv\Scripts\python.exe -m pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` — 48 passed; `git diff --check` passed.
+- F43.1 committed and pushed as `08ea1af` (`feat(F43.1): add advice analytics calculation`). `gh run list --commit 08ea1af` returned `[]`; remote GitHub CI did not start and is unverified. Next: Core durable member snapshot/job/query API with PostgreSQL acceptance tests before implementation.
