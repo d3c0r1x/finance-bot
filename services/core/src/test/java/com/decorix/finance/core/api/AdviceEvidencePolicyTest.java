@@ -14,19 +14,22 @@ class AdviceEvidencePolicyTest {
     void modelOnlyGroupRemainsGuessUntilConfirmedAndAllowedOverridesEvidence() {
         var groups = List.of(
                 group("coffee", 2, 0, 2, 0, true),
-                group("chips", 3, 1, 1, 1, false));
+                group("chips", 3, 1, 1, 1, false),
+                group("tea", 3, 0, 2, 1, false));
 
         var initial = AdviceEvidencePolicy.apply(groups, Map.of());
         assertEquals(List.of("chips"), initial.banned().stream().map(AdviceEvidenceApi.EvidenceGroup::productKey).toList());
-        assertEquals(List.of("coffee"), initial.guesses().stream().map(AdviceEvidenceApi.EvidenceGroup::productKey).toList());
+        assertEquals(List.of("coffee", "tea"), initial.guesses().stream()
+                .map(AdviceEvidenceApi.EvidenceGroup::productKey).toList());
         assertFalse(initial.banned().stream().anyMatch(AdviceEvidenceApi.EvidenceGroup::modelOnly));
 
         var confirmed = AdviceEvidencePolicy.apply(groups, Map.of("coffee", "confirmed"));
         assertEquals(List.of("coffee", "chips"), confirmed.banned().stream()
                 .map(AdviceEvidenceApi.EvidenceGroup::productKey).toList());
-        assertTrue(confirmed.guesses().isEmpty());
+        assertEquals(List.of("tea"), confirmed.guesses().stream()
+                .map(AdviceEvidenceApi.EvidenceGroup::productKey).toList());
 
-        var allowed = AdviceEvidencePolicy.apply(groups, Map.of("coffee", "allowed", "chips", "allowed"));
+        var allowed = AdviceEvidencePolicy.apply(groups, Map.of("coffee", "allowed", "chips", "allowed", "tea", "allowed"));
         assertTrue(allowed.banned().isEmpty());
         assertTrue(allowed.guesses().isEmpty());
     }

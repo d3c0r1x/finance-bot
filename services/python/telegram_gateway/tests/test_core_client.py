@@ -587,6 +587,16 @@ def test_do_not_buy_validation_rejects_mixed_guess_and_block():
         TelegramCoreClient._validated_do_not_buy(report)
 
 
+def test_do_not_buy_accepts_unmarked_source_as_review_only():
+    group = {"productKey": "tea", "productName": "Tea", "count": 3, "amount": None,
+             "missingAmountCount": 1, "ruleCount": 0, "modelCount": 2, "unmarkedCount": 1,
+             "modelOnly": False, "latestVerdict": "unnecessary", "latestAdvice": "",
+             "lastPurchasedAt": "2026-10-06T10:00:00Z"}
+    report = {"available": True, "reasonCode": "available", "algorithmVersion": "advice-evidence.v1",
+              "inputVersion": "0" * 64, "banned": [], "guesses": [group]}
+    assert TelegramCoreClient._validated_do_not_buy(report) == report
+
+
 def test_core_client_rejects_fabricated_product_baseline_without_history():
     invalid = product_card()
     invalid.update(purchaseCount=1, hasBaseline=False, baselineUnitPrice="0.000000",

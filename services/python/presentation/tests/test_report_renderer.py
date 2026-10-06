@@ -44,6 +44,18 @@ def test_shopping_renderer_distinguishes_rule_and_human_blocks():
     assert "Чай — вы отметили" in text
 
 
+def test_do_not_buy_renderer_labels_unknown_source_without_claiming_model_only():
+    report = {"available": True, "reasonCode": "available", "algorithmVersion": "advice-evidence.v1",
+              "inputVersion": "0" * 64, "banned": [], "guesses": [{
+                  "productKey": "tea", "productName": "Чай", "count": 3, "amount": None,
+                  "missingAmountCount": 1, "ruleCount": 0, "modelCount": 2, "unmarkedCount": 1,
+                  "modelOnly": False, "latestVerdict": "unnecessary", "latestAdvice": "",
+                  "lastPurchasedAt": "2026-10-06T10:00:00Z"}]}
+    text = render_do_not_buy(report)
+    assert "источник части отметок неизвестен" in text
+    assert "не блокирует покупки" in text
+
+
 REPORT = {
     "period": "custom",
     "scope": "personal",

@@ -99,4 +99,17 @@ describe('personal do-not-buy evidence', () => {
     expect(screen.queryByRole('button', { name: 'Confirm do not buy' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow purchase' })).not.toBeInTheDocument();
   });
+
+  it('labels evidence with unknown provenance as unverified without blocking it', async () => {
+    const uncertain = { ...coffee, productKey: 'tea', productName: 'Чай', count: 3,
+      modelCount: 2, unmarkedCount: 1, modelOnly: false };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/products/decisions')
+      ? json({ productKeys: [], confirmedProductKeys: [] })
+      : json({ available: true, reasonCode: 'available', algorithmVersion: 'advice-evidence.v1',
+        inputVersion: '0'.repeat(64), banned: [], guesses: [uncertain] })));
+    show('ru', false);
+    expect(await screen.findByRole('heading', { name: 'Непроверенные отметки' })).toBeInTheDocument();
+    expect(screen.getByText('Источник части отметок неизвестен')).toBeInTheDocument();
+    expect(screen.queryByText('Основано на проверке чеков')).not.toBeInTheDocument();
+  });
 });

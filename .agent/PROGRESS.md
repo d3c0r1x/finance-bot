@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 08:24, Europe/Moscow.
+Updated: 2026-10-06 12:12, Europe/Moscow.
 
 ## Global plan
 
@@ -57,18 +57,18 @@ Updated: 2026-10-06 08:24, Europe/Moscow.
 | F41.3b | Telegram list and human controls | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 41ace8f |
 | F41.3b1 | Actor-scoped Telegram list and decision routes | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 7089a63 |
 | F41.3b2 | Telegram command, renderer and callbacks | COMPLETE — local and four GitHub workflows GREEN | F41.3b1 | 41ace8f |
-| F41.3c | Android list and human controls | COMMIT_PENDING — 49/49 instrumentation, installed APK launched | F41.2b | pending |
+| F41.3c | Android list and human controls | COMMIT_PENDING — current diff passed 50/50 instrumentation and APK launch | F41.2b | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F41.3c — Android RU/EN shows verified blocks and separate model guesses, human decisions and distinct shopping block reasons.
-- Status: TESTING — earlier 49/49 instrumentation result predates current provenance corrections; rerun current-diff gates before commit.
-- Acceptance: model guess remains visible without blocking shopping; confirm/allow/revoke call member-scoped Core API; viewer has no write controls; unavailable evidence is explicit.
+- Status: COMMIT_PENDING — current-diff local gates pass; F41.3c handles mixed/unknown evidence conservatively across Core, Telegram, Web and Android.
+- Acceptance: model guess and unknown-provenance evidence remain reviewable without blocking shopping; confirm/allow/revoke call member-scoped Core API; viewer has no write controls; unavailable evidence is explicit.
 - Data boundary: Android parses Core evidence and decision DTOs; tenant switch clears cached advice/decisions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `41ace8f`.
-- Updated at: 2026-10-06 08:24 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `cdc51c9`; F41.3c files modified in working tree.
+- Updated at: 2026-10-06 12:12 Europe/Moscow.
 
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
@@ -78,6 +78,12 @@ Updated: 2026-10-06 08:24, Europe/Moscow.
 - Read-only environment check: two connected emulator processes report Android API 34, so neither proves API 23–26 compatibility. Unity-bundled SDK/ADB exists. Tailscale Windows service is running/automatic. No local listener was found on 5432, 8080, 8081, 5173, 4173, or 8443. Android build still has `minSdk = 26` and emulator-only API/OIDC values. F41.3c changes remain uncommitted and must be preserved.
 - Plan-document structural checks: PASS (F01–F60 preserved, V2 deferred, MVP link/API 23/Keycloak/email/TDD requirements present); `git diff --check` PASS (Git reports only existing LF/CRLF normalization notices).
 - Current-diff checks: Core `AdviceEvidencePolicyTest` PASS; Web `DoNotBuyPanel.test.tsx` 5/5 PASS; Python renderer/Core client 66/66 PASS. Android debug APK assemble PASS, but Android local unit suite FAILS in Gradle/JUnit discovery with `ClassNotFoundException: com.decorix.finance.DevelopmentConnectionBuilderTest`; compiled class exists and is listed on `testDebugUnitTest.classpath`, so root cause remains unresolved. Initial Java/Python command failures were missing PATH runtimes; Unity JDK/SDK and repo `.venv` resolve those setup gaps.
+- Plan update commit `cdc51c9` (`docs(plan): define personal MVP and defer V2`) was pushed to `origin/feat/saas-rewrite`; push succeeded. F41 implementation changes remain unstaged and untouched.
+- Failure analysis `ANDROID-UNIT-CLASSLOAD`: compiled test and classpath were valid; direct JUnit passed. The Gradle test worker failed from the project's normal Unicode/space path, but the exact Gradle task passed through temporary `Z:` drive mapping. This is a Windows path-specific runner issue, not a product/test assertion failure; no repository build config change needed.
+- F41 edge-case RED proven safely in temporary worktree at `cdc51c9`: applied only the new `AdviceEvidencePolicyTest`; it failed because mixed unmarked `tea` was classified as blocked. Temporary worktree removed; current checkout remained unchanged.
+- F41 GREEN: `:services:core:test --tests ...AdviceEvidencePolicyTest` PASS; Web `DoNotBuyPanel.test.tsx` 5/5; Web TypeScript + Vite production build PASS; Python renderer/Core client tests 66/66; Android unit PASS via `Z:` mapping; connected Android instrumentation 50/50 on test AVD `FinanceBotF38` (API 34). Targeted F41 model/UI and two unrelated suite tests also passed on `Quest_Test`; its full-suite run failed only after emulator `system_server` died (`DeadSystemException`), so it is not used as GREEN evidence.
+- Debug APK assembled, installed and launched on `emulator-5556`; process `21967`; SHA-256 `BB7D6BC6EF01CD793F37D7124420058C3B3273F56C3D976106699E7F5B5F6297`.
+- Plan docs commit `cdc51c9` is on origin. Next: commit only F41.3c source/tests plus progress, push feature branch, inspect CI result; then begin MVP Android API 23 goal. Android 6–8 images, persistent backend, public HTTPS and real email are still unverified.
 - Next: isolate Android test discovery failure without changing product code; finish current F41.3c gates and commit. Then run MVP M0/M1. No claim of MVP runtime, public HTTPS, or email delivery yet.
 
 ## Verification evidence

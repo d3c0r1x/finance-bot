@@ -556,7 +556,7 @@ internal object FinanceModels {
                     && name.isNotBlank() && name.length <= 200 && count >= 2
                     && missing in 0..count && rule >= 0 && model >= 0 && unmarked >= 0
                     && rule + model + unmarked == count && modelOnly == (model == count)
-                    && (field != "guesses" || modelOnly)
+                    && (field != "guesses" || rule == 0)
                     && (amount == null || Regex("^\\d{1,30}\\.\\d{2}$").matches(amount))
                     && verdict in setOf("harmful", "unnecessary") && advice.length <= 500) {
                     "Invalid do-not-buy group"

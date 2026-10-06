@@ -270,6 +270,18 @@ class FinanceModelsTest {
         assertEquals("rule_backed_not_to_buy", shopping.blockedCandidates.single().reasonCode)
     }
 
+    @Test fun parsesUnmarkedAdviceSourceAsReviewOnlyGuess() {
+        val report = FinanceModels.doNotBuy(JSONObject("""
+            {"available":true,"reasonCode":"available","algorithmVersion":"advice-evidence.v1",
+             "inputVersion":"${"0".repeat(64)}","banned":[],
+             "guesses":[{"productKey":"tea","productName":"Чай","count":3,"amount":null,
+                         "missingAmountCount":1,"ruleCount":0,"modelCount":2,"unmarkedCount":1,
+                         "modelOnly":false,"latestVerdict":"unnecessary","latestAdvice":"",
+                         "lastPurchasedAt":"2026-10-06T10:00:00Z"}]}
+        """.trimIndent()))
+        assertEquals(false, report.guesses.single().modelOnly)
+    }
+
     @Test fun parsesPersonalInflationWithoutRecomputingCoreTotals() {
         val inflation = FinanceModels.personalInflation(JSONObject("""
             {"available":true,"reasonCode":"available","asOf":"2026-10-06T12:00:00Z","windowDays":90,

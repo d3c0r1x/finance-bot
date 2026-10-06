@@ -15,7 +15,7 @@ public final class AdviceEvidencePolicy {
         for (EvidenceGroup group : groups) {
             String decision = decisions.get(group.productKey());
             if ("allowed".equals(decision)) continue;
-            if ("confirmed".equals(decision) || !group.modelOnly()) banned.add(group);
+            if ("confirmed".equals(decision) || group.ruleCount() > 0) banned.add(group);
             else guesses.add(group);
         }
         return new Classified(List.copyOf(banned), List.copyOf(guesses));

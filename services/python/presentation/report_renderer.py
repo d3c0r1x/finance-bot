@@ -740,7 +740,8 @@ def render_do_not_buy(report: Mapping[str, object], decisions: Mapping[str, obje
         amount = group.get("amount")
         cost = "сумма неизвестна" if amount is None else f"{_format_rub(_money(amount, 'amount'))} ₽"
         source = ("подтверждено вами" if group.get("productKey") in confirmed else
-                  "догадка модели" if guess else "основано на проверке чеков")
+                  "догадка модели" if guess and group.get("modelOnly") is True else
+                  "источник части отметок неизвестен" if guess else "основано на проверке чеков")
         name = group["productName"][:100] + ("…" if len(group["productName"]) > 100 else "")
         lines.append(f"• {name} — {source}; {group['count']} отметки; {cost}.")
         advice = group.get("latestAdvice")
@@ -754,7 +755,9 @@ def render_do_not_buy(report: Mapping[str, object], decisions: Mapping[str, obje
         if len(banned) > 4:
             lines.append(f"Ещё {len(banned) - 4} товаров не показаны в сообщении.")
     if guesses:
-        lines.extend(("", "Догадки модели — не блокирует покупки, пока вы не подтвердите:"))
+        label = ("Непроверенные отметки" if any(group.get("modelOnly") is False for group in guesses)
+                 else "Догадки модели")
+        lines.extend(("", f"{label} — не блокирует покупки, пока вы не подтвердите:"))
         for group in guesses[:4]:
             append_group(group, guess=True)
         if len(guesses) > 4:

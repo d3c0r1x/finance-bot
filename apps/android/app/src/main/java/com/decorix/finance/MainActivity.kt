@@ -1006,9 +1006,13 @@ private fun DoNotBuyScreen(modifier: Modifier, state: FinanceUiState, language: 
                 }
                 if (report.guesses.isNotEmpty()) item {
                     Column {
-                        Text(if (russian) "Догадки модели" else "Model guesses", style = MaterialTheme.typography.titleMedium)
-                        Text(if (russian) "Догадка не скрывает покупку без вашего подтверждения."
-                            else "A guess does not hide a purchase until you confirm it.")
+                        val uncertain = report.guesses.any { !it.modelOnly }
+                        Text(if (uncertain) {
+                            if (russian) "Непроверенные отметки" else "Unverified evidence"
+                        } else if (russian) "Догадки модели" else "Model guesses",
+                            style = MaterialTheme.typography.titleMedium)
+                        Text(if (russian) "Без вашего подтверждения эти отметки не скрывают покупку."
+                            else "These verdicts do not hide a purchase until you confirm them.")
                     }
                 }
                 report.guesses.forEach { group ->
@@ -1042,7 +1046,8 @@ private fun DoNotBuyGroup(group: FinanceAdviceGroup, guess: Boolean, decisions: 
             Text(group.productName, style = MaterialTheme.typography.titleMedium)
             Text(when {
                 confirmed -> if (russian) "Подтверждено вами" else "Confirmed by you"
-                guess -> if (russian) "Догадка модели" else "Model guess"
+                guess && group.modelOnly -> if (russian) "Догадка модели" else "Model guess"
+                guess -> if (russian) "Источник части отметок неизвестен" else "Some verdict sources are unknown"
                 else -> if (russian) "Основано на проверке чеков" else "Based on receipt review"
             })
             Text(if (russian) "Отмечено в чеках: ${group.count}" else "Flagged receipts: ${group.count}")

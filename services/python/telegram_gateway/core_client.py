@@ -603,7 +603,7 @@ class TelegramCoreClient:
                         or missing > count or rule + model + unmarked != count \
                         or type(group.get("modelOnly")) is not bool \
                         or group["modelOnly"] != (model == count) \
-                        or section == "guesses" and not group["modelOnly"] \
+                        or section == "guesses" and rule != 0 \
                         or group.get("latestVerdict") not in {"harmful", "unnecessary"} \
                         or not isinstance(group.get("latestAdvice"), str) or len(group["latestAdvice"]) > 500:
                     raise TelegramCoreError("unavailable")
