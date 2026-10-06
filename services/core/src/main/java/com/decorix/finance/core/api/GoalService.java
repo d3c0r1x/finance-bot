@@ -166,6 +166,8 @@ public class GoalService {
             return new Decision(builder.key, builder.name, builder.harmful, builder.model == builder.harmful,
                     "confirmed".equals(decision), "allowed".equals(decision));
         }).sorted(java.util.Comparator.comparing(Decision::productKey)).toList();
+        if (!withinInputBound(decisionRows.size(), purchases.size()))
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "too_many_items");
         String watermark = GoalCandidatesClient.watermark(unit, decisionRows, purchases, json);
         Request request = new Request(watermark, Instant.now(), unit, decisionRows, purchases);
         Goal active = activeGoal(tenantId, actor.userId());
@@ -244,6 +246,12 @@ public class GoalService {
     }
 
     private static BigDecimal decimal(String value) { return value == null ? null : new BigDecimal(value); }
+
+    static boolean withinInputBound(int decisions, int purchases) {
+        return decisions >= 0 && purchases >= 0 && purchases <= MAX_ITEMS
+                && decisions <= MAX_ITEMS - purchases;
+    }
+
 
     private static void validateAccept(UUID tenantId, String subject, AcceptRequest request) {
         if (tenantId == null || subject == null || subject.isBlank() || request == null
