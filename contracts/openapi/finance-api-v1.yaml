@@ -995,6 +995,21 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ProductDecisionKeys' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /bff/tenants/{tenantId}/products/do-not-buy:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserDoNotBuyList
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Personal rule-backed blocks and separate model-only guesses from confirmed expense receipts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdviceEvidenceReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /bff/tenants/{tenantId}/products/price-history:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -3430,6 +3445,19 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ProductDecisionKeys' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/tenants/{tenantId}/products/do-not-buy:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getDoNotBuyList
+      responses:
+        '200':
+          description: Member-scoped receipt evidence with explicit unavailable state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdviceEvidenceReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/tenants/{tenantId}/products/price-history:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4800,6 +4828,41 @@ components:
           type: array
           uniqueItems: true
           items: { type: string, minLength: 1, maxLength: 256 }
+    AdviceEvidenceGroup:
+      type: object
+      additionalProperties: false
+      required: [productKey, productName, count, amount, missingAmountCount, ruleCount, modelCount,
+                 unmarkedCount, modelOnly, latestVerdict, latestAdvice, lastPurchasedAt]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]+$' }
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        count: { type: integer, minimum: 2 }
+        amount: { type: [string, 'null'], pattern: '^\d{1,30}\.\d{2}$' }
+        missingAmountCount: { type: integer, minimum: 0 }
+        ruleCount: { type: integer, minimum: 0 }
+        modelCount: { type: integer, minimum: 0 }
+        unmarkedCount: { type: integer, minimum: 0 }
+        modelOnly: { type: boolean, description: True only when every optional verdict came from the model. }
+        latestVerdict: { type: string, enum: [harmful, unnecessary] }
+        latestAdvice: { type: string, maxLength: 500 }
+        lastPurchasedAt: { type: string, format: date-time }
+    AdviceEvidenceReport:
+      type: object
+      additionalProperties: false
+      required: [available, reasonCode, algorithmVersion, inputVersion, banned, guesses]
+      properties:
+        available: { type: boolean }
+        reasonCode: { type: string, enum: [available, no_optional_items, too_many_items, analytics_unavailable] }
+        algorithmVersion: { type: [string, 'null'], enum: [advice-evidence.v1, null] }
+        inputVersion: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
+        banned:
+          type: array
+          maxItems: 25000
+          items: { $ref: '#/components/schemas/AdviceEvidenceGroup' }
+        guesses:
+          type: array
+          maxItems: 25000
+          items: { $ref: '#/components/schemas/AdviceEvidenceGroup' }
     ProductCatalogResponse:
       type: object
       additionalProperties: false
@@ -4992,7 +5055,7 @@ components:
       properties:
         productKey: { type: string, pattern: '^[a-zа-я0-9]{1,256}$' }
         productName: { type: string, minLength: 1, maxLength: 200 }
-        reasonCode: { type: string, const: confirmed_not_to_buy }
+        reasonCode: { type: string, enum: [confirmed_not_to_buy, rule_backed_not_to_buy] }
     ShoppingCandidate:
       type: object
       additionalProperties: false

@@ -23,10 +23,13 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProductDecisionController {
     private final ReceiptService receipts;
     private final ProductPriceHistoryService priceHistory;
+    private final AdviceEvidenceService evidence;
 
-    public ProductDecisionController(ReceiptService receipts, ProductPriceHistoryService priceHistory) {
+    public ProductDecisionController(ReceiptService receipts, ProductPriceHistoryService priceHistory,
+                                     AdviceEvidenceService evidence) {
         this.receipts = receipts;
         this.priceHistory = priceHistory;
+        this.evidence = evidence;
     }
 
     @GetMapping("/price-history")
@@ -44,6 +47,11 @@ public class ProductDecisionController {
     @GetMapping("/decisions")
     ProductDecisionKeys allowedProducts(@PathVariable UUID tenantId, @AuthenticationPrincipal Jwt jwt) {
         return receipts.allowedProducts(tenantId, jwt.getSubject());
+    }
+
+    @GetMapping("/do-not-buy")
+    AdviceEvidenceApi.Report doNotBuy(@PathVariable UUID tenantId, @AuthenticationPrincipal Jwt jwt) {
+        return evidence.get(tenantId, jwt.getSubject());
     }
 
     @PutMapping("/{productKey}/decision")

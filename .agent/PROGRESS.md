@@ -49,21 +49,21 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
 | F40.3 | Web, Android and Telegram optional-spend presentation | COMPLETE — local client gates and GitHub regression GREEN | F40.2 | ec1a373 |
-| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — Go grouping and personal decision persistence verified; evidence overlay and clients remain | F40 | pending |
+| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — Go grouping, Core decisions and shopping overlay verified; client controls remain | F40 | pending |
 | F41.1 | Go evidence groups for the personal “do not buy” list | COMPLETE — local and three GitHub workflows GREEN | F40 facts | bd8444f |
-| F41.2a | Confirm/allow/revoke member-local product decisions with audit | COMMIT_PENDING — PostgreSQL and contract gates GREEN | F41.1 | pending |
-| F41.2b | Core evidence API, personal policy overlay and shopping isolation | NOT_IMPLEMENTED | F41.2a | pending |
+| F41.2a | Confirm/allow/revoke member-local product decisions with audit | COMPLETE — local and four GitHub workflows GREEN | F41.1 | d537b08 |
+| F41.2b | Core evidence API, personal policy overlay and shopping isolation | COMMIT_PENDING — PostgreSQL/Core/contracts GREEN | F41.2a | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F41.2a — Core stores per-member `confirmed`/`allowed` decisions and audits each change; F41.2b connects Go evidence to the list and shopping.
-- Status: COMMIT_PENDING — F41.1 GitHub workflows `37413587958`, `37413587940`, `37413587971` all completed successfully; F41.2a focused PostgreSQL acceptance, full Core check and 44 contract tests pass locally.
-- Acceptance: confirmed and allowed are separate personal states; repeated identical decisions are idempotent; switching increments version and writes audit; revoke removes the state; other members cannot see it; BFF requires CSRF.
-- Data boundary: Core/PostgreSQL owns human decisions; Go only groups evidence. F41.2b will bind the two without converting model-only guesses into automatic shopping blocks.
+- ID and outcome: F41.2b — Core reads member-local receipt evidence, returns separate blocks/guesses and overlays shopping without hiding model-only suggestions.
+- Status: COMMIT_PENDING — F41.2a `d537b08` is pushed and four GitHub workflows are GREEN. F41.2b focused PostgreSQL/API and policy tests, full Core check and 45 contracts pass locally.
+- Acceptance: only active member's confirmed posted expense receipt optional verdicts reach Go; two-verdict groups are listed; model-only groups remain guesses and visible in shopping until confirmed; rule-backed groups block unless allowed; unavailable analytics and 50,001-line overflow are explicit.
+- Data boundary: Core/PostgreSQL owns membership and human decisions; Go groups bounded authorized evidence and never writes decisions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `bd8444f`.
-- Updated at: 2026-10-06 07:34 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `d537b08`.
+- Updated at: 2026-10-06 07:49 Europe/Moscow.
 
 ## Verification evidence
 
@@ -87,6 +87,10 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 | F41.2a observed RED | Focused `TransactionApiPostgresTest.productDecisionCanConfirmModelGuessAndSwitchPerMemberWithAudit`; contract schema test | isolated `finance_test_f41_20261006` before implementation | FAIL expected | `confirmed` returned HTTP 400; selection schema lacked `confirmed` |
 | F41.2a focused PostgreSQL | Same focused Java test with migration V34 | F41.2a worktree | PASS | Confirm, idempotence, version switch, revoke/audit, second-member isolation and BFF CSRF route |
 | F41.2a regression | `:services:core:check --rerun-tasks --no-daemon`; `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | F41.2a worktree | PASS; 44 contracts | Full Core suite on isolated PostgreSQL 18.6 and strict decision schemas |
+| F41.2a GitHub regression | Actions `37414351352`, `37414351376`, `37414351356`, `37414351388` | commit `d537b08` | PASS | Python/contracts/Go, private S3/ClamAV, bot and Core PostgreSQL workflows all completed successfully |
+| F41.2b observed RED | `AdviceEvidencePolicyTest`; focused PostgreSQL do-not-buy API/shopping test; OpenAPI contract test | F41.2b tests before implementation | FAIL expected | Missing policy/types, then HTTP 404 list, then shopping still showed rule-backed Chips, then absent OpenAPI path |
+| F41.2b focused PostgreSQL | `TransactionApiPostgresTest.doNotBuyListSeparatesModelGuessesAndScopesReceiptEvidenceToMember`; `AdviceEvidencePolicyTest` | isolated `finance_test_f41_20261006` | PASS | Personal input excludes second member; model-only guess, rule block, confirm/allow transitions, BFF route and analytics outage |
+| F41.2b regression | `:services:core:check --rerun-tasks --no-daemon`; `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | F41.2b worktree | PASS; 45 contracts | 235 Core tests, 2 skipped; public/BFF schemas and shopping reason code validated |
 | F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
 | F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, commit `b1e64c4` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
 | F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
@@ -113,10 +117,11 @@ Updated: 2026-10-06 07:23, Europe/Moscow.
 - F40.2 decision overlay RED: the receipt input contained the expected member/product key, and PostgreSQL had the matching allowed decision, but Java's `user_id = ANY (?::uuid[])` lookup returned no overlay. Removing the array lookup and applying tenant-scoped rows against the bounded fact owner/key sets made the PostgreSQL acceptance pass. Facts: both SQL-array variants failed; direct RLS-scoped SQL found the decision; tenant-scoped lookup passed the same acceptance. Likely cause is JDBC UUID-array binding; no claim that the driver internals were independently proven.
 - F40.2 CI: the unrelated private receipt S3 integration timed out once in SeaweedFS HTTP; rerunning the failed GitHub job passed. Core/PostgreSQL, contracts and bot workflows passed on commit `68253b7`.
 - GitHub PostgreSQL run `37398375404` failed after the new receipt acceptance left a `receipt.confirmed` outbox event for the shared contract validator. `test_core_migration.py` mapped transaction, budget and debt events but omitted receipt. Added the receipt schema mapping. Local contract suite passes 54/2 skips; local integration test connects only after using the migrator role, but its cleaned database has no persisted events, so CI must verify event replay.
+- F41.2b full Core check first failed one unit mock because shopping now calls the four-argument decision overlay. Updated the existing mock expectation to the new `Set.of()` evidence input; focused test and full 235-test Core check then passed.
 
 ## Next action
 
-- Commit and push F41.2a after staged diff review; then start F41.2b Core evidence API and shopping overlay.
+- Commit and push F41.2b after staged diff review; verify GitHub checks, then start F41.3 RU/EN Web, Telegram and Android controls.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 

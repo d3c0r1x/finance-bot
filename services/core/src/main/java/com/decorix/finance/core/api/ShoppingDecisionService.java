@@ -34,9 +34,14 @@ public class ShoppingDecisionService {
     }
 
     public ShoppingList apply(UUID tenantId, UUID userId, ShoppingList analytics) {
+        return apply(tenantId, userId, analytics, Set.of());
+    }
+
+    public ShoppingList apply(UUID tenantId, UUID userId, ShoppingList analytics, Set<String> evidenceBlocked) {
         if (analytics == null || analytics.candidates() == null || analytics.inventoryTracked()) {
             throw unavailable();
         }
+        if (evidenceBlocked == null) throw unavailable();
         DecisionSnapshot decisions = transaction.execute(status -> {
             setTenant(tenantId);
             Map<String, Instant> marks = new HashMap<>();
@@ -50,7 +55,10 @@ public class ShoppingDecisionService {
             Set<String> blocked = new HashSet<>(jdbc.query("SELECT product_key FROM user_product_decisions "
                             + "WHERE tenant_id = ? AND user_id = ? AND decision = 'confirmed'",
                     (rs, row) -> rs.getString("product_key"), tenantId, userId));
-            return new DecisionSnapshot(marks, muted, blocked);
+            Set<String> allowed = new HashSet<>(jdbc.query("SELECT product_key FROM user_product_decisions "
+                            + "WHERE tenant_id = ? AND user_id = ? AND decision = 'allowed'",
+                    (rs, row) -> rs.getString("product_key"), tenantId, userId));
+            return new DecisionSnapshot(marks, muted, blocked, allowed);
         });
         if (decisions == null) throw unavailable();
 
@@ -70,6 +78,8 @@ public class ShoppingDecisionService {
                 bought.add(candidate);
             } else if (decisions.blocked().contains(key)) {
                 blocked.add(new BlockedShoppingCandidate(key, raw.productName(), "confirmed_not_to_buy"));
+            } else if (evidenceBlocked.contains(key) && !decisions.allowed().contains(key)) {
+                blocked.add(new BlockedShoppingCandidate(key, raw.productName(), "rule_backed_not_to_buy"));
             } else if (decisions.muted().contains(key)) {
                 muted.add(candidate);
             } else {
@@ -146,5 +156,6 @@ public class ShoppingDecisionService {
         return new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Shopping candidates response is incomplete");
     }
 
-    private record DecisionSnapshot(Map<String, Instant> marks, Set<String> muted, Set<String> blocked) {}
+    private record DecisionSnapshot(Map<String, Instant> marks, Set<String> muted, Set<String> blocked,
+                                    Set<String> allowed) {}
 }

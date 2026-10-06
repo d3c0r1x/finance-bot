@@ -100,10 +100,19 @@ class TransactionApiPostgresTest {
     private static final AtomicReference<String> LAST_PRICE_COMPARE_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_PRICE_CATALOG_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_SHOPPING_REQUEST = new AtomicReference<>("");
+    private static final String DEFAULT_SHOPPING_RESPONSE = """
+            {"candidates":[{"productName":"Milk Fresh 1l","purchaseCount":3,"medianIntervalDays":10,
+             "usualUnitPrice":"100.000000","estimatedCost":"100.00",
+             "lastPurchasedAt":"2026-10-04T00:00:00Z","dueAt":"2026-10-05T00:00:00Z","daysUntilDue":0}],
+             "estimatedListCost":"100.00","inventoryTracked":false}
+            """;
+    private static final AtomicReference<String> SHOPPING_RESPONSE = new AtomicReference<>(DEFAULT_SHOPPING_RESPONSE);
     private static final AtomicReference<String> LAST_PERSONAL_INFLATION_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_RECURRING_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_WASTE_REQUEST = new AtomicReference<>("");
     private static final AtomicInteger WASTE_RESPONSE_STATUS = new AtomicInteger(200);
+    private static final AtomicReference<String> LAST_EVIDENCE_REQUEST = new AtomicReference<>("");
+    private static final AtomicInteger EVIDENCE_RESPONSE_STATUS = new AtomicInteger(200);
     private static final AtomicBoolean RECURRING_FIXTURE_ENABLED = new AtomicBoolean();
     private static final String RECURRING_SERIES_ID = "abcdef0123456789abcdef0123456789";
     private static final String ANALYTICS_SERVICE_TOKEN = "integration-analytics-price-token";
@@ -175,6 +184,9 @@ class TransactionApiPostgresTest {
         RECURRING_FIXTURE_ENABLED.set(false);
         LAST_WASTE_REQUEST.set("");
         WASTE_RESPONSE_STATUS.set(200);
+        LAST_EVIDENCE_REQUEST.set("");
+        EVIDENCE_RESPONSE_STATUS.set(200);
+        SHOPPING_RESPONSE.set(DEFAULT_SHOPPING_RESPONSE);
         cleanupReceiptPhotoFixtures();
         grantAppPrivileges();
         subject = "keycloak|integration-" + UUID.randomUUID();
@@ -4638,6 +4650,91 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void doNotBuyListSeparatesModelGuessesAndScopesReceiptEvidenceToMember() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        String otherSubject = "keycloak|evidence-other-" + UUID.randomUUID();
+        List<UUID> ownItems = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID owner = userIdFor(subject);
+            UUID other = jdbc.queryForObject("INSERT INTO users DEFAULT VALUES RETURNING id", UUID.class);
+            jdbc.update("INSERT INTO external_identities (user_id, provider, subject) VALUES (?, 'keycloak', ?)",
+                    other, otherSubject);
+            jdbc.update("INSERT INTO memberships (tenant_id, subject, role, user_id) VALUES (?, ?, 'member', ?)",
+                    tenantId, otherSubject, other);
+            List<UUID> items = new java.util.ArrayList<>();
+            items.add(addConfirmedReceiptItem(owner, subject,
+                    addReportTransaction(owner, subject, "expense", "13.00", "food", "2026-09-01T10:00:00Z"),
+                    "Coffee", "13.00", "unnecessary", "model", 1));
+            items.add(addConfirmedReceiptItem(owner, subject,
+                    addReportTransaction(owner, subject, "expense", "14.00", "food", "2026-09-10T10:00:00Z"),
+                    "Coffee", "14.00", "harmful", "model", 2));
+            items.add(addConfirmedReceiptItem(owner, subject,
+                    addReportTransaction(owner, subject, "expense", "1.00", "food", "2026-09-01T11:00:00Z"),
+                    "Chips", "1.00", "unnecessary", "rule", 3));
+            items.add(addConfirmedReceiptItem(owner, subject,
+                    addReportTransaction(owner, subject, "expense", "2.00", "food", "2026-09-02T11:00:00Z"),
+                    "Chips", "2.00", "harmful", "model", 4));
+            addConfirmedReceiptItem(other, otherSubject,
+                    addReportTransaction(other, otherSubject, "expense", "99.00", "food", "2026-09-03T10:00:00Z"),
+                    "Coffee", "99.00", "harmful", "rule", 5);
+            return items;
+        });
+        String path = "/api/v1/tenants/" + tenantId + "/products/do-not-buy";
+
+        mvc.perform(get(path).with(auth)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(true))
+                .andExpect(jsonPath("$.banned[0].productKey").value("chips"))
+                .andExpect(jsonPath("$.guesses[0].productKey").value("coffee"))
+                .andExpect(jsonPath("$.guesses[0].modelOnly").value(true));
+        org.junit.jupiter.api.Assertions.assertEquals(4,
+                ((Number) com.jayway.jsonpath.JsonPath.read(LAST_EVIDENCE_REQUEST.get(), "$.items.length()")).intValue());
+        for (UUID item : ownItems) {
+            org.junit.jupiter.api.Assertions.assertTrue(LAST_EVIDENCE_REQUEST.get().contains(item.toString()));
+        }
+        mvc.perform(get("/bff/tenants/" + tenantId + "/products/do-not-buy")
+                        .with(oidcLogin().idToken(token -> token.subject(subject))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.guesses[0].productKey").value("coffee"));
+        SHOPPING_RESPONSE.set("""
+                {"candidates":[
+                  {"productName":"Chips","purchaseCount":3,"medianIntervalDays":10,
+                   "usualUnitPrice":"1.000000","estimatedCost":"1.00",
+                   "lastPurchasedAt":"2026-09-02T11:00:00Z","dueAt":"2026-09-12T11:00:00Z","daysUntilDue":0},
+                  {"productName":"Coffee","purchaseCount":3,"medianIntervalDays":10,
+                   "usualUnitPrice":"13.000000","estimatedCost":"13.00",
+                   "lastPurchasedAt":"2026-09-10T10:00:00Z","dueAt":"2026-09-20T10:00:00Z","daysUntilDue":0}],
+                 "estimatedListCost":"14.00","inventoryTracked":false}
+                """);
+        String shoppingPath = "/api/v1/tenants/" + tenantId + "/shopping";
+        mvc.perform(get(shoppingPath).with(auth)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates[0].productKey").value("coffee"))
+                .andExpect(jsonPath("$.blockedCandidates[0].productKey").value("chips"))
+                .andExpect(jsonPath("$.blockedCandidates[0].reasonCode").value("rule_backed_not_to_buy"));
+
+        mvc.perform(put("/api/v1/tenants/" + tenantId + "/products/coffee/decision").with(auth)
+                        .contentType("application/json").content("{\"decision\":\"confirmed\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(get(path).with(auth)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.banned.length()").value(2))
+                .andExpect(jsonPath("$.guesses").isEmpty());
+        mvc.perform(get(shoppingPath).with(auth)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates").isEmpty())
+                .andExpect(jsonPath("$.blockedCandidates.length()").value(2));
+        mvc.perform(put("/api/v1/tenants/" + tenantId + "/products/chips/decision").with(auth)
+                        .contentType("application/json").content("{\"decision\":\"allowed\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(get(path).with(auth)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.banned[0].productKey").value("coffee"));
+        mvc.perform(get(shoppingPath).with(auth)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates[0].productKey").value("chips"))
+                .andExpect(jsonPath("$.blockedCandidates[0].productKey").value("coffee"));
+        EVIDENCE_RESPONSE_STATUS.set(503);
+        mvc.perform(get(path).with(auth)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.reasonCode").value("analytics_unavailable"))
+                .andExpect(jsonPath("$.banned").isEmpty());
+    }
+
+    @Test
     void productDecisionCanConfirmModelGuessAndSwitchPerMemberWithAudit() throws Exception {
         String key = "milkcocoa";
         String path = "/api/v1/tenants/" + tenantId + "/products/" + key + "/decision";
@@ -5243,12 +5340,7 @@ class TransactionApiPostgresTest {
                     return;
                 }
                 LAST_SHOPPING_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-                byte[] body = """
-                        {"candidates":[{"productName":"Milk Fresh 1l","purchaseCount":3,"medianIntervalDays":10,
-                         "usualUnitPrice":"100.000000","estimatedCost":"100.00",
-                         "lastPurchasedAt":"2026-10-04T00:00:00Z","dueAt":"2026-10-05T00:00:00Z","daysUntilDue":0}],
-                         "estimatedListCost":"100.00","inventoryTracked":false}
-                        """.getBytes(StandardCharsets.UTF_8);
+                byte[] body = SHOPPING_RESPONSE.get().getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
                 exchange.sendResponseHeaders(200, body.length);
                 try (var output = exchange.getResponseBody()) {
@@ -5300,6 +5392,38 @@ class TransactionApiPostgresTest {
                          "bySource":{"unknown":"50.00"},"topItems":[],"repeats":[],"corrected":[],"optionalByDay":{}}
                         """.formatted(asOf, fromDate, toDate);
                 byte[] body = response.getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+                exchange.sendResponseHeaders(200, body.length);
+                try (var output = exchange.getResponseBody()) {
+                    output.write(body);
+                }
+            });
+            server.createContext("/internal/v1/analytics/advice/evidence-groups", exchange -> {
+                if (!("Bearer " + ANALYTICS_SERVICE_TOKEN).equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
+                    exchange.sendResponseHeaders(401, -1);
+                    exchange.close();
+                    return;
+                }
+                LAST_EVIDENCE_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+                int responseStatus = EVIDENCE_RESPONSE_STATUS.get();
+                if (responseStatus != 200) {
+                    exchange.sendResponseHeaders(responseStatus, -1);
+                    exchange.close();
+                    return;
+                }
+                byte[] body = """
+                        {"algorithmVersion":"advice-evidence.v1",
+                         "inputVersion":"0000000000000000000000000000000000000000000000000000000000000000",
+                         "groups":[
+                           {"productKey":"chips","productName":"Chips","count":2,"amount":"3.00",
+                            "missingAmountCount":0,"ruleCount":1,"modelCount":1,"unmarkedCount":0,
+                            "modelOnly":false,"latestVerdict":"harmful","latestAdvice":"",
+                            "lastPurchasedAt":"2026-09-02T11:00:00Z"},
+                           {"productKey":"coffee","productName":"Coffee","count":2,"amount":"27.00",
+                            "missingAmountCount":0,"ruleCount":0,"modelCount":2,"unmarkedCount":0,
+                            "modelOnly":true,"latestVerdict":"harmful","latestAdvice":"",
+                            "lastPurchasedAt":"2026-09-10T10:00:00Z"}]}
+                        """.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
                 exchange.sendResponseHeaders(200, body.length);
                 try (var output = exchange.getResponseBody()) {

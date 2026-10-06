@@ -224,8 +224,8 @@ def test_shopping_candidates_are_member_scoped_and_explicitly_not_inventory():
     assert candidate["properties"]["purchaseCount"]["minimum"] == 3
     assert candidate["properties"]["medianIntervalDays"]["minimum"] == 3
     assert candidate["properties"]["daysUntilDue"]["maximum"] == 3
-    assert public["components"]["schemas"]["BlockedShoppingCandidate"]["properties"]["reasonCode"]["const"] \
-        == "confirmed_not_to_buy"
+    assert public["components"]["schemas"]["BlockedShoppingCandidate"]["properties"]["reasonCode"]["enum"] \
+        == ["confirmed_not_to_buy", "rule_backed_not_to_buy"]
 
     for path, method, operation_id in (
             ("/api/v1/tenants/{tenantId}/shopping/{productKey}/bought", "post", "markShoppingCandidateBought"),
@@ -442,6 +442,21 @@ def test_product_decisions_expose_separate_confirmed_and_allowed_keys():
     assert schemas["ProductDecisionSelection"]["properties"]["decision"]["enum"] == ["allowed", "confirmed"]
     assert set(schemas["ProductDecisionKeys"]["required"]) == {"productKeys", "confirmedProductKeys"}
     assert schemas["ProductDecisionKeys"]["properties"]["confirmedProductKeys"]["uniqueItems"] is True
+
+
+def test_do_not_buy_contract_separates_model_guesses_from_shopping_blocks():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    schemas = spec["components"]["schemas"]
+    for prefix, security in (("/api/v1", [{"bearerAuth": []}]), ("/bff", [{"bffSession": []}])):
+        path = prefix + "/tenants/{tenantId}/products/do-not-buy"
+        operation = spec["paths"][path]["get"]
+        if prefix == "/bff":
+            assert operation["security"] == security
+        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("AdviceEvidenceReport")
+    assert {"available", "reasonCode", "algorithmVersion", "inputVersion", "banned", "guesses"} == set(
+        schemas["AdviceEvidenceReport"]["required"])
+    assert schemas["AdviceEvidenceGroup"]["properties"]["modelOnly"]["type"] == "boolean"
+    assert "rule_backed_not_to_buy" in schemas["BlockedShoppingCandidate"]["properties"]["reasonCode"]["enum"]
 
 
 def test_repeat_warnings_only_describe_prior_confirmed_item_evidence():

@@ -63,13 +63,14 @@ public class WebBffController {
     private final ProductPriceHistoryService productPriceHistory;
     private final ReceiptProcessingService receiptProcessing;
     private final ReceiptReadingService receiptReadings;
+    private final AdviceEvidenceService evidence;
 
     public WebBffController(TenantService tenants, TransactionService transactions, MemberProfileService profiles,
                             NotificationPreferencesService notificationPreferences, BudgetService budgets,
                             DebtService debts, ReportService reports, TransactionDraftService drafts,
                             ReceiptService receipts, TelegramLinkService telegramLinks,
                             ProductPriceHistoryService productPriceHistory, ReceiptProcessingService receiptProcessing,
-                            ReceiptReadingService receiptReadings) {
+                            ReceiptReadingService receiptReadings, AdviceEvidenceService evidence) {
         this.tenants = tenants;
         this.transactions = transactions;
         this.profiles = profiles;
@@ -83,6 +84,7 @@ public class WebBffController {
         this.productPriceHistory = productPriceHistory;
         this.receiptProcessing = receiptProcessing;
         this.receiptReadings = receiptReadings;
+        this.evidence = evidence;
     }
 
     @GetMapping("/csrf")
@@ -496,6 +498,11 @@ public class WebBffController {
     @GetMapping("/tenants/{tenantId}/products/decisions")
     ProductDecisionKeys allowedProducts(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
         return receipts.allowedProducts(tenantId, user.getSubject());
+    }
+
+    @GetMapping("/tenants/{tenantId}/products/do-not-buy")
+    AdviceEvidenceApi.Report doNotBuy(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
+        return evidence.get(tenantId, user.getSubject());
     }
 
     @GetMapping("/tenants/{tenantId}/products/price-history")

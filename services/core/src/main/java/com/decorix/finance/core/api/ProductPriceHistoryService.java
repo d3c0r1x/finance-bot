@@ -11,6 +11,7 @@ import com.decorix.finance.core.domain.ProductIdentityPolicy;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
@@ -28,17 +29,27 @@ public class ProductPriceHistoryService {
     private final ProductPriceHistoryClient analytics;
     private final ShoppingDecisionService shoppingDecisions;
     private final RecurringDecisionService recurringDecisions;
+    private final AdviceEvidenceService evidence;
 
     @Autowired
     public ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
                                       ProductPriceHistoryClient analytics,
                                       ShoppingDecisionService shoppingDecisions,
-                                      RecurringDecisionService recurringDecisions) {
+                                      RecurringDecisionService recurringDecisions,
+                                      AdviceEvidenceService evidence) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.analytics = analytics;
         this.shoppingDecisions = shoppingDecisions;
         this.recurringDecisions = recurringDecisions;
+        this.evidence = evidence;
+    }
+
+    ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
+                               ProductPriceHistoryClient analytics,
+                               ShoppingDecisionService shoppingDecisions,
+                               RecurringDecisionService recurringDecisions) {
+        this(jdbc, transaction, analytics, shoppingDecisions, recurringDecisions, null);
     }
 
     ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
@@ -249,7 +260,8 @@ public class ProductPriceHistoryService {
     }
 
     private ShoppingList shoppingForMember(UUID tenantId, UUID userId) {
-        return shoppingDecisions.apply(tenantId, userId, analytics.shopping(tenantId.toString(), userId.toString()));
+        ShoppingList source = analytics.shopping(tenantId.toString(), userId.toString());
+        return shoppingDecisions.apply(tenantId, userId, source, bannedEvidenceKeys(tenantId, userId));
     }
 
     private ShoppingList updateShoppingDecision(UUID tenantId, UUID userId, String productKey, String action) {
@@ -257,6 +269,7 @@ public class ProductPriceHistoryService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping list not found");
         }
         ShoppingList source = analytics.shopping(tenantId.toString(), activeMember(tenantId, userId).toString());
+        Set<String> blocked = bannedEvidenceKeys(tenantId, userId);
         ShoppingCandidate target = source.candidates().stream().filter(candidate ->
                 productKey.equals(ProductIdentityPolicy.productKey(candidate.productName()))).findFirst().orElse(null);
         if (target == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Shopping suggestion not found");
@@ -266,7 +279,18 @@ public class ProductPriceHistoryService {
             case "unmute" -> shoppingDecisions.unmute(tenantId, userId, productKey);
             default -> throw new IllegalArgumentException("Unknown shopping decision");
         }
-        return shoppingDecisions.apply(tenantId, userId, source);
+        return shoppingDecisions.apply(tenantId, userId, source, blocked);
+    }
+
+    private Set<String> bannedEvidenceKeys(UUID tenantId, UUID userId) {
+        if (evidence == null) return Set.of();
+        AdviceEvidenceApi.Report report = evidence.get(tenantId, userId);
+        if (!report.available()) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "Shopping advice evidence is unavailable");
+        }
+        return report.banned().stream().map(AdviceEvidenceApi.EvidenceGroup::productKey)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private UUID activeMember(UUID tenantId, UUID userId) {
