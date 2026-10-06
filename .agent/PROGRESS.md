@@ -1295,3 +1295,12 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 - Added strict bounded Core HTTP client, service-token claim/result calls, a single-instance cancellable worker, and opt-in integration in the existing `analytics-api`. Worker mode validates its Core URL, service token and poll interval; disabled mode preserves current startup behavior.
 - Tests cover no work, calculation/result flow, invalid input delivery for Core retry, transient Core errors, cancellation during idle poll, completion failure, serialized processing, strict claim decoding, HTTP 204/5xx handling and startup configuration.
 - GREEN: `go test ./... -count=1` and `go vet ./...` from `services/analytics-go`; focused Go worker/client/config tests pass. Next: commit F43.3 and implement Task 4 Web report/status polling.
+
+## E4.73 F43.4 Web report and F43 acceptance — 2026-10-07 01:44 MSK
+
+- Added RU/EN F43 panel to Web reports with watermark/status, pending/processing polling, explicit enqueue/retry/recalculation, partial/unavailable reasons, theoretical 30-day ceiling, four-week trend, post-advice cadence, and separate F42 annotation. Viewers can read the report but cannot enqueue jobs; no automatic calculation starts.
+- RED/GREEN: focused panel suite first failed on missing component, then a new viewer permission test failed because the enqueue button was visible. Both gaps were fixed. Focused suite 7/7; full Web suite 67/67; TypeScript and production Vite build pass.
+- Final gates: Go `test ./... -count=1` and `go vet ./...` pass; contract/migration tests 64 passed, 2 existing optional DB skips; Core `:services:core:check` reports BUILD SUCCESSFUL (tasks up to date; PostgreSQL F43 acceptance had passed in E4.71); `git diff --check` passes.
+- Telegram `/report` was inspected: it accepts period/scope and returns the legacy finance report DTO, with no route for the stored F43 job/report DTO. F43 stays in Web; no duplicate Telegram calculation was added. Parity now records this intentional difference.
+- F43.4 and plan/parity updates committed as `a911e27` (`feat(F43.4): expose advice analytics report`) and pushed to `origin/feat/saas-rewrite`. `gh run list --commit a911e27` returned `[]`; remote CI did not start and is unverified.
+- F43 feature work is complete. This does not complete personal MVP operations: no persistent server, public HTTPS, or Android emulator-installed MVP delivery was verified here. Continue with the next V1 feature goal F44 using test-first gates, while keeping MVP deployment gates visible in the global plan.
