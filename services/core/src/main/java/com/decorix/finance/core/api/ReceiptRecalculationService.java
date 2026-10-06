@@ -1,16 +1,26 @@
 package com.decorix.finance.core.api;
 
+import com.decorix.finance.core.api.AdviceRecalculationImpactApi.Impact;
+import com.decorix.finance.core.api.AdviceWasteApi.ReceiptLine;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyRequest;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.ApplyResult;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.Change;
 import com.decorix.finance.core.api.ReceiptRecalculationApi.Preview;
 import com.decorix.finance.core.domain.ReceiptBasketPolicy;
+import com.decorix.finance.core.domain.ProductIdentityPolicy;
 import com.decorix.finance.core.domain.ReceiptRecalculationPolicy;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,19 +36,39 @@ public class ReceiptRecalculationService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final ObjectMapper json;
+    private final AdviceRecalculationImpactClient impactClient;
 
-    public ReceiptRecalculationService(JdbcTemplate jdbc, TransactionTemplate transaction, ObjectMapper json) {
+    public ReceiptRecalculationService(JdbcTemplate jdbc, TransactionTemplate transaction, ObjectMapper json,
+                                       AdviceRecalculationImpactClient impactClient) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.json = json;
+        this.impactClient = impactClient;
     }
 
     public Preview preview(UUID tenantId, String subject) {
-        return transaction.execute(status -> {
-            Actor actor = actor(tenantId, subject);
-            List<StoredLine> lines = jdbc.query("""
+        PreparedPreview prepared = transaction.execute(status -> prepare(tenantId, subject));
+        Impact impact = impactClient.calculate(new AdviceRecalculationImpactApi.Request(
+                prepared.before(), prepared.after())).withCurrency(prepared.currency());
+        return transaction.execute(status -> persistPreview(tenantId, subject, prepared, impact));
+    }
+
+    private PreparedPreview prepare(UUID tenantId, String subject) {
+        Actor actor = actor(tenantId, subject);
+        Map<String, Object> profile = jdbc.queryForMap(
+                "SELECT timezone, currency FROM member_profiles WHERE tenant_id = ? AND user_id = ?",
+                tenantId, actor.userId());
+        String timezone = (String) profile.get("timezone");
+        String currency = (String) profile.get("currency");
+        ZoneId zone;
+        try {
+            zone = ZoneId.of(timezone);
+        } catch (RuntimeException invalidTimezone) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Member timezone is invalid", invalidTimezone);
+        }
+        List<StoredLine> lines = jdbc.query("""
                     SELECT r.id AS receipt_id, ri.id AS item_id, ri.name, ri.line_sum, ri.verdict,
-                           ri.review_reason, ri.review_action, ri.verdict_source, ri.version
+                           ri.review_reason, ri.review_action, ri.verdict_source, ri.version, t.occurred_at
                     FROM receipts r
                     JOIN transactions t ON t.tenant_id = r.tenant_id AND t.id = r.transaction_id
                     JOIN receipt_items ri ON ri.tenant_id = r.tenant_id AND ri.receipt_id = r.id
@@ -49,51 +79,121 @@ public class ReceiptRecalculationService {
                     """, (rs, row) -> new StoredLine(rs.getObject("receipt_id", UUID.class),
                     rs.getObject("item_id", UUID.class), rs.getString("name"), rs.getBigDecimal("line_sum"),
                     rs.getString("verdict"), rs.getString("review_reason"), rs.getString("review_action"),
-                    rs.getString("verdict_source"), rs.getLong("version")), tenantId, actor.userId());
-            if (lines.size() > MAX_ITEMS) {
-                throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Receipt history is too large to recalculate");
-            }
+                    rs.getString("verdict_source"), rs.getLong("version"),
+                    rs.getTimestamp("occurred_at").toInstant()), tenantId, actor.userId());
+        if (lines.size() > MAX_ITEMS) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Receipt history is too large to recalculate");
+        }
 
-            List<ReceiptRecalculationPolicy.Line> input = lines.stream().map(line ->
-                    new ReceiptRecalculationPolicy.Line(line.itemId(), line.name(), line.lineSum(), line.verdict(),
-                            line.reason(), line.action(), line.source())).toList();
-            ReceiptRecalculationPolicy.Plan plan;
-            try {
-                plan = ReceiptRecalculationPolicy.preview(input);
-            } catch (IllegalArgumentException invalid) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Receipt history contains invalid review data", invalid);
+        List<ReceiptRecalculationPolicy.Line> input = lines.stream().map(line ->
+                new ReceiptRecalculationPolicy.Line(line.itemId(), line.name(), line.lineSum(), line.verdict(),
+                        line.reason(), line.action(), line.source())).toList();
+        ReceiptRecalculationPolicy.Plan plan;
+        try {
+            plan = ReceiptRecalculationPolicy.preview(input);
+        } catch (IllegalArgumentException invalid) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Receipt history contains invalid review data", invalid);
+        }
+        Map<UUID, StoredLine> storedById = new LinkedHashMap<>();
+        lines.forEach(line -> storedById.put(line.itemId(), line));
+        ImpactWindow window = impactWindow(zone);
+        List<StoredLine> reportLines = lines.stream()
+                .filter(line -> !line.purchasedAt().isBefore(window.start()) && line.purchasedAt().isBefore(window.end()))
+                .toList();
+        Map<DecisionKey, Long> allowed = loadAllowedDecisions(tenantId, actor.userId(), reportLines);
+        List<ReceiptLine> beforeItems = new ArrayList<>(reportLines.size());
+        List<ReceiptLine> afterItems = new ArrayList<>(reportLines.size());
+        Map<UUID, ReceiptRecalculationPolicy.Update> updates = new HashMap<>();
+        plan.updates().forEach(update -> updates.put(update.itemId(), update));
+        for (StoredLine line : reportLines) {
+            String productKey = ProductIdentityPolicy.productKey(line.name());
+            Long decisionVersion = allowed.get(new DecisionKey(actor.userId(), productKey));
+            boolean isAllowed = decisionVersion != null;
+            beforeItems.add(toReceiptLine(line, productKey, isAllowed, decisionVersion));
+            ReceiptRecalculationPolicy.Update update = updates.get(line.itemId());
+            if (update == null) {
+                afterItems.add(toReceiptLine(line, productKey, isAllowed, decisionVersion));
+            } else {
+                afterItems.add(new ReceiptLine(line.itemId().toString(), productKey, line.name(),
+                        line.lineSum() == null ? null : line.lineSum().toPlainString(), update.afterVerdict(),
+                        "rule", line.purchasedAt(), isAllowed, line.version(), decisionVersion == null ? 0 : decisionVersion));
             }
-            Map<UUID, StoredLine> storedById = new LinkedHashMap<>();
-            lines.forEach(line -> storedById.put(line.itemId(), line));
-            UUID runId = UUID.randomUUID();
-            int changedCount = (int) plan.updates().stream().filter(ReceiptRecalculationPolicy.Update::changed).count();
-            jdbc.update("""
+        }
+        var before = new AdviceWasteApi.Request(window.from().toString(), window.to().toString(), window.asOf(),
+                zone.getId(), List.copyOf(beforeItems));
+        var after = new AdviceWasteApi.Request(window.from().toString(), window.to().toString(), window.asOf(),
+                zone.getId(), List.copyOf(afterItems));
+        return new PreparedPreview(actor, plan, storedById, before, after, currency);
+    }
+
+    private Preview persistPreview(UUID tenantId, String subject, PreparedPreview prepared, Impact impact) {
+        // Re-check the active actor inside the write transaction after the Go call.
+        Actor currentActor = actor(tenantId, subject);
+        if (!currentActor.userId().equals(prepared.actor().userId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Active member changed during recalculation preview");
+        }
+        ReceiptRecalculationPolicy.Plan plan = prepared.plan();
+        Map<UUID, StoredLine> storedById = prepared.storedById();
+        UUID runId = UUID.randomUUID();
+        int changedCount = (int) plan.updates().stream().filter(ReceiptRecalculationPolicy.Update::changed).count();
+        jdbc.update("""
                     INSERT INTO recalculation_runs
                       (id, tenant_id, owner_user_id, initiated_by_subject, algorithm_version, checked_count,
-                       update_count, changed_count)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, runId, tenantId, actor.userId(), subject, ReceiptBasketPolicy.ALGORITHM_VERSION,
-                    plan.checked(), plan.updates().size(), changedCount);
+                       update_count, changed_count, impact_report)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))
+                    """, runId, tenantId, currentActor.userId(), subject, ReceiptBasketPolicy.ALGORITHM_VERSION,
+                    plan.checked(), plan.updates().size(), changedCount, serialize(impact));
 
-            List<Change> changes = new ArrayList<>(plan.updates().size());
-            for (ReceiptRecalculationPolicy.Update update : plan.updates()) {
-                StoredLine stored = storedById.get(update.itemId());
-                Map<String, Object> before = itemState(stored.name(), stored.lineSum(), update.beforeVerdict(),
-                        update.beforeReason(), update.beforeAction(), update.beforeSource());
-                Map<String, Object> after = itemState(stored.name(), stored.lineSum(), update.afterVerdict(),
-                        update.afterReason(), update.afterAction(), update.afterSource());
-                jdbc.update("""
+        List<Change> changes = new ArrayList<>(plan.updates().size());
+        for (ReceiptRecalculationPolicy.Update update : plan.updates()) {
+            StoredLine stored = storedById.get(update.itemId());
+            Map<String, Object> before = itemState(stored.name(), stored.lineSum(), update.beforeVerdict(),
+                    update.beforeReason(), update.beforeAction(), update.beforeSource());
+            Map<String, Object> after = itemState(stored.name(), stored.lineSum(), update.afterVerdict(),
+                    update.afterReason(), update.afterAction(), update.afterSource());
+            jdbc.update("""
                         INSERT INTO recalculation_changes
                           (tenant_id, run_id, receipt_id, receipt_item_id, expected_item_version, line_sum,
                            before_state, after_state, changed)
                         VALUES (?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb), ?)
-                        """, tenantId, runId, stored.receiptId(), stored.itemId(), stored.version(),
-                        stored.lineSum(), serialize(before), serialize(after), update.changed());
-                changes.add(toChange(update, stored.version()));
+                    """, tenantId, runId, stored.receiptId(), stored.itemId(), stored.version(),
+                    stored.lineSum(), serialize(before), serialize(after), update.changed());
+            changes.add(toChange(update, stored.version()));
+        }
+        return new Preview(runId, ReceiptBasketPolicy.ALGORITHM_VERSION, "previewed", plan.checked(),
+                plan.updates().size(), changedCount, impact, List.copyOf(changes));
+    }
+
+    private Map<DecisionKey, Long> loadAllowedDecisions(UUID tenantId, UUID ownerId, List<StoredLine> lines) {
+        Set<String> productKeys = new HashSet<>();
+        lines.forEach(line -> productKeys.add(ProductIdentityPolicy.productKey(line.name())));
+        Map<DecisionKey, Long> result = new HashMap<>();
+        if (productKeys.isEmpty()) return result;
+        jdbc.query("""
+                SELECT product_key, version FROM user_product_decisions
+                WHERE tenant_id = ? AND user_id = ? AND decision = 'allowed'
+                """, rs -> {
+            while (rs.next()) {
+                String key = rs.getString("product_key");
+                if (productKeys.contains(key)) result.put(new DecisionKey(ownerId, key), rs.getLong("version"));
             }
-            return new Preview(runId, ReceiptBasketPolicy.ALGORITHM_VERSION, "previewed", plan.checked(),
-                    plan.updates().size(), changedCount, List.copyOf(changes));
-        });
+            return null;
+        }, tenantId, ownerId);
+        return result;
+    }
+
+    private static ReceiptLine toReceiptLine(StoredLine line, String productKey, boolean allowed, Long decisionVersion) {
+        return new ReceiptLine(line.itemId().toString(), productKey, line.name(),
+                line.lineSum() == null ? null : line.lineSum().toPlainString(), line.verdict(), line.source(),
+                line.purchasedAt(), allowed, line.version(), decisionVersion == null ? 0 : decisionVersion);
+    }
+
+    private static ImpactWindow impactWindow(ZoneId zone) {
+        LocalDate to = LocalDate.now(zone);
+        LocalDate from = to.minusDays(89);
+        Instant start = from.atStartOfDay(zone).toInstant();
+        Instant end = to.plusDays(1).atStartOfDay(zone).toInstant();
+        return new ImpactWindow(from, to, to.plusDays(1).atStartOfDay(zone).toInstant(), start, end);
     }
 
     public ApplyResult apply(UUID tenantId, String subject, ApplyRequest request) {
@@ -103,19 +203,20 @@ public class ReceiptRecalculationService {
         return transaction.execute(status -> {
             Actor actor = actor(tenantId, subject);
             List<Run> runs = jdbc.query("""
-                    SELECT id, algorithm_version, state, update_count, changed_count
+                    SELECT id, algorithm_version, state, update_count, changed_count, impact_report::text AS impact_report
                     FROM recalculation_runs
                     WHERE tenant_id = ? AND owner_user_id = ? AND id = ?
                     FOR UPDATE
-                    """, (rs, row) -> new Run(rs.getObject("id", UUID.class), rs.getString("algorithm_version"),
-                    rs.getString("state"), rs.getInt("update_count"), rs.getInt("changed_count")),
+            """, (rs, row) -> new Run(rs.getObject("id", UUID.class), rs.getString("algorithm_version"),
+                    rs.getString("state"), rs.getInt("update_count"), rs.getInt("changed_count"),
+                    readImpact(rs.getString("impact_report"))),
                     tenantId, actor.userId(), request.runId());
             if (runs.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recalculation run not found");
             Run run = runs.get(0);
             List<Change> changes = loadChanges(tenantId, run.id());
             if ("applied".equals(run.state())) {
                 return new ApplyResult(run.id(), run.algorithmVersion(), run.state(), run.updateCount(),
-                        run.changedCount(), changes);
+                        run.changedCount(), run.impact(), changes);
             }
 
             List<CurrentChange> current = jdbc.query("""
@@ -187,7 +288,7 @@ public class ReceiptRecalculationService {
             jdbc.update("UPDATE recalculation_runs SET state = 'applied', applied_at = now() "
                     + "WHERE tenant_id = ? AND id = ? AND state = 'previewed'", tenantId, run.id());
             return new ApplyResult(run.id(), run.algorithmVersion(), "applied", run.updateCount(),
-                    run.changedCount(), changes);
+                    run.changedCount(), run.impact(), changes);
         });
     }
 
@@ -289,10 +390,23 @@ public class ReceiptRecalculationService {
         }
     }
 
+    private Impact readImpact(String value) {
+        if (value == null) return null;
+        try {
+            return json.readValue(value, Impact.class);
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Could not read receipt recalculation impact snapshot", exception);
+        }
+    }
+
     private record Actor(UUID userId, String role) {}
-    private record Run(UUID id, String algorithmVersion, String state, int updateCount, int changedCount) {}
+    private record Run(UUID id, String algorithmVersion, String state, int updateCount, int changedCount, Impact impact) {}
     private record StoredLine(UUID receiptId, UUID itemId, String name, BigDecimal lineSum, String verdict,
-                              String reason, String action, String source, long version) {}
+                              String reason, String action, String source, long version, Instant purchasedAt) {}
+    private record DecisionKey(UUID ownerId, String productKey) {}
+    private record ImpactWindow(LocalDate from, LocalDate to, Instant asOf, Instant start, Instant end) {}
+    private record PreparedPreview(Actor actor, ReceiptRecalculationPolicy.Plan plan, Map<UUID, StoredLine> storedById,
+                                   AdviceWasteApi.Request before, AdviceWasteApi.Request after, String currency) {}
     private record CurrentChange(UUID receiptId, UUID itemId, long expectedVersion, String lineSum, String name,
                                  String beforeVerdict, String beforeReason, String beforeAction, String beforeSource,
                                  String afterVerdict, String afterReason, String afterAction, String afterSource,

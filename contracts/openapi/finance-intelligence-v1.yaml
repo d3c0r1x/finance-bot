@@ -118,6 +118,26 @@ paths:
         '400': { description: Request is malformed or contains invalid receipt facts }
         '401': { description: Internal service token is missing or invalid }
         '413': { description: Request exceeds the supported body size }
+  /internal/v1/analytics/recalculation-impact:
+    post:
+      operationId: calculateReceiptRecalculationImpact
+      security:
+        - serviceBearer: []
+      description: Computes optional-spend before/after and delta from matching receipt facts with changed review verdicts only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecalculationImpactRequest' }
+      responses:
+        '200':
+          description: Exact optional-spend impact and stable input fingerprint
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecalculationImpact' }
+        '400': { description: Before and after windows differ or financial receipt facts changed }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the supported body size }
   /internal/v1/analytics/advice/evidence-groups:
     post:
       operationId: groupAdviceEvidence
@@ -607,6 +627,26 @@ components:
           maxItems: 50000
           items: { $ref: '#/components/schemas/WasteLine' }
       description: Core sends only confirmed expense receipt items in the authorized date and member scope; allowed is resolved against each receipt owner's current decision.
+    RecalculationImpactRequest:
+      type: object
+      additionalProperties: false
+      required: [before, after]
+      properties:
+        before: { $ref: '#/components/schemas/WasteRequest' }
+        after: { $ref: '#/components/schemas/WasteRequest' }
+    RecalculationImpact:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, inputVersion, reasonCode, completeness,
+                 optionalSpendBefore, optionalSpendAfter, optionalSpendDelta]
+      properties:
+        algorithmVersion: { type: string, const: receipt-recalculation-impact.v1 }
+        inputVersion: { type: string, pattern: '^[0-9a-f]{64}$' }
+        reasonCode: { type: string, enum: [available, no_reviewed_items, missing_amounts, analytics_unavailable] }
+        completeness: { type: string, enum: [complete, partial] }
+        optionalSpendBefore: { type: [string, 'null'], pattern: '^\\d+\\.\\d{2}$' }
+        optionalSpendAfter: { type: [string, 'null'], pattern: '^\\d+\\.\\d{2}$' }
+        optionalSpendDelta: { type: [string, 'null'], pattern: '^-?\\d+\\.\\d{2}$' }
     WasteLine:
       type: object
       additionalProperties: false

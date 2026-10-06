@@ -169,13 +169,20 @@ export type ReceiptRecalculationChange = {
   afterVerdict: string; afterReason: string | null; afterAction: string | null; afterSource: string;
   changed: boolean;
 };
+export type ReceiptRecalculationImpact = {
+  algorithmVersion: string; inputVersion: string;
+  reasonCode: 'available' | 'no_reviewed_items' | 'missing_amounts' | 'analytics_unavailable';
+  completeness: 'complete' | 'partial';
+  optionalSpendBefore: string | null; optionalSpendAfter: string | null; optionalSpendDelta: string | null;
+  currency: string | null;
+};
 export type ReceiptRecalculationPreview = {
   runId: string; algorithmVersion: string; state: 'previewed'; checked: number; updateCount: number;
-  changedCount: number; changes: ReceiptRecalculationChange[];
+  changedCount: number; impact: ReceiptRecalculationImpact; changes: ReceiptRecalculationChange[];
 };
 export type ReceiptRecalculationApplyResult = {
   runId: string; algorithmVersion: string; state: 'applied'; appliedCount: number;
-  changedCount: number; changes: ReceiptRecalculationChange[];
+  changedCount: number; impact: ReceiptRecalculationImpact | null; changes: ReceiptRecalculationChange[];
 };
 export type ProductCatalogCard = {
   productName: string; purchaseCount: number; usualUnitPrice: string; hasBaseline: boolean;

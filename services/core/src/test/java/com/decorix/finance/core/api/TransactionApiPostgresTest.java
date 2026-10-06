@@ -11,6 +11,11 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.argThat;
 
 import com.nimbusds.jose.JOSEObjectType;
 import com.nimbusds.jose.JWSAlgorithm;
@@ -63,6 +68,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionTemplate;
+import com.decorix.finance.core.api.AdviceRecalculationImpactApi.Impact;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=${FINANCE_TEST_JDBC_URL:jdbc:postgresql://localhost:5432/finance_test}",
@@ -133,6 +139,7 @@ class TransactionApiPostgresTest {
     @MockitoBean private ReceiptMalwareScanner receiptMalwareScanner;
     @MockitoBean private ReceiptOcrClient receiptOcrClient;
     @MockitoBean private ReceiptVisionClient receiptVisionClient;
+    @MockitoBean private AdviceRecalculationImpactClient recalculationImpactClient;
 
     private UUID tenantId;
     private String subject;
@@ -181,6 +188,9 @@ class TransactionApiPostgresTest {
 
     @BeforeEach
     void createTenantAndMembership() {
+        lenient().when(recalculationImpactClient.calculate(any())).thenReturn(new Impact(
+                "receipt-recalculation-impact.v1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "available", "complete", "0.00", "0.00", "0.00"));
         RECURRING_FIXTURE_ENABLED.set(false);
         LAST_WASTE_REQUEST.set("");
         WASTE_RESPONSE_STATUS.set(200);
@@ -1815,6 +1825,9 @@ class TransactionApiPostgresTest {
     @Test
     void recalculationPreviewIsExplicitAndDoesNotChangeReceiptOrTransactionAmounts() throws Exception {
         var auth = jwt().jwt(token -> token.subject(subject));
+        when(recalculationImpactClient.calculate(any())).thenReturn(new Impact(
+                "receipt-recalculation-impact.v1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "available", "complete", "123.45", "0.00", "-123.45"));
         UUID itemId = transactions.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
             UUID ownerId = userIdFor(subject);
@@ -1836,7 +1849,16 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.changes[0].beforeSource").value("model"))
                 .andExpect(jsonPath("$.changes[0].afterSource").value("rule"))
                 .andExpect(jsonPath("$.changes[0].lineSum").value("123.45"))
+                .andExpect(jsonPath("$.impact.optionalSpendBefore").value("123.45"))
+                .andExpect(jsonPath("$.impact.optionalSpendAfter").value("0.00"))
+                .andExpect(jsonPath("$.impact.optionalSpendDelta").value("-123.45"))
+                .andExpect(jsonPath("$.impact.currency").value("RUB"))
                 .andReturn();
+        verify(recalculationImpactClient).calculate(argThat(request -> request.before().items().size() == 1
+                && "unnecessary".equals(request.before().items().get(0).verdict())
+                && "neutral".equals(request.after().items().get(0).verdict())
+                && "model".equals(request.before().items().get(0).verdictSource())
+                && "rule".equals(request.after().items().get(0).verdictSource())));
         UUID runId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
                 previewResponse.getResponse().getContentAsString(), "$.runId"));
 
@@ -1860,12 +1882,14 @@ class TransactionApiPostgresTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.runId").value(runId.toString()))
                 .andExpect(jsonPath("$.state").value("applied"))
-                .andExpect(jsonPath("$.appliedCount").value(1));
+                .andExpect(jsonPath("$.appliedCount").value(1))
+                .andExpect(jsonPath("$.impact.optionalSpendDelta").value("-123.45"));
         mvc.perform(post("/api/v1/tenants/" + tenantId + "/review-recalculations/apply").with(auth)
                         .contentType("application/json").content("{\"runId\":\"" + runId + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("applied"))
-                .andExpect(jsonPath("$.appliedCount").value(1));
+                .andExpect(jsonPath("$.appliedCount").value(1))
+                .andExpect(jsonPath("$.impact.optionalSpendDelta").value("-123.45"));
 
         Map<String, Object> afterApply = transactions.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());

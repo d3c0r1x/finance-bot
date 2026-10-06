@@ -60,6 +60,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	recalculationImpact, err := advice.NewRecalculationImpactHandler(os.Getenv("FINANCE_ANALYTICS_SERVICE_TOKEN"))
+	if err != nil {
+		return err
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/internal/v1/prices/compare", priceHistory)
 	mux.Handle("/internal/v1/products/catalog", productCatalog)
@@ -68,6 +72,7 @@ func run() error {
 	mux.Handle("/internal/v1/analytics/recurring", recurringAnalytics)
 	mux.Handle("/internal/v1/analytics/waste", wasteAnalytics)
 	mux.Handle("/internal/v1/analytics/advice/evidence-groups", evidenceAnalytics)
+	mux.Handle("/internal/v1/analytics/recalculation-impact", recalculationImpact)
 	mux.HandleFunc("/healthz", healthHandler)
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

@@ -8,6 +8,11 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const preview = {
   runId: 'run-1', algorithmVersion: 'receipt-basket.v1', state: 'previewed', checked: 4,
   updateCount: 2, changedCount: 1,
+  impact: {
+    algorithmVersion: 'receipt-recalculation-impact.v1', inputVersion: 'a'.repeat(64),
+    reasonCode: 'available', completeness: 'complete', optionalSpendBefore: '125.00',
+    optionalSpendAfter: '0.00', optionalSpendDelta: '-125.00', currency: 'RUB',
+  },
   changes: [{
     itemId: 'item-1', name: 'Chips', lineSum: '125.00', itemVersion: 3,
     beforeVerdict: 'neutral', beforeReason: 'old reason', beforeAction: null, beforeSource: 'model',
@@ -54,6 +59,36 @@ describe('ReceiptRecalculationPanel', () => {
     mount(false);
     expect(screen.queryByRole('button', { name: 'Проверить старые разборы' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Применить пересчёт' })).not.toBeInTheDocument();
+  });
+
+  it('shows the Go-calculated optional-spend impact in the preview', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/bff/csrf') return json({ token: 'csrf' });
+      return json(preview);
+    }));
+    mount();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить старые разборы' }));
+
+    expect(await screen.findByText('Необязательные покупки: 125.00 RUB → 0.00 RUB')).toBeInTheDocument();
+    expect(screen.getByText('Изменение: -125.00 RUB')).toBeInTheDocument();
+  });
+
+  it('reports an unavailable impact without inventing a zero delta', async () => {
+    const unavailablePreview = { ...preview, impact: {
+      ...preview.impact, reasonCode: 'missing_amounts', completeness: 'partial',
+      optionalSpendBefore: null, optionalSpendAfter: null, optionalSpendDelta: null,
+    } };
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/bff/csrf') return json({ token: 'csrf' });
+      return json(unavailablePreview);
+    }));
+    mount();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить старые разборы' }));
+
+    expect(await screen.findByText('Дельта не рассчитана: в чеках не хватает сумм.')).toBeInTheDocument();
+    expect(screen.queryByText(/Изменение: .*0\.00/)).not.toBeInTheDocument();
   });
 
   it('drops an older preview when refreshing it fails', async () => {

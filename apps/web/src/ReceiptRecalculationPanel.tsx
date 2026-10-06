@@ -11,6 +11,8 @@ const labels = {
     changed: 'Изменено позиций', before: 'Старое', after: 'Новое', amount: 'Сумма позиции',
     unchangedTotals: 'Суммы чеков и операций не меняются.', previewed: 'Предварительный просмотр. Изменения ещё не сохранены.',
     applied: 'Пересчёт применён.', noChanges: 'Нет позиций для обновления.',
+    impact: 'Необязательные покупки', delta: 'Изменение', noReviewed: 'Дельта не рассчитана: нет проверенных позиций.',
+    missingAmounts: 'Дельта не рассчитана: в чеках не хватает сумм.', unavailable: 'Дельта не рассчитана: аналитический сервис недоступен.',
   },
   en: {
     title: 'Older receipt reviews', preview: 'Preview old reviews', apply: 'Apply recalculation',
@@ -18,6 +20,8 @@ const labels = {
     changed: 'Items changed', before: 'Before', after: 'After', amount: 'Line amount',
     unchangedTotals: 'Receipt and transaction totals stay unchanged.', previewed: 'Preview only. Changes are not saved yet.',
     applied: 'Recalculation applied.', noChanges: 'No items need an update.',
+    impact: 'Optional purchases', delta: 'Change', noReviewed: 'No delta: there are no reviewed items.',
+    missingAmounts: 'No delta: some receipt items have no amounts.', unavailable: 'No delta: analytics service is unavailable.',
   },
 } as const;
 
@@ -60,6 +64,15 @@ export function ReceiptRecalculationPanel({ tenantId, language, canWrite }: {
     {preview && <div aria-live="polite">
       <p>{t.previewed}</p>
       <p>{t.checked}: {preview.checked} · {t.updates}: {preview.updateCount} · {t.changed}: {preview.changedCount}</p>
+      {preview.impact.reasonCode === 'available'
+        && preview.impact.optionalSpendBefore !== null && preview.impact.optionalSpendAfter !== null
+        && preview.impact.optionalSpendDelta !== null
+        ? <div aria-label={t.impact}>
+          <p>{t.impact}: {preview.impact.optionalSpendBefore}{preview.impact.currency ? ` ${preview.impact.currency}` : ''} → {preview.impact.optionalSpendAfter}{preview.impact.currency ? ` ${preview.impact.currency}` : ''}</p>
+          <p>{t.delta}: {preview.impact.optionalSpendDelta}{preview.impact.currency ? ` ${preview.impact.currency}` : ''}</p>
+        </div>
+        : <p role="status">{preview.impact.reasonCode === 'missing_amounts' ? t.missingAmounts
+          : preview.impact.reasonCode === 'no_reviewed_items' ? t.noReviewed : t.unavailable}</p>}
       {preview.changes.length === 0 && <p>{t.noChanges}</p>}
       <ul>{preview.changes.map((change) => <li key={change.itemId}>
         <strong>{change.name}</strong> · {t.amount}: {change.lineSum ?? '—'}

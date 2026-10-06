@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 23:39, Europe/Moscow.
+Updated: 2026-10-07 00:00, Europe/Moscow.
 
 ## Global plan
 
@@ -58,21 +58,23 @@ Updated: 2026-10-06 23:39, Europe/Moscow.
 | F41.3b1 | Actor-scoped Telegram list and decision routes | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 7089a63 |
 | F41.3b2 | Telegram command, renderer and callbacks | COMPLETE — local and four GitHub workflows GREEN | F41.3b1 | 41ace8f |
 | F41.3c | Android list and human controls | COMMITTED — 50/50 instrumentation and APK launch; GitHub run not found | F41.2b | ccfcf6a |
-| F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — Core preview/apply and durable audit complete; client actions and batch history remain | F41 | pending |
+| F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — Core, Web and Go before/after impact complete locally; Telegram controls and batch/history remain | F41 | pending |
 | F42.1 | Deterministic preview policy for eligible receipt lines | COMPLETE — local Core regression passed | F42 | 6f80afc |
 | F42.2 | Persist preview, apply safely, audit and report changes through Core API | COMMITTED — local PostgreSQL/Core checks pass; contract pytest unavailable, GitHub run not found | F42.1 | d41888c |
 | F42.3 | Web preview and explicit apply flow for receipt verdict recalculation | COMMITTED — Web 57/57 and production build pass; GitHub run not found | F42.2 | 81267de |
+| F42.4 | Calculate optional-spend impact in Go; persist exact report in Core preview; display it in Web | LOCAL GREEN — Go, Core 243/0/2 skipped, Web 59/59, contract 46/46; commit and remote CI pending | F42.3 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F42.3 — let Web users safely preview and explicitly apply recalculation in the receipts area.
-- Status: COMMITTED — `81267de` pushed. Observed RED for missing component and stale preview surviving refresh failure; focused 3/3 and full Web 57/57 pass, production build passes. GitHub run not found.
-- Acceptance: writer can request preview, compare old/new verdict and reason, then explicitly apply; viewer sees no controls; UI states receipt/transaction totals remain unchanged; reports refresh after apply.
-- Changed files: `ReceiptRecalculationPanel.tsx`, focused tests, API types/client, receipts integration, parity and this progress log.
+- ID and outcome: F42.4 — calculate and persist the before/after optional-spend impact in Go/Core, then show it with profile currency in Web.
+- Status: LOCAL GREEN — RED reproduced for missing Core client and missing Web impact presentation. Full Go tests/vet, Core check (243 tests, 0 failures, 2 skipped), Web (59/59 + typecheck + Vite build), contracts (46/46), and `git diff --check` pass. Not yet committed or checked in GitHub Actions.
+- Acceptance: Core sends same-window/same-fact before/after batches to authenticated Go; Go calculates exact optional-spend delta; Core stores the report in V36 snapshot and returns it on repeated apply; Web shows amounts/currency/delta or a reason without inventing zero; receipt and transaction amounts stay unchanged.
+- Changed files: Go impact algorithm/route/tests, Core client/service/API/V36 migration/PostgreSQL test, RU/EN Web display/tests/types, both OpenAPI contracts, parity and this progress log.
 - User choices: maintain F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, no placeholder financial data. Personal MVP takes priority; V2 remains deferred.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `81267de`; unrelated user-owned untracked files remain.
-- Updated at: 2026-10-06 23:39 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, base HEAD `81267de`; F42.4 changes are not committed; unrelated user-owned untracked files remain untouched.
+- Runtime: M2/MVP still BLOCKED; no durable backend/public HTTPS. This F42 work has not restarted or deployed a server.
+- Updated at: 2026-10-07 00:00 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -185,7 +187,7 @@ Updated: 2026-10-06 23:39, Europe/Moscow.
 
 ## Next action
 
-- Stage only F42.2-owned files, inspect staged diff, commit and push; then implement F42 user-facing recalculation controls and batch/change-history parity.
+- Stage only F42.4-owned files, inspect staged diff, commit and push; check GitHub Actions. Then implement Telegram controls and remaining F42 batch/change-history parity.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
@@ -1218,3 +1220,13 @@ Updated: 2026-10-06 23:39, Europe/Moscow.
 - GREEN: focused Vitest 3/3; full `pnpm --dir apps/web test` 57/57; `pnpm --dir apps/web build` passed (`tsc -b` and Vite production build).
 - F42.3 `81267de` and F42.2 `d41888c` are pushed; GitHub has no run for `81267de`. M2 runtime remains BLOCKED; no server restart or deployment is possible because no persistent Core runtime exists.
 - Next: implement Telegram controls and remaining F42 batch/history behavior. Preserve unrelated untracked files.
+
+## E4.64 F42.4 Go-calculated impact — 2026-10-07 00:00 MSK
+
+- Observed RED: Go tests failed to compile because the before/after impact builder and authenticated handler were absent. Core client tests failed to compile because `AdviceRecalculationImpactClient` was absent. Web tests failed to find both the available delta and the explicit missing-data state.
+- Go now calls the existing exact optional-spend report algorithm for matched before/after windows, rejects changes to financial receipt facts, hashes both inputs, and exposes an authenticated internal route. Tests cover exact delta, incomplete amounts, changed facts, auth and successful route.
+- Core sends only the requesting member's recent 90-day receipt facts, calls Go outside its DB transaction, validates the response, attaches profile currency, and saves the report with V36 JSONB. Preview and Apply (including idempotent retry) return the stored report. Existing versions remain nullable for old runs.
+- Web shows before/after spend, signed delta and profile currency; when Go cannot calculate it, Web shows the reason and does not fabricate zero. Apply remains a separate explicit action.
+- GREEN: full Go `test ./...` and `vet ./...`; `:services:core:check` with PostgreSQL (243 tests, 0 failures, 2 skipped); all Web tests 59/59, `tsc --noEmit`, Vite production build; `tools/contracts/test_contracts.py` 46/46; `git diff --check`.
+- No remote CI run is available yet; F42.4 is not committed. M2 runtime stays BLOCKED; no persistent server or public HTTPS deploy was attempted.
+- Next: stage only F42.4 files, review the staged diff, commit/push, inspect CI; then continue Telegram and batch/history work.

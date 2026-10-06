@@ -4717,7 +4717,7 @@ components:
     ReceiptRecalculationPreview:
       type: object
       additionalProperties: false
-      required: [runId, algorithmVersion, state, checked, updateCount, changedCount, changes]
+      required: [runId, algorithmVersion, state, checked, updateCount, changedCount, impact, changes]
       properties:
         runId: { type: string, format: uuid }
         algorithmVersion: { type: string, const: receipt-basket.v1 }
@@ -4725,6 +4725,7 @@ components:
         checked: { type: integer, minimum: 0, maximum: 50000 }
         updateCount: { type: integer, minimum: 0, maximum: 50000 }
         changedCount: { type: integer, minimum: 0, maximum: 50000 }
+        impact: { $ref: '#/components/schemas/ReceiptRecalculationImpact' }
         changes:
           type: array
           maxItems: 50000
@@ -4738,13 +4739,17 @@ components:
     ReceiptRecalculationApplyResult:
       type: object
       additionalProperties: false
-      required: [runId, algorithmVersion, state, appliedCount, changedCount, changes]
+      required: [runId, algorithmVersion, state, appliedCount, changedCount, impact, changes]
       properties:
         runId: { type: string, format: uuid }
         algorithmVersion: { type: string, const: receipt-basket.v1 }
         state: { type: string, const: applied }
         appliedCount: { type: integer, minimum: 0, maximum: 50000 }
         changedCount: { type: integer, minimum: 0, maximum: 50000 }
+        impact:
+          anyOf:
+            - { $ref: '#/components/schemas/ReceiptRecalculationImpact' }
+            - { type: 'null' }
         changes:
           type: array
           maxItems: 50000
@@ -4768,6 +4773,20 @@ components:
         afterAction: { type: [string, 'null'], maxLength: 500 }
         afterSource: { type: string, const: rule }
         changed: { type: boolean }
+    ReceiptRecalculationImpact:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, inputVersion, reasonCode, completeness,
+                 optionalSpendBefore, optionalSpendAfter, optionalSpendDelta, currency]
+      properties:
+        algorithmVersion: { type: string, const: receipt-recalculation-impact.v1 }
+        inputVersion: { type: string, pattern: '^[0-9a-f]{64}$' }
+        reasonCode: { type: string, enum: [available, no_reviewed_items, missing_amounts, analytics_unavailable] }
+        completeness: { type: string, enum: [complete, partial] }
+        optionalSpendBefore: { type: [string, 'null'], pattern: '^\\d+\\.\\d{2}$' }
+        optionalSpendAfter: { type: [string, 'null'], pattern: '^\\d+\\.\\d{2}$' }
+        optionalSpendDelta: { type: [string, 'null'], pattern: '^-?\\d+\\.\\d{2}$' }
+        currency: { type: [string, 'null'], pattern: '^[A-Z]{3}$' }
     BankImportConfirm:
       type: object
       additionalProperties: false
