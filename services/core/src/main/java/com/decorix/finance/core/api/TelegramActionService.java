@@ -28,6 +28,7 @@ import com.decorix.finance.core.api.BudgetApi.BudgetProposalResponse;
 import com.decorix.finance.core.api.ProductApi.ProductCatalogResponse;
 import com.decorix.finance.core.api.ProductApi.ShoppingList;
 import com.decorix.finance.core.api.ProductApi.ProductDecisionSelection;
+import com.decorix.finance.core.api.ProductApi.ProductDecisionKeys;
 import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import java.util.List;
@@ -117,6 +118,12 @@ public class TelegramActionService {
         if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Do-not-buy request is required");
         ActorContext actor = transaction.execute(status -> actorContexts.require(request.token(), "receipt.read"));
         return evidence.get(actor.tenantId(), actor.userId());
+    }
+
+    public ProductDecisionKeys doNotBuyDecisions(ResolveRequest request) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Do-not-buy request is required");
+        ActorContext actor = transaction.execute(status -> actorContexts.require(request.token(), "receipt.read"));
+        return receipts.allowedProducts(actor.tenantId(), actor.keycloakSubject());
     }
 
     public AdviceEvidenceApi.Report decideDoNotBuy(ResolveRequest request, String productKey, String action) {

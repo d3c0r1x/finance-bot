@@ -9,8 +9,39 @@ from services.python.presentation.report_renderer import (
     render_recurring_projection,
     render_report,
     render_report_png,
+    render_do_not_buy,
+    render_shopping_candidates,
     report_text,
 )
+
+
+def test_do_not_buy_renderer_separates_rules_from_guesses_and_unknown_amount():
+    group = {"productKey": "tea", "productName": "Чай", "count": 2, "amount": None,
+             "missingAmountCount": 2, "ruleCount": 0, "modelCount": 2, "unmarkedCount": 0,
+             "modelOnly": True, "latestVerdict": "unnecessary", "latestAdvice": "Проверьте привычку",
+             "lastPurchasedAt": "2026-10-06T10:00:00Z"}
+    report = {"available": True, "reasonCode": "available", "algorithmVersion": "advice-evidence.v1",
+              "inputVersion": "0" * 64, "banned": [{**group, "productKey": "chips", "productName": "Чипсы",
+                                                    "modelOnly": False, "ruleCount": 2, "modelCount": 0}],
+              "guesses": [group]}
+    text = render_do_not_buy(report)
+    assert "Чипсы" in text and "основано на проверке чеков" in text
+    assert "Догадки модели" in text and "Чай" in text
+    assert "сумма неизвестна" in text and "не блокирует покупки" in text
+    assert "Проверьте привычку" in text
+    with_decisions = render_do_not_buy(report, {"productKeys": ["milk"], "confirmedProductKeys": ["chips"]})
+    assert "Чипсы — подтверждено вами" in with_decisions
+    assert "Вы разрешили покупать:" in with_decisions and "milk" in with_decisions
+
+
+def test_shopping_renderer_distinguishes_rule_and_human_blocks():
+    blocked = [{"productKey": "chips", "productName": "Чипсы", "reasonCode": "rule_backed_not_to_buy"},
+               {"productKey": "tea", "productName": "Чай", "reasonCode": "confirmed_not_to_buy"}]
+    text = render_shopping_candidates({"inventoryTracked": False, "candidates": [],
+                                       "estimatedListCost": "0.00", "boughtCandidates": [],
+                                       "mutedCandidates": [], "blockedCandidates": blocked})
+    assert "Чипсы — основано на проверке чеков" in text
+    assert "Чай — вы отметили" in text
 
 
 REPORT = {

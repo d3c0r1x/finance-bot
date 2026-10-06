@@ -94,6 +94,14 @@ public class TelegramActionController {
         return actions.doNotBuy(request);
     }
 
+    @PostMapping("/actions/do-not-buy/decisions")
+    ProductApi.ProductDecisionKeys doNotBuyDecisions(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.doNotBuyDecisions(request);
+    }
+
     @PostMapping("/actions/do-not-buy/{productKey}/{action}")
     AdviceEvidenceApi.Report decideDoNotBuy(
             @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,

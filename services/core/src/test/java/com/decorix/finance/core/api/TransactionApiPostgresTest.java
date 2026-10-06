@@ -4678,6 +4678,10 @@ class TransactionApiPostgresTest {
                         .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
                         .contentType("application/json").content(body))
                 .andExpect(status().isOk());
+        mvc.perform(post(route + "/decisions")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.confirmedProductKeys[0]").value("coffee"));
         mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions")
                         .with(jwt().jwt(jwt -> jwt.subject(subject))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.confirmedProductKeys[0]").value("coffee"));

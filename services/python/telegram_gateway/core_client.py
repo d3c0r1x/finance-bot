@@ -345,6 +345,32 @@ class TelegramCoreClient:
         body = await self._post_json("shopping", {"token": actor_context_token}, expected_status=200)
         return self._validated_shopping_candidates(body)
 
+    async def get_do_not_buy(self, actor_context_token: str) -> dict:
+        body = await self._post_json("actions/do-not-buy", {"token": actor_context_token}, expected_status=200)
+        return self._validated_do_not_buy(body)
+
+    async def get_do_not_buy_decisions(self, actor_context_token: str) -> dict:
+        body = await self._post_json("actions/do-not-buy/decisions", {"token": actor_context_token},
+                                     expected_status=200)
+        if not isinstance(body, dict) or not isinstance(body.get("productKeys"), list) \
+                or not isinstance(body.get("confirmedProductKeys"), list):
+            raise TelegramCoreError("unavailable")
+        keys = body["productKeys"] + body["confirmedProductKeys"]
+        if len(keys) != len(set(keys)) or len(keys) > 50000 \
+                or any(not isinstance(key, str) or not _PRODUCT_KEY.fullmatch(key) for key in keys):
+            raise TelegramCoreError("unavailable")
+        return body
+
+    async def decide_do_not_buy(self, actor_context_token: str, product_key: str, action: str) -> dict:
+        if not isinstance(actor_context_token, str) or not actor_context_token \
+                or not isinstance(product_key, str) or not _PRODUCT_KEY.fullmatch(product_key) \
+                or action not in {"confirm", "allow", "revoke"}:
+            raise TelegramCoreError("unavailable")
+        body = await self._post_json(
+            f"actions/do-not-buy/{quote(product_key, safe='')}/{action}",
+            {"token": actor_context_token}, expected_status=200)
+        return self._validated_do_not_buy(body)
+
     async def get_personal_inflation(self, actor_context_token: str) -> dict:
         if not isinstance(actor_context_token, str) or not actor_context_token:
             raise TelegramCoreError("unavailable")
@@ -535,7 +561,7 @@ class TelegramCoreClient:
             key = candidate.get("productKey")
             if not isinstance(name, str) or not name.strip() or len(name) > 200 \
                     or not isinstance(key, str) or not _PRODUCT_KEY.fullmatch(key) or key in keys \
-                    or candidate.get("reasonCode") != "confirmed_not_to_buy":
+                    or candidate.get("reasonCode") not in {"confirmed_not_to_buy", "rule_backed_not_to_buy"}:
                 raise TelegramCoreError("unavailable")
             keys.add(key)
             normalized_blocked.append(candidate)
@@ -544,6 +570,49 @@ class TelegramCoreClient:
         return {"candidates": normalized, "estimatedListCost": total_raw, "inventoryTracked": False,
                 "boughtCandidates": normalized_bought, "mutedCandidates": normalized_muted,
                 "blockedCandidates": normalized_blocked}
+
+    @staticmethod
+    def _validated_do_not_buy(body: object) -> dict:
+        if not isinstance(body, dict) or type(body.get("available")) is not bool \
+                or body.get("reasonCode") not in {"available", "no_optional_items", "too_many_items",
+                                                  "analytics_unavailable"} \
+                or not isinstance(body.get("banned"), list) or not isinstance(body.get("guesses"), list) \
+                or len(body["banned"]) + len(body["guesses"]) > 50000:
+            raise TelegramCoreError("unavailable")
+        available, reason = body["available"], body["reasonCode"]
+        version, input_version = body.get("algorithmVersion"), body.get("inputVersion")
+        if available != (reason in {"available", "no_optional_items"}) \
+                or (available and version != "advice-evidence.v1") \
+                or (not available and (version is not None or input_version is not None or body["banned"] or body["guesses"])) \
+                or (reason == "no_optional_items" and (input_version is not None or body["banned"] or body["guesses"])) \
+                or (reason == "available" and (not isinstance(input_version, str)
+                       or not re.fullmatch(r"[0-9a-f]{64}", input_version))):
+            raise TelegramCoreError("unavailable")
+        keys = set()
+        for section in ("banned", "guesses"):
+            for group in body[section]:
+                if not isinstance(group, dict):
+                    raise TelegramCoreError("unavailable")
+                key, name = group.get("productKey"), group.get("productName")
+                count, missing = group.get("count"), group.get("missingAmountCount")
+                rule, model, unmarked = (group.get(field) for field in ("ruleCount", "modelCount", "unmarkedCount"))
+                if not isinstance(key, str) or not _PRODUCT_KEY.fullmatch(key) or key in keys \
+                        or not isinstance(name, str) or not name.strip() or len(name) > 200 \
+                        or type(count) is not int or count < 2 \
+                        or any(type(value) is not int or value < 0 for value in (missing, rule, model, unmarked)) \
+                        or missing > count or rule + model + unmarked != count \
+                        or type(group.get("modelOnly")) is not bool \
+                        or group["modelOnly"] != (model == count) \
+                        or section == "guesses" and not group["modelOnly"] \
+                        or group.get("latestVerdict") not in {"harmful", "unnecessary"} \
+                        or not isinstance(group.get("latestAdvice"), str) or len(group["latestAdvice"]) > 500:
+                    raise TelegramCoreError("unavailable")
+                amount = group.get("amount")
+                if amount is not None:
+                    TelegramCoreClient._validated_product_decimal(amount, "amount", _PRODUCT_TOTAL, positive=False)
+                TelegramCoreClient._validated_product_datetime(group.get("lastPurchasedAt"), "lastPurchasedAt")
+                keys.add(key)
+        return body
 
     @staticmethod
     def _validated_personal_inflation(body: object) -> dict:

@@ -461,6 +461,10 @@ def test_do_not_buy_contract_separates_model_guesses_from_shopping_blocks():
 
 def test_telegram_do_not_buy_actions_require_actor_and_service_credentials():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    decisions = spec["paths"]["/internal/v1/telegram/actions/do-not-buy/decisions"]["post"]
+    assert decisions["security"] == [{"telegramServiceToken": []}]
+    assert decisions["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "ProductDecisionKeys")
     for path in ("/internal/v1/telegram/actions/do-not-buy",
                  "/internal/v1/telegram/actions/do-not-buy/{productKey}/{action}"):
         operation = spec["paths"][path]["post"]

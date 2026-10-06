@@ -530,6 +530,9 @@ def test_shopping_validation_requires_member_decision_sections_and_explained_blo
              "boughtCandidates": [], "mutedCandidates": [], "blockedCandidates": [
                  {"productKey": "freshmilk", "productName": "Milk Fresh 1l", "reasonCode": "confirmed_not_to_buy"}]}
     assert TelegramCoreClient._validated_shopping_candidates(valid)["blockedCandidates"] == valid["blockedCandidates"]
+    rule = {**valid, "blockedCandidates": [{**valid["blockedCandidates"][0],
+                                            "reasonCode": "rule_backed_not_to_buy"}]}
+    assert TelegramCoreClient._validated_shopping_candidates(rule)["blockedCandidates"] == rule["blockedCandidates"]
     invalid = {**valid, "blockedCandidates": [{**valid["blockedCandidates"][0], "reasonCode": "unknown"}]}
     try:
         TelegramCoreClient._validated_shopping_candidates(invalid)
@@ -537,6 +540,51 @@ def test_shopping_validation_requires_member_decision_sections_and_explained_blo
         assert error.code == "unavailable"
     else:
         raise AssertionError("an unexplained shopping block was accepted")
+
+
+def test_do_not_buy_actions_use_actor_token_and_validate_evidence():
+    seen = []
+    report = {"available": True, "reasonCode": "available", "algorithmVersion": "advice-evidence.v1",
+              "inputVersion": "0" * 64, "banned": [], "guesses": []}
+
+    async def action(request):
+        seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
+        return web.json_response(report)
+
+    async def exercise():
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/actions/do-not-buy", action)
+        app.router.add_post("/internal/v1/telegram/actions/do-not-buy/tea/{action}", action)
+        async def decisions(request):
+            seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
+            return web.json_response({"productKeys": ["tea"], "confirmedProductKeys": []})
+        app.router.add_post("/internal/v1/telegram/actions/do-not-buy/decisions", decisions)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "telegram-service-secret")
+            return [await client.get_do_not_buy("opaque-context"),
+                    await client.decide_do_not_buy("opaque-context", "tea", "confirm"),
+                    await client.decide_do_not_buy("opaque-context", "tea", "allow"),
+                    await client.decide_do_not_buy("opaque-context", "tea", "revoke"),
+                    await client.get_do_not_buy_decisions("opaque-context")]
+
+    assert asyncio.run(exercise()) == [report] * 4 + [{"productKeys": ["tea"], "confirmedProductKeys": []}]
+    assert seen == [(path, "telegram-service-secret", {"token": "opaque-context"}) for path in (
+        "/internal/v1/telegram/actions/do-not-buy",
+        "/internal/v1/telegram/actions/do-not-buy/tea/confirm",
+        "/internal/v1/telegram/actions/do-not-buy/tea/allow",
+        "/internal/v1/telegram/actions/do-not-buy/tea/revoke",
+        "/internal/v1/telegram/actions/do-not-buy/decisions")]
+
+
+def test_do_not_buy_validation_rejects_mixed_guess_and_block():
+    group = {"productKey": "tea", "productName": "Tea", "count": 2, "amount": None,
+             "missingAmountCount": 2, "ruleCount": 0, "modelCount": 2, "unmarkedCount": 0,
+             "modelOnly": True, "latestVerdict": "unnecessary", "latestAdvice": "",
+             "lastPurchasedAt": "2026-10-06T10:00:00Z"}
+    report = {"available": True, "reasonCode": "available", "algorithmVersion": "advice-evidence.v1",
+              "inputVersion": "0" * 64, "banned": [group], "guesses": [group]}
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_do_not_buy(report)
 
 
 def test_core_client_rejects_fabricated_product_baseline_without_history():

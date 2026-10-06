@@ -43,6 +43,7 @@ from services.python.presentation.report_renderer import (
     render_recurring_projection,
     render_product_catalog,
     render_report,
+    render_do_not_buy,
     render_shopping_candidates,
 )
 
@@ -150,7 +151,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     async def help_command(message: Message) -> None:
         await message.answer(
             "Команды: /start, /menu, /help, /link <код>, /add <описание операции>, /history, /debts, "
-            "/price [название товара], /shopping, /inflation, /budget [set <family|personal> <category|total|food_week> <amount>|reset|propose|suggest <income>], "
+            "/price [название товара], /shopping, /nobuy, /inflation, /budget [set <family|personal> <category|total|food_week> <amount>|reset|propose|suggest <income>], "
             "/report. /budget propose строит предложение по истории, /budget suggest <income> — по доходу. "
             "Для финансов сначала привяжите аккаунт и выберите пространство.",
             reply_markup=MAIN_MENU,
@@ -314,6 +315,85 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             },
         })
         await message.answer(text, reply_markup=_shopping_keyboard(shopping, revision), parse_mode=None)
+
+    async def show_do_not_buy(message: Message, state: FSMContext) -> None:
+        if message.chat.type != "private":
+            await message.answer("Список «Не брать» доступен только в личном чате.", reply_markup=MAIN_MENU)
+            return
+        actor = (await state.get_data()).get("telegram_actor_context")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await message.answer("Сначала выберите пространство командой /menu.", reply_markup=MAIN_MENU)
+            return
+        try:
+            report = await core.get_do_not_buy(actor["token"])
+            decisions = await core.get_do_not_buy_decisions(actor["token"])
+            text = render_do_not_buy(report, decisions)
+        except TelegramCoreError as error:
+            if error.code == "unauthorized":
+                await state.clear()
+            await message.answer({"unauthorized": "Сессия истекла. Выберите пространство командой /menu.",
+                                  "forbidden": "У вашей роли нет доступа к чекам."}.get(
+                error.code, "Список «Не брать» временно недоступен. Попробуйте позже."), reply_markup=MAIN_MENU)
+            return
+        except (TypeError, ValueError, KeyError):
+            await message.answer("Список «Не брать» получен в неверном формате. Попробуйте позже.",
+                                 reply_markup=MAIN_MENU)
+            return
+        revision = secrets.token_urlsafe(6)
+        can_write = actor.get("role") != "viewer"
+        await state.update_data(telegram_nobuy_decision=_nobuy_selection(report, decisions, actor, revision, can_write))
+        await message.answer(text, reply_markup=_nobuy_keyboard(report, decisions, revision, can_write),
+                             parse_mode=None)
+
+    async def decide_do_not_buy(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = (callback.data or "").split(":")
+        if len(parts) != 4 or parts[0] != "nobuy" or parts[2] not in {"confirm", "allow", "revoke"}:
+            await callback.answer("Действие устарело. Откройте /nobuy снова.", show_alert=True)
+            return
+        if callback.message is None or callback.message.chat.type != "private" or callback.from_user is None:
+            await callback.answer("Действие доступно только в личном чате.", show_alert=True)
+            return
+        data = await state.get_data()
+        actor, selection = data.get("telegram_actor_context"), data.get("telegram_nobuy_decision")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            return
+        if actor.get("role") == "viewer":
+            await callback.answer("У вашей роли нет права изменять список.", show_alert=True)
+            return
+        if not isinstance(selection, dict) or selection.get("revision") != parts[1] \
+                or selection.get("tenantId") != actor.get("tenantId"):
+            await callback.answer("Список обновился. Откройте /nobuy снова.", show_alert=True)
+            return
+        try:
+            index = int(parts[3])
+            keys = selection["products"][parts[2]]
+            key = keys[index] if 0 <= index < len(keys) else None
+        except (KeyError, TypeError, ValueError, IndexError):
+            key = None
+        if not isinstance(key, str):
+            await callback.answer("Товар устарел. Откройте /nobuy снова.", show_alert=True)
+            return
+        try:
+            report = await core.decide_do_not_buy(actor["token"], key, parts[2])
+            decisions = await core.get_do_not_buy_decisions(actor["token"])
+            text = render_do_not_buy(report, decisions)
+        except TelegramCoreError as error:
+            if error.code == "unauthorized":
+                await state.clear()
+                await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            else:
+                await callback.answer("Не удалось сохранить решение. Откройте /nobuy позже.", show_alert=True)
+            return
+        except (TypeError, ValueError, KeyError):
+            await callback.answer("Список «Не брать» получен в неверном формате.", show_alert=True)
+            return
+        revision = secrets.token_urlsafe(6)
+        await state.update_data(telegram_nobuy_decision=_nobuy_selection(report, decisions, actor, revision, True))
+        await callback.message.edit_text(text, reply_markup=_nobuy_keyboard(report, decisions, revision, True),
+                                         parse_mode=None)
+        await callback.answer({"confirm": "«Не брать» подтверждено", "allow": "Покупка разрешена",
+                               "revoke": "Решение отменено"}[parts[2]])
 
     async def show_personal_inflation(message: Message, state: FSMContext) -> None:
         if message.chat.type != "private":
@@ -1043,6 +1123,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(show_report, Command("report"))
     router.message.register(show_product_catalog, Command("price"))
     router.message.register(show_shopping, Command("shopping"))
+    router.message.register(show_do_not_buy, Command("nobuy"))
     router.message.register(show_personal_inflation, Command("inflation"))
     router.message.register(show_recurring, Command("recurring"))
     router.message.register(show_debts, Command("debts"))
@@ -1054,6 +1135,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(receive_transaction_draft_edit, F.text)
     router.callback_query.register(decide_transaction_draft, F.data.startswith("draft:"))
     router.callback_query.register(decide_shopping, F.data.startswith("shopping:"))
+    router.callback_query.register(decide_do_not_buy, F.data.startswith("nobuy:"))
     router.callback_query.register(decide_recurring, F.data.startswith("recurring:"))
     router.callback_query.register(decide_transaction_history, F.data.startswith("history:"))
     router.callback_query.register(decide_budget_proposal, F.data.startswith("budget_proposal:"))
@@ -1415,6 +1497,35 @@ def _shopping_keyboard(shopping: dict, revision: str) -> InlineKeyboardMarkup | 
             raise ValueError("Muted shopping candidate has no product key")
         buttons.append([InlineKeyboardButton(text=f"Вернуть · {candidate['productName'][:32]}",
                                              callback_data=f"shopping:{revision}:unmute:{index}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+
+def _nobuy_selection(report: dict, decisions: dict, actor: dict, revision: str, can_write: bool) -> dict:
+    products = {"confirm": [], "allow": [], "revoke": []}
+    if can_write and report["available"]:
+        guesses = [item["productKey"] for item in report["guesses"][:4]]
+        banned = [item["productKey"] for item in report["banned"][:4]]
+        confirmed = set(decisions["confirmedProductKeys"])
+        products["confirm"] = [key for key in guesses if key not in confirmed]
+        products["allow"] = banned + guesses
+        products["revoke"] = [key for key in banned + guesses if key in confirmed]
+        products["revoke"].extend(key for key in decisions["productKeys"][:4]
+                                  if key not in products["revoke"])
+    return {"revision": revision, "tenantId": actor["tenantId"], "products": products}
+
+
+def _nobuy_keyboard(report: dict, decisions: dict, revision: str, can_write: bool) -> InlineKeyboardMarkup | None:
+    if not can_write or not report["available"]:
+        return None
+    selection = _nobuy_selection(report, decisions, {"tenantId": ""}, revision, True)["products"]
+    labels = {"confirm": "Подтвердить «не брать»", "allow": "Можно брать", "revoke": "Отменить решение"}
+    buttons = []
+    for action in ("confirm", "allow", "revoke"):
+        for index, key in enumerate(selection[action]):
+            name = next((item["productName"] for item in report["banned"][:4] + report["guesses"][:4]
+                         if item["productKey"] == key), key)
+            buttons.append([InlineKeyboardButton(text=f"{labels[action]} · {name[:24]}",
+                                                callback_data=f"nobuy:{revision}:{action}:{index}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
 
 

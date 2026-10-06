@@ -704,14 +704,66 @@ def render_shopping_candidates(shopping: Mapping[str, object]) -> str:
                     or not candidate["productName"].strip() or len(candidate["productName"]) > 200 \
                     or not isinstance(candidate.get("productKey"), str) \
                     or not re.fullmatch(r"[a-zа-я0-9]{1,256}", candidate["productKey"]) \
-                    or candidate.get("reasonCode") != "confirmed_not_to_buy":
+                    or candidate.get("reasonCode") not in {"confirmed_not_to_buy", "rule_backed_not_to_buy"}:
                 raise ValueError("Blocked shopping candidate is invalid")
             key = candidate["productKey"]
             if key in seen_keys:
                 raise ValueError("Shopping product keys must be unique")
             seen_keys.add(key)
-            lines.append(f"• {candidate['productName']} — вы отметили «не брать».")
+            reason = ("вы отметили «не брать»" if candidate["reasonCode"] == "confirmed_not_to_buy"
+                      else "основано на проверке чеков")
+            lines.append(f"• {candidate['productName']} — {reason}.")
     lines.append("Это подсказка по чекам, не учёт запасов: бот не знает, что уже есть дома.")
+    return "\n".join(lines)
+
+
+def render_do_not_buy(report: Mapping[str, object], decisions: Mapping[str, object] | None = None) -> str:
+    if not isinstance(report, Mapping) or type(report.get("available")) is not bool \
+            or not isinstance(report.get("banned"), list) or not isinstance(report.get("guesses"), list):
+        raise ValueError("Do-not-buy report is invalid")
+    if not report["available"]:
+        return "🚫 Не брать\nСоветы по чекам временно недоступны. Попробуйте /nobuy позже."
+    banned, guesses = report["banned"], report["guesses"]
+    confirmed = set(decisions.get("confirmedProductKeys", [])) if isinstance(decisions, Mapping) else set()
+    allowed = decisions.get("productKeys", []) if isinstance(decisions, Mapping) else []
+    if not isinstance(allowed, list) or not all(isinstance(key, str) for key in allowed):
+        raise ValueError("Do-not-buy decisions are invalid")
+    lines = ["🚫 Не брать"]
+    if not banned and not guesses and not allowed:
+        lines.append("Повторяющихся отметок «вредно» или «лишнее» пока нет.")
+        return "\n".join(lines)
+
+    def append_group(group: object, *, guess: bool) -> None:
+        if not isinstance(group, Mapping) or not isinstance(group.get("productName"), str) \
+                or type(group.get("count")) is not int:
+            raise ValueError("Do-not-buy group is invalid")
+        amount = group.get("amount")
+        cost = "сумма неизвестна" if amount is None else f"{_format_rub(_money(amount, 'amount'))} ₽"
+        source = ("подтверждено вами" if group.get("productKey") in confirmed else
+                  "догадка модели" if guess else "основано на проверке чеков")
+        name = group["productName"][:100] + ("…" if len(group["productName"]) > 100 else "")
+        lines.append(f"• {name} — {source}; {group['count']} отметки; {cost}.")
+        advice = group.get("latestAdvice")
+        if isinstance(advice, str) and advice.strip():
+            lines.append(f"  {advice.strip()[:100]}")
+
+    if banned:
+        lines.extend(("", "По правилам или вашему решению:"))
+        for group in banned[:4]:
+            append_group(group, guess=False)
+        if len(banned) > 4:
+            lines.append(f"Ещё {len(banned) - 4} товаров не показаны в сообщении.")
+    if guesses:
+        lines.extend(("", "Догадки модели — не блокирует покупки, пока вы не подтвердите:"))
+        for group in guesses[:4]:
+            append_group(group, guess=True)
+        if len(guesses) > 4:
+            lines.append(f"Ещё {len(guesses) - 4} догадок не показаны в сообщении.")
+    if allowed:
+        lines.extend(("", "Вы разрешили покупать:"))
+        lines.extend(f"• {key[:64]}{'…' if len(key) > 64 else ''}" for key in allowed[:4])
+        if len(allowed) > 4:
+            lines.append(f"Ещё {len(allowed) - 4} решений не показаны в сообщении.")
     return "\n".join(lines)
 
 

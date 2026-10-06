@@ -714,6 +714,92 @@ def test_shopping_command_uses_linked_actor_and_explains_it_is_not_inventory(mon
     assert any("Уже купил" in button.text for row in sent[0].reply_markup.inline_keyboard for button in row)
 
 
+def test_do_not_buy_command_separates_guesses_and_callback_uses_saved_key(monkeypatch):
+    sent, calls = [], []
+    group = {"productKey": "tea", "productName": "Чай", "count": 2, "amount": "20.00",
+             "missingAmountCount": 0, "ruleCount": 0, "modelCount": 2, "unmarkedCount": 0,
+             "modelOnly": True, "latestVerdict": "unnecessary", "latestAdvice": "",
+             "lastPurchasedAt": "2026-10-06T10:00:00Z"}
+    initial = {"available": True, "reasonCode": "available", "algorithmVersion": "advice-evidence.v1",
+               "inputVersion": "0" * 64, "banned": [], "guesses": [group]}
+    confirmed = {**initial, "banned": [group], "guesses": []}
+
+    class FakeCore:
+        async def get_do_not_buy(self, token):
+            calls.append(("get", token))
+            return initial
+
+        async def get_do_not_buy_decisions(self, token):
+            calls.append(("decisions", token))
+            return {"productKeys": [], "confirmedProductKeys": []}
+
+        async def decide_do_not_buy(self, token, key, action):
+            calls.append(("decide", token, key, action))
+            return confirmed
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(message_id=955, date=datetime(2026, 10, 6, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"), from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/nobuy", entities=[MessageEntity(type="bot_command", offset=0, length=6)])
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "owner"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=955, message=message)))
+        rendered = next(method for method in sent if method.__class__.__name__ == "SendMessage")
+        assert "Догадки модели" in rendered.text
+        button = next(button for row in rendered.reply_markup.inline_keyboard for button in row
+                      if "Подтвердить" in button.text)
+        callback = CallbackQuery(id="nobuy-confirm", from_user=message.from_user,
+                                 chat_instance="chat-instance", message=message, data=button.callback_data)
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=956, callback_query=callback)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    assert ("decide", "opaque-context", "tea", "confirm") in calls
+    edit = next(method for method in sent if method.__class__.__name__ == "EditMessageText")
+    assert "По правилам" in edit.text
+
+
+def test_do_not_buy_viewer_has_no_decision_controls(monkeypatch):
+    sent = []
+
+    class FakeCore:
+        async def get_do_not_buy(self, token):
+            assert token == "opaque-context"
+            return {"available": True, "reasonCode": "no_optional_items", "algorithmVersion": "advice-evidence.v1",
+                    "inputVersion": None, "banned": [], "guesses": []}
+
+        async def get_do_not_buy_decisions(self, token):
+            assert token == "opaque-context"
+            return {"productKeys": [], "confirmedProductKeys": []}
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(message_id=957, date=datetime(2026, 10, 6, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"), from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/nobuy", entities=[MessageEntity(type="bot_command", offset=0, length=6)])
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        dispatcher = build_dispatcher(telegram_core=FakeCore())
+        state_key = StorageKey(bot_id=bot.id, chat_id=42, user_id=42)
+        asyncio.run(dispatcher.storage.set_data(state_key, {"telegram_actor_context": {
+            "token": "opaque-context", "tenantId": "tenant-a", "displayName": "Home", "role": "viewer"}}))
+        asyncio.run(dispatcher.feed_update(bot, Update(update_id=957, message=message)))
+    finally:
+        asyncio.run(bot.session.close())
+    shown = next(method for method in sent if method.__class__.__name__ == "SendMessage")
+    assert "Повторяющихся отметок" in shown.text
+    assert shown.reply_markup is None
+
+
 def test_shopping_bought_callback_uses_saved_product_key_and_refreshes_hidden_reason(monkeypatch):
     sent = []
     calls = []

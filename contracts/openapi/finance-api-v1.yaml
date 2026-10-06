@@ -1376,6 +1376,26 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /internal/v1/telegram/actions/do-not-buy/decisions:
+    post:
+      operationId: getTelegramDoNotBuyDecisions
+      security:
+        - telegramServiceToken: []
+      description: Resolves receipt.read and returns this member's allowed and confirmed product keys.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Personal product decisions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDecisionKeys' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /internal/v1/telegram/actions/personal-inflation:
     post:
       operationId: getTelegramPersonalInflation
