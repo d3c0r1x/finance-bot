@@ -158,6 +158,26 @@ paths:
         '400': { description: Request is malformed or contains invalid purchase facts }
         '401': { description: Internal service token is missing or invalid }
         '413': { description: Request exceeds the supported body size }
+  /internal/v1/analytics/goals/progress:
+    post:
+      operationId: calculateGoalProgressF45
+      security:
+        - serviceBearer: []
+      description: Calculates progress from Core-authorized confirmed purchase facts and immutable accepted goal terms. Does not mutate goal state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/F45ProgressRequest' }
+      responses:
+        '200':
+          description: Versioned goal progress with null monetary values when receipt amounts are unknown
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/F45Progress' }
+        '400': { description: Request is malformed or contains invalid goal/purchase facts }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the supported body size }
   /internal/v1/analytics/recalculation-impact:
     post:
       operationId: calculateReceiptRecalculationImpact
@@ -897,6 +917,7 @@ components:
       properties:
         key: { type: string, minLength: 1, maxLength: 300 }
         productKey: { type: string, minLength: 1, maxLength: 256 }
+        memberProductKeys: { type: array, uniqueItems: true, minItems: 1, maxItems: 50000, items: { type: string, minLength: 1, maxLength: 256 } }
         name: { type: string, minLength: 1, maxLength: 200 }
         unit: { type: string, enum: [count, sum] }
         monthlyRate: { type: string, pattern: '^\d+\.\d{2}$' }
@@ -911,6 +932,57 @@ components:
             properties: { unit: { const: sum } }
           then:
             required: [monthlyLimit]
+        - if:
+            properties: { key: { pattern: '^cat:' } }
+          then:
+            required: [memberProductKeys]
+    F45Goal:
+      type: object
+      additionalProperties: false
+      required: [key, scope, unit, acceptedAt, endsAt, countTarget]
+      properties:
+        key: { type: string, minLength: 1, maxLength: 300 }
+        scope: { type: string, enum: [product, group] }
+        unit: { type: string, enum: [count, sum] }
+        acceptedAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        countTarget: { type: integer, minimum: 0 }
+        monthlyLimit: { type: string, pattern: '^\d{1,15}\.\d{2}$' }
+        memberProductKeys: { type: array, uniqueItems: true, minItems: 1, maxItems: 50000, items: { type: string, minLength: 1, maxLength: 256 } }
+    F45Purchase:
+      type: object
+      additionalProperties: false
+      required: [productKey, lineSum, purchasedAt]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]*$' }
+        lineSum: { type: [string, 'null'], pattern: '^\d{1,15}\.\d{2}$' }
+        purchasedAt: { type: string, format: date-time }
+    F45ProgressRequest:
+      type: object
+      additionalProperties: false
+      required: [inputWatermark, asOf, goal, purchases]
+      properties:
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        asOf: { type: string, format: date-time }
+        goal: { $ref: '#/components/schemas/F45Goal' }
+        purchases: { type: array, maxItems: 50000, items: { $ref: '#/components/schemas/F45Purchase' } }
+    F45Progress:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, inputWatermark, unit, bought, spent, amountsUnknown, over, met, finished, daysLeft, windowStart, windowEnd]
+      properties:
+        algorithmVersion: { type: string, const: goal-progress-f45.v1 }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        unit: { type: string, enum: [count, sum] }
+        bought: { type: integer, minimum: 0, maximum: 50000 }
+        spent: { type: [string, 'null'], pattern: '^\d{1,15}\.\d{2}$' }
+        amountsUnknown: { type: boolean }
+        over: { type: [boolean, 'null'] }
+        met: { type: [boolean, 'null'] }
+        finished: { type: boolean }
+        daysLeft: { type: integer, minimum: 0, maximum: 30 }
+        windowStart: { type: string, format: date-time }
+        windowEnd: { type: string, format: date-time }
     F44SkippedCandidate:
       type: object
       additionalProperties: false

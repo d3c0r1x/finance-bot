@@ -24,7 +24,7 @@
       {"key": "snack", "productKey": "snack", "name": "Снеки", "unit": "count", "monthlyRate": "4.00", "countTarget": 2, "monthlySpend": "400.00", "estimatedReduction": "200.00", "purchaseCount": 4, "evidenceCount": 2}
     ],
     "groups": [
-      {"key": "cat:снеки", "name": "Снеки и чипсы", "unit": "count", "monthlyRate": "4.00", "countTarget": 2, "monthlySpend": "400.00", "estimatedReduction": "200.00", "purchaseCount": 4, "evidenceCount": 2}
+      {"key": "cat:снеки", "memberProductKeys": ["snack"], "name": "Снеки и чипсы", "unit": "count", "monthlyRate": "4.00", "countTarget": 2, "monthlySpend": "400.00", "estimatedReduction": "200.00", "purchaseCount": 4, "evidenceCount": 2}
     ],
     "skipped": []
   }

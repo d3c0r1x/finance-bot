@@ -157,6 +157,9 @@ func TestBuildF44CandidatesBuildsOnlyCountGroupsFromCombinedEvidence(t *testing.
 	if len(got.Groups) != 1 || got.Groups[0].Key != "cat:сладкое" || got.Groups[0].Unit != "count" {
 		t.Fatalf("expected one sweets count candidate without allowed/substring false positives: %#v", got.Groups)
 	}
+	if !reflect.DeepEqual(got.Groups[0].MemberProductKeys, []string{"choco", "cookie"}) {
+		t.Fatalf("accepted group must snapshot only eligible product keys, excluding allowed cola: %#v", got.Groups[0].MemberProductKeys)
+	}
 	if got.Groups[0].MonthlyLimit != "" {
 		t.Fatalf("sum mode must not return a group money target: %#v", got.Groups[0])
 	}

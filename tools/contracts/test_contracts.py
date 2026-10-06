@@ -948,6 +948,40 @@ def test_goal_candidates_f44_internal_contract_is_strict_and_fixture_matches_sch
     Draft202012Validator(report_document, format_checker=FormatChecker()).validate(fixture["expected"])
 
 
+def test_goal_progress_f45_internal_contract_is_strict_and_nullable_for_unknown_money():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+    operation = spec["paths"]["/internal/v1/analytics/goals/progress"]["post"]
+    assert operation["operationId"] == "calculateGoalProgressF45"
+    assert operation["security"] == [{"serviceBearer": []}]
+    schemas = spec["components"]["schemas"]
+    for name in ("F45Goal", "F45Purchase", "F45ProgressRequest", "F45Progress"):
+        assert schemas[name]["additionalProperties"] is False
+    request_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/F45ProgressRequest",
+    }
+    response_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/F45Progress",
+    }
+    request = {
+        "inputWatermark": "9", "asOf": "2026-10-20T12:00:00Z",
+        "goal": {"key": "chips", "scope": "product", "unit": "count",
+                 "acceptedAt": "2026-10-01T12:00:00Z", "endsAt": "2026-10-31T12:00:00Z", "countTarget": 2},
+        "purchases": [{"productKey": "chips", "lineSum": None, "purchasedAt": "2026-10-03T12:00:00Z"}],
+    }
+    response = {
+        "algorithmVersion": "goal-progress-f45.v1", "inputWatermark": "9", "unit": "count",
+        "bought": 1, "spent": None, "amountsUnknown": True, "over": False, "met": True,
+        "finished": False, "daysLeft": 11, "windowStart": "2026-10-01T12:00:00Z",
+        "windowEnd": "2026-10-31T12:00:00Z",
+    }
+    Draft202012Validator(request_document, format_checker=FormatChecker()).validate(request)
+    Draft202012Validator(response_document, format_checker=FormatChecker()).validate(response)
+
+
 def test_advice_evidence_internal_contract_is_strict_and_fixture_matches_schema():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
     operation = spec["paths"]["/internal/v1/analytics/advice/evidence-groups"]["post"]

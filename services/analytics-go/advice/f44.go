@@ -57,24 +57,25 @@ type F44Report struct {
 }
 
 type F44Candidate struct {
-	Key                string `json:"key"`
-	ProductKey         string `json:"productKey,omitempty"`
-	Name               string `json:"name"`
-	Unit               string `json:"unit"`
-	MonthlyRate        string `json:"monthlyRate"`
-	CountTarget        int    `json:"countTarget"`
-	MonthlySpend       *string `json:"monthlySpend"`
-	MonthlyLimit       string `json:"monthlyLimit,omitempty"`
-	EstimatedReduction *string `json:"estimatedReduction"`
-	PurchaseCount      int    `json:"purchaseCount"`
-	EvidenceCount      int    `json:"evidenceCount"`
+	Key                string   `json:"key"`
+	ProductKey         string   `json:"productKey,omitempty"`
+	MemberProductKeys  []string `json:"memberProductKeys,omitempty"`
+	Name               string   `json:"name"`
+	Unit               string   `json:"unit"`
+	MonthlyRate        string   `json:"monthlyRate"`
+	CountTarget        int      `json:"countTarget"`
+	MonthlySpend       *string  `json:"monthlySpend"`
+	MonthlyLimit       string   `json:"monthlyLimit,omitempty"`
+	EstimatedReduction *string  `json:"estimatedReduction"`
+	PurchaseCount      int      `json:"purchaseCount"`
+	EvidenceCount      int      `json:"evidenceCount"`
 }
 
 type F44SkippedCandidate struct {
-	ProductKey   string `json:"productKey"`
-	Name         string `json:"name"`
+	ProductKey   string  `json:"productKey"`
+	Name         string  `json:"name"`
 	MonthlySpend *string `json:"monthlySpend"`
-	ReasonCode   string `json:"reasonCode"`
+	ReasonCode   string  `json:"reasonCode"`
 }
 
 type f44Category struct {
@@ -148,18 +149,22 @@ func BuildF44Candidates(request F44Request) (F44Report, error) {
 	}
 	for _, category := range f44Categories {
 		var evidence int
+		eligibleProducts := make(map[string]struct{})
 		for _, decision := range decisions {
 			if f44Eligible(decision) && f44MatchesCategory(decision.Name, category) {
 				evidence += decision.HarmfulCount
+				eligibleProducts[decision.ProductKey] = struct{}{}
 			}
 		}
 		if evidence < 2 {
 			continue
 		}
 		var entries []f44Purchase
+		members := make(map[string]struct{})
 		for _, purchase := range purchases {
-			if f44MatchesCategory(purchase.Name, category) {
+			if _, eligible := eligibleProducts[purchase.ProductKey]; eligible && f44MatchesCategory(purchase.Name, category) {
 				entries = append(entries, purchase)
+				members[purchase.ProductKey] = struct{}{}
 			}
 		}
 		candidate, _ := f44Candidate("cat:"+category.key, category.name, entries, "count", evidence)
@@ -168,6 +173,11 @@ func BuildF44Candidates(request F44Request) (F44Report, error) {
 		}
 		candidate.Unit = "count"
 		candidate.ProductKey = ""
+		candidate.MemberProductKeys = make([]string, 0, len(members))
+		for key := range members {
+			candidate.MemberProductKeys = append(candidate.MemberProductKeys, key)
+		}
+		sort.Strings(candidate.MemberProductKeys)
 		report.Groups = append(report.Groups, *candidate)
 	}
 	f44SortCandidates(report.Products)
