@@ -241,6 +241,35 @@ class FinanceModelsTest {
         assertEquals("confirmed_not_to_buy", shopping.blockedCandidates.single().reasonCode)
     }
 
+    @Test fun parsesDoNotBuyEvidenceWithoutTreatingModelGuessAsBlock() {
+        val report = FinanceModels.doNotBuy(JSONObject("""
+            {"available":true,"reasonCode":"available","algorithmVersion":"advice-evidence.v1",
+             "inputVersion":"${"0".repeat(64)}",
+             "banned":[{"productKey":"chips","productName":"Чипсы","count":2,"amount":"20.00",
+                        "missingAmountCount":0,"ruleCount":2,"modelCount":0,"unmarkedCount":0,
+                        "modelOnly":false,"latestVerdict":"harmful","latestAdvice":"",
+                        "lastPurchasedAt":"2026-10-06T10:00:00Z"}],
+             "guesses":[{"productKey":"tea","productName":"Чай","count":2,"amount":null,
+                         "missingAmountCount":2,"ruleCount":0,"modelCount":2,"unmarkedCount":0,
+                         "modelOnly":true,"latestVerdict":"unnecessary","latestAdvice":"Проверьте",
+                         "lastPurchasedAt":"2026-10-06T10:00:00Z"}]}
+        """.trimIndent()))
+        assertEquals("chips", report.banned.single().productKey)
+        assertEquals("tea", report.guesses.single().productKey)
+        assertNull(report.guesses.single().amount)
+        assertEquals("Проверьте", report.guesses.single().latestAdvice)
+    }
+
+    @Test fun shoppingAcceptsRuleBackedBlockedReason() {
+        val shopping = FinanceModels.shoppingList(JSONObject("""
+            {"candidates":[],"estimatedListCost":"0.00","inventoryTracked":false,
+             "boughtCandidates":[],"mutedCandidates":[],
+             "blockedCandidates":[{"productKey":"chips","productName":"Чипсы",
+                                   "reasonCode":"rule_backed_not_to_buy"}]}
+        """.trimIndent()))
+        assertEquals("rule_backed_not_to_buy", shopping.blockedCandidates.single().reasonCode)
+    }
+
     @Test fun parsesPersonalInflationWithoutRecomputingCoreTotals() {
         val inflation = FinanceModels.personalInflation(JSONObject("""
             {"available":true,"reasonCode":"available","asOf":"2026-10-06T12:00:00Z","windowDays":90,

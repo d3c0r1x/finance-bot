@@ -150,6 +150,24 @@ class FinanceApi(context: Context) {
         execute("/api/v1/tenants/$tenantId/shopping", "GET"),
     ))
 
+    fun doNotBuy(tenantId: String): FinanceDoNotBuy = FinanceModels.doNotBuy(JSONObject(
+        execute("/api/v1/tenants/$tenantId/products/do-not-buy", "GET"),
+    ))
+
+    fun productDecisions(tenantId: String): FinanceProductDecisions = FinanceModels.productDecisions(JSONObject(
+        execute("/api/v1/tenants/$tenantId/products/decisions", "GET"),
+    ))
+
+    fun decideDoNotBuy(tenantId: String, productKey: String, action: String) {
+        val path = "/api/v1/tenants/$tenantId/products/${android.net.Uri.encode(productKey)}/decision"
+        when (action) {
+            "confirm", "allow" -> execute(path, "PUT",
+                JSONObject().put("decision", if (action == "confirm") "confirmed" else "allowed").toString())
+            "revoke" -> execute(path, "DELETE", "{}")
+            else -> error("Unknown do-not-buy decision")
+        }
+    }
+
     fun personalInflation(tenantId: String): FinancePersonalInflation = FinanceModels.personalInflation(JSONObject(
         execute("/api/v1/tenants/$tenantId/analytics/personal-inflation", "GET"),
     ))

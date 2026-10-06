@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
                         onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
                         onShoppingLoad = ::loadShoppingCandidates, onShoppingDecision = ::applyShoppingDecision,
                         onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation,
+                        onDoNotBuyLoad = ::loadDoNotBuy, onDoNotBuyDecision = ::applyDoNotBuyDecision,
                         onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision)
                 }
             }
@@ -203,12 +204,19 @@ class MainActivity : ComponentActivity() {
     private fun runApi(action: () -> FinanceWorkspaceSnapshot) {
         ui = ui.copy(busy = true, error = null)
         executor.execute {
-            runCatching(action).onSuccess { snapshot -> ui = ui.copy(busy = false, tenants = snapshot.tenants,
-                transactions = snapshot.transactions, budgets = snapshot.budgets, debts = snapshot.debts,
-                budgetProposal = snapshot.proposal, dashboardSummary = snapshot.dashboardSummary,
-                report = snapshot.report, transactionDraft = snapshot.transactionDraft,
-                memberProfile = snapshot.memberProfile, notificationPreferences = snapshot.notificationPreferences,
-                budgetAlerts = snapshot.budgetAlerts, error = null) }
+            runCatching(action).onSuccess { snapshot ->
+                val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
+                ui = ui.copy(busy = false, tenants = snapshot.tenants,
+                    transactions = snapshot.transactions, budgets = snapshot.budgets, debts = snapshot.debts,
+                    budgetProposal = snapshot.proposal, dashboardSummary = snapshot.dashboardSummary,
+                    report = snapshot.report, transactionDraft = snapshot.transactionDraft,
+                    memberProfile = snapshot.memberProfile, notificationPreferences = snapshot.notificationPreferences,
+                    budgetAlerts = snapshot.budgetAlerts, error = null,
+                    doNotBuy = ui.doNotBuy.takeIf { sameTenant },
+                    productDecisions = ui.productDecisions.takeIf { sameTenant },
+                    doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
+                    doNotBuyLoading = ui.doNotBuyLoading && sameTenant)
+            }
                 .onFailure { error ->
                     if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
                     else ui = ui.copy(busy = false, error = error.message ?: "Request failed")
@@ -298,6 +306,51 @@ class MainActivity : ComponentActivity() {
                         ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
                     }
                 }
+        }
+    }
+
+    private fun loadDoNotBuy() {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        ui = ui.copy(doNotBuyLoading = true, doNotBuyError = null)
+        executor.execute {
+            runCatching { api.doNotBuy(tenantId) to api.productDecisions(tenantId) }
+                .onSuccess { (report, decisions) ->
+                    if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(doNotBuyLoading = false, doNotBuy = report,
+                            productDecisions = decisions, doNotBuyError = null)
+                    }
+                }
+                .onFailure { error ->
+                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    else if (ui.tenants.firstOrNull()?.id == tenantId) {
+                        ui = ui.copy(doNotBuyLoading = false, doNotBuyError = error.message ?: "Request failed")
+                    }
+                }
+        }
+    }
+
+    private fun applyDoNotBuyDecision(productKey: String, action: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        ui = ui.copy(doNotBuyLoading = true, doNotBuyError = null)
+        executor.execute {
+            runCatching {
+                api.decideDoNotBuy(tenantId, productKey, action)
+                api.doNotBuy(tenantId) to api.productDecisions(tenantId)
+            }.onSuccess { (report, decisions) ->
+                if (ui.tenants.firstOrNull()?.id == tenantId) {
+                    ui = ui.copy(doNotBuyLoading = false, doNotBuy = report,
+                        productDecisions = decisions, doNotBuyError = null)
+                    if (ui.shoppingList != null) runCatching { api.shoppingCandidates(tenantId) }
+                        .onSuccess { shopping ->
+                            if (ui.tenants.firstOrNull()?.id == tenantId) ui = ui.copy(shoppingList = shopping)
+                        }
+                }
+            }.onFailure { error ->
+                if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                else if (ui.tenants.firstOrNull()?.id == tenantId) {
+                    ui = ui.copy(doNotBuyLoading = false, doNotBuyError = error.message ?: "Request failed")
+                }
+            }
         }
     }
 
@@ -426,6 +479,10 @@ data class FinanceUiState(
     val shoppingList: FinanceShoppingList? = null,
     val shoppingLoading: Boolean = false,
     val shoppingError: String? = null,
+    val doNotBuy: FinanceDoNotBuy? = null,
+    val productDecisions: FinanceProductDecisions? = null,
+    val doNotBuyLoading: Boolean = false,
+    val doNotBuyError: String? = null,
     val personalInflation: FinancePersonalInflation? = null,
     val personalInflationLoading: Boolean = false,
     val personalInflationError: String? = null,
@@ -472,6 +529,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onShoppingLoad: () -> Unit = {},
                           onShoppingDecision: (String, String) -> Unit = { _, _ -> },
                           onShoppingCopy: (String) -> Unit = {},
+                          onDoNotBuyLoad: () -> Unit = {},
+                          onDoNotBuyDecision: (String, String) -> Unit = { _, _ -> },
                           onPersonalInflationLoad: () -> Unit = {},
                           onRecurringLoad: () -> Unit = {},
                           onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> }) {
@@ -542,10 +601,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 Text(state.tenants.first().name, style = MaterialTheme.typography.headlineSmall)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring").forEach { screen ->
+                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring", "nobuy").forEach { screen ->
                         TextButton(onClick = {
                             activeScreen = screen
                             if (screen == "shopping" && state.shoppingList == null && !state.shoppingLoading) onShoppingLoad()
+                            if (screen == "nobuy" && state.doNotBuy == null && !state.doNotBuyLoading) onDoNotBuyLoad()
                             if (screen == "inflation" && state.personalInflation == null && !state.personalInflationLoading) {
                                 onPersonalInflationLoad()
                             }
@@ -556,6 +616,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
+                                "nobuy" -> if (russian) "Не брать" else "Do not buy"
                                 "inflation" -> if (russian) "Динамика цен" else "Price trend"
                                 "recurring" -> if (russian) "Регулярные" else "Recurring"
                                 "budgets" -> if (russian) "Бюджеты" else "Budgets"
@@ -571,6 +632,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "overview" -> DashboardScreen(state, language)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
+                    "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
+                        onDoNotBuyDecision)
                     "inflation" -> PersonalInflationScreen(Modifier.weight(1f), state, language,
                         onRetry = onPersonalInflationLoad)
                     "recurring" -> RecurringScreen(Modifier.weight(1f), state, language, onRetry = onRecurringLoad,
@@ -887,7 +950,10 @@ private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: 
                 item { Text(if (russian) "Не брать" else "Do not buy", style = MaterialTheme.typography.titleMedium) }
                 shopping.blockedCandidates.forEach { candidate ->
                     item {
-                        Text("${candidate.productName} · ${if (russian) "Вы отметили как «не брать»." else "You marked this as do not buy."}")
+                        val reason = if (candidate.reasonCode == "confirmed_not_to_buy") {
+                            if (russian) "Вы отметили как «не брать»." else "You marked this as do not buy."
+                        } else if (russian) "Основано на проверке чеков." else "Based on receipt review."
+                        Text("${candidate.productName} · $reason")
                     }
                 }
             }
@@ -899,6 +965,101 @@ private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: 
             item {
                 Text(if (russian) "Это подсказка по чекам, не учёт запасов."
                     else "Not home inventory: suggestions use your confirmed receipt rhythm.")
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun DoNotBuyScreen(modifier: Modifier, state: FinanceUiState, language: String, onRetry: () -> Unit,
+                           onDecision: (String, String) -> Unit) {
+    val russian = language == "ru"
+    val report = state.doNotBuy
+    val decisions = state.productDecisions
+    val canWrite = state.tenants.firstOrNull()?.role != "viewer" && decisions != null && !state.doNotBuyLoading
+    LazyColumn(modifier = modifier.testTag("do-not-buy-list"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Text(if (russian) "Не брать" else "Do not buy", style = MaterialTheme.typography.titleLarge) }
+        when {
+            state.doNotBuyLoading -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            state.doNotBuyError != null -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (russian) "Советы по чекам временно недоступны." else "Receipt advice is temporarily unavailable.")
+                    Button(onClick = onRetry) { Text(if (russian) "Повторить" else "Retry") }
+                }
+            }
+            report == null || decisions == null -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            !report.available -> item {
+                Text(if (russian) "Советы по чекам временно недоступны." else "Receipt advice is temporarily unavailable.")
+                Button(onClick = onRetry) { Text(if (russian) "Повторить" else "Retry") }
+            }
+            else -> {
+                if (report.banned.isEmpty() && report.guesses.isEmpty()) item {
+                    Text(if (russian) "Повторяющихся отметок «вредно» или «лишнее» пока нет."
+                        else "No repeated harmful or unnecessary verdicts yet.")
+                }
+                if (report.banned.isNotEmpty()) item {
+                    Text(if (russian) "По правилам или вашему решению" else "By rule or your decision",
+                        style = MaterialTheme.typography.titleMedium)
+                }
+                report.banned.forEach { group ->
+                    item { DoNotBuyGroup(group, false, decisions, russian, canWrite, onDecision) }
+                }
+                if (report.guesses.isNotEmpty()) item {
+                    Column {
+                        Text(if (russian) "Догадки модели" else "Model guesses", style = MaterialTheme.typography.titleMedium)
+                        Text(if (russian) "Догадка не скрывает покупку без вашего подтверждения."
+                            else "A guess does not hide a purchase until you confirm it.")
+                    }
+                }
+                report.guesses.forEach { group ->
+                    item { DoNotBuyGroup(group, true, decisions, russian, canWrite, onDecision) }
+                }
+                if (decisions.productKeys.isNotEmpty()) item {
+                    Text(if (russian) "Вы разрешили покупать" else "You allowed purchases",
+                        style = MaterialTheme.typography.titleMedium)
+                }
+                decisions.productKeys.forEach { key ->
+                    item {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(key, Modifier.weight(1f))
+                            if (canWrite) TextButton(onClick = { onDecision(key, "revoke") }) {
+                                Text(if (russian) "Отменить решение" else "Undo decision")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun DoNotBuyGroup(group: FinanceAdviceGroup, guess: Boolean, decisions: FinanceProductDecisions,
+                          russian: Boolean, canWrite: Boolean, onDecision: (String, String) -> Unit) {
+    val confirmed = group.productKey in decisions.confirmedProductKeys
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(group.productName, style = MaterialTheme.typography.titleMedium)
+            Text(when {
+                confirmed -> if (russian) "Подтверждено вами" else "Confirmed by you"
+                guess -> if (russian) "Догадка модели" else "Model guess"
+                else -> if (russian) "Основано на проверке чеков" else "Based on receipt review"
+            })
+            Text(if (russian) "Отмечено в чеках: ${group.count}" else "Flagged receipts: ${group.count}")
+            Text(if (group.amount == null) {
+                if (russian) "Сумма неизвестна" else "Amount unavailable"
+            } else if (russian) "Сумма: ${group.amount} ₽" else "Amount: ${group.amount} RUB")
+            if (group.latestAdvice.isNotBlank()) Text(group.latestAdvice)
+            if (canWrite) {
+                if (guess && !confirmed) TextButton(onClick = { onDecision(group.productKey, "confirm") }) {
+                    Text(if (russian) "Подтвердить «не брать»" else "Confirm do not buy")
+                }
+                TextButton(onClick = { onDecision(group.productKey, "allow") }) {
+                    Text(if (russian) "Можно брать" else "Allow purchase")
+                }
+                if (confirmed) TextButton(onClick = { onDecision(group.productKey, "revoke") }) {
+                    Text(if (russian) "Отменить решение" else "Undo decision")
+                }
             }
         }
     }

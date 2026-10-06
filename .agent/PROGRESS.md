@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 08:12, Europe/Moscow.
+Updated: 2026-10-06 08:24, Europe/Moscow.
 
 ## Global plan
 
@@ -49,26 +49,26 @@ Updated: 2026-10-06 08:12, Europe/Moscow.
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
 | F40.3 | Web, Android and Telegram optional-spend presentation | COMPLETE — local client gates and GitHub regression GREEN | F40.2 | ec1a373 |
-| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — Go/Core and Web verified; Telegram and Android controls remain | F40 | pending |
+| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — all surfaces verified locally; Android commit/CI remains | F40 | pending |
 | F41.1 | Go evidence groups for the personal “do not buy” list | COMPLETE — local and three GitHub workflows GREEN | F40 facts | bd8444f |
 | F41.2a | Confirm/allow/revoke member-local product decisions with audit | COMPLETE — local and four GitHub workflows GREEN | F41.1 | d537b08 |
 | F41.2b | Core evidence API, personal policy overlay and shopping isolation | COMPLETE — local and four GitHub workflows GREEN | F41.2a | 7307fff |
 | F41.3a | RU/EN Web list, guesses and human controls | COMPLETE — local gates and two GitHub workflows GREEN | F41.2b | 8706159 |
-| F41.3b | Telegram list and human controls | IN PROGRESS — Core actor routes pushed; gateway GREEN locally | F41.2b | pending |
+| F41.3b | Telegram list and human controls | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 41ace8f |
 | F41.3b1 | Actor-scoped Telegram list and decision routes | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 7089a63 |
-| F41.3b2 | Telegram command, renderer and callbacks | COMMIT_PENDING — 166 Python/contracts and full Core check GREEN | F41.3b1 | pending |
-| F41.3c | Android list and human controls | NOT_IMPLEMENTED | F41.2b | pending |
+| F41.3b2 | Telegram command, renderer and callbacks | COMPLETE — local and four GitHub workflows GREEN | F41.3b1 | 41ace8f |
+| F41.3c | Android list and human controls | COMMIT_PENDING — 49/49 instrumentation, installed APK launched | F41.2b | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F41.3b2 — `/nobuy` shows verified blocks and separate model guesses, offers confirm/allow/revoke, and refreshes actor-scoped data after callbacks.
-- Status: COMMIT_PENDING — Python gateway/presentation/contracts 166 tests and full Core check pass locally; F41.3b1 `7089a63` is pushed with four GitHub workflows GREEN.
-- Acceptance: service-token and actor-scoped decisions are read; viewer has no write buttons; callback maps only to saved keys and rejects stale revisions; `/shopping` accepts rule-backed blocks and labels their source.
-- Data boundary: decisions use Core actor context; model guesses alone never block shopping.
+- ID and outcome: F41.3c — Android RU/EN shows verified blocks and separate model guesses, human decisions and distinct shopping block reasons.
+- Status: COMMIT_PENDING — 49/49 connected instrumentation tests pass; debug APK installed and launched on emulator-5556; F41.3b2 `41ace8f` is pushed with four GitHub workflows GREEN.
+- Acceptance: model guess remains visible without blocking shopping; confirm/allow/revoke call member-scoped Core API; viewer has no write controls; unavailable evidence is explicit.
+- Data boundary: Android parses Core evidence and decision DTOs; tenant switch clears cached advice/decisions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7089a63`.
-- Updated at: 2026-10-06 08:12 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `41ace8f`.
+- Updated at: 2026-10-06 08:24 Europe/Moscow.
 
 ## Verification evidence
 
@@ -105,6 +105,9 @@ Updated: 2026-10-06 08:12, Europe/Moscow.
 | F41.3b1 GitHub regression | Actions `37416646936`, `37416646946`, `37416646932`, `37416646937` | commit `7089a63` | PASS | Python/contracts, private S3, Core PostgreSQL and bot workflows completed successfully |
 | F41.3b2 observed RED | Python client, renderer, command and contract focused tests | F41.3b2 tests before implementation | FAIL expected | Missing `/nobuy`, client actions, renderer and decisions route; shopping rejected rule-backed blocks |
 | F41.3b2 regression | `pytest services/python/telegram_gateway/tests services/python/presentation/tests tools/contracts/test_contracts.py -q -p no:cacheprovider`; `:services:core:check --rerun-tasks --no-daemon` | F41.3b2 working tree, isolated PostgreSQL | PASS, 166 Python/contracts; full Core | Actor-scoped decisions route, separate guesses, viewer read-only, safe callback key and shopping reason labels |
+| F41.3b2 GitHub regression | Actions `37417405513`, `37417405369`, `37417405537`, `37417405466` | commit `41ace8f` | PASS | Python/contracts, private S3, bot and Core PostgreSQL workflows completed successfully |
+| F41.3c observed RED | `:app:compileDebugAndroidTestKotlin` | tests before Android implementation | FAIL expected | Missing `FinanceModels.doNotBuy`, advice UI state and decision callback |
+| F41.3c Android instrumentation | `:app:connectedDebugAndroidTest --no-daemon` | emulator-5556, Android SDK/JDK from Unity | PASS, 49/49 | Evidence parser, separate model guesses, localized UI and shopping reason; debug APK installed and launched; SHA-256 `9265BE1CEDBF9648B2CED24BE025A38D73F259441BD0196ABC7CDF63F6FA4267` |
 | F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
 | F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, commit `b1e64c4` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
 | F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
@@ -133,10 +136,11 @@ Updated: 2026-10-06 08:12, Europe/Moscow.
 - GitHub PostgreSQL run `37398375404` failed after the new receipt acceptance left a `receipt.confirmed` outbox event for the shared contract validator. `test_core_migration.py` mapped transaction, budget and debt events but omitted receipt. Added the receipt schema mapping. Local contract suite passes 54/2 skips; local integration test connects only after using the migrator role, but its cleaned database has no persisted events, so CI must verify event replay.
 - F41.2b full Core check first failed one unit mock because shopping now calls the four-argument decision overlay. Updated the existing mock expectation to the new `Set.of()` evidence input; focused test and full 235-test Core check then passed.
 - F41.3a initial Web test found the confirmed status inside a longer paragraph, so it used a dedicated span for the status. TypeScript build also found mixed mutation return types; an async mutation now returns void after awaiting the selected action. Focused tests, all 53 Web tests and production build then passed.
+- F41.3c first full Android run passed 48/49; an existing debt-screen test failed because inserting the new tab before debts moved the horizontally scrollable navigation target. The focused failure reproduced. Moving the new tab to the end restored the focused test; the full 49-test suite then passed.
 
 ## Next action
 
-- Commit and push F41.3b2 after staged diff review; then implement F41.3c Android list and controls.
+- Commit and push F41.3c after staged diff review; confirm GitHub regression, then begin F42.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 

@@ -167,6 +167,19 @@ data class FinanceShoppingList(
 
 data class FinanceBlockedShoppingCandidate(val productKey: String, val productName: String, val reasonCode: String)
 
+data class FinanceAdviceGroup(
+    val productKey: String, val productName: String, val count: Int, val amount: String?,
+    val missingAmountCount: Int, val ruleCount: Int, val modelCount: Int, val unmarkedCount: Int,
+    val modelOnly: Boolean, val latestVerdict: String, val latestAdvice: String, val lastPurchasedAt: String,
+)
+
+data class FinanceDoNotBuy(
+    val available: Boolean, val reasonCode: String, val banned: List<FinanceAdviceGroup>,
+    val guesses: List<FinanceAdviceGroup>,
+)
+
+data class FinanceProductDecisions(val productKeys: List<String>, val confirmedProductKeys: List<String>)
+
 data class FinancePersonalInflationItem(
     val productName: String,
     val oldUnitPrice: String,
@@ -495,7 +508,8 @@ internal object FinanceModels {
             val name = item.getString("productName")
             val reason = item.getString("reasonCode")
             require(productKeyPattern.matches(productKey) && keys.add(productKey)
-                && name.isNotBlank() && name.length <= 200 && reason == "confirmed_not_to_buy") {
+                && name.isNotBlank() && name.length <= 200
+                && reason in setOf("confirmed_not_to_buy", "rule_backed_not_to_buy")) {
                 "Invalid blocked shopping candidate"
             }
             FinanceBlockedShoppingCandidate(productKey, name, reason)
@@ -508,6 +522,72 @@ internal object FinanceModels {
         }
         require(estimatedTotal.compareTo(totalRaw.toBigDecimal()) == 0) { "Shopping estimate does not match candidates" }
         return FinanceShoppingList(candidates, totalRaw, false, bought, muted, blocked)
+    }
+
+    fun doNotBuy(json: JSONObject): FinanceDoNotBuy {
+        val available = json.getBoolean("available")
+        val reason = json.getString("reasonCode")
+        val version = nullableString(json, "algorithmVersion")
+        val inputVersion = nullableString(json, "inputVersion")
+        require(reason in setOf("available", "no_optional_items", "too_many_items", "analytics_unavailable")
+            && available == (reason == "available" || reason == "no_optional_items")
+            && (if (available) version == "advice-evidence.v1" else version == null)
+            && (if (reason == "available") inputVersion?.matches(Regex("^[0-9a-f]{64}$")) == true
+                else inputVersion == null)) { "Invalid do-not-buy status" }
+        val keys = mutableSetOf<String>()
+        fun groups(field: String): List<FinanceAdviceGroup> {
+            val array = json.getJSONArray(field)
+            require(array.length() <= 25000) { "Too many do-not-buy groups" }
+            return (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                val key = item.getString("productKey")
+                val name = item.getString("productName")
+                val count = exactInt(item, "count")
+                val missing = exactInt(item, "missingAmountCount")
+                val rule = exactInt(item, "ruleCount")
+                val model = exactInt(item, "modelCount")
+                val unmarked = exactInt(item, "unmarkedCount")
+                val modelOnly = item.getBoolean("modelOnly")
+                val amount = nullableString(item, "amount")
+                val verdict = item.getString("latestVerdict")
+                val advice = item.getString("latestAdvice")
+                val purchased = item.getString("lastPurchasedAt")
+                require(Regex("^[a-zа-я0-9]{1,256}$").matches(key) && keys.add(key)
+                    && name.isNotBlank() && name.length <= 200 && count >= 2
+                    && missing in 0..count && rule >= 0 && model >= 0 && unmarked >= 0
+                    && rule + model + unmarked == count && modelOnly == (model == count)
+                    && (field != "guesses" || modelOnly)
+                    && (amount == null || Regex("^\\d{1,30}\\.\\d{2}$").matches(amount))
+                    && verdict in setOf("harmful", "unnecessary") && advice.length <= 500) {
+                    "Invalid do-not-buy group"
+                }
+                Instant.parse(purchased)
+                FinanceAdviceGroup(key, name, count, amount, missing, rule, model, unmarked,
+                    modelOnly, verdict, advice, purchased)
+            }
+        }
+        val banned = groups("banned")
+        val guesses = groups("guesses")
+        require(available || banned.isEmpty() && guesses.isEmpty()) { "Unavailable advice cannot contain evidence" }
+        require(reason != "no_optional_items" || banned.isEmpty() && guesses.isEmpty()) { "Empty advice has evidence" }
+        return FinanceDoNotBuy(available, reason, banned, guesses)
+    }
+
+    fun productDecisions(json: JSONObject): FinanceProductDecisions {
+        val keys = mutableSetOf<String>()
+        fun parse(field: String): List<String> {
+            val array = json.getJSONArray(field)
+            require(array.length() <= 50000) { "Too many product decisions" }
+            return (0 until array.length()).map { index ->
+                require(array.get(index) is String) { "Invalid product decision key" }
+                val key = array.getString(index)
+                require(Regex("^[a-zа-я0-9]{1,256}$").matches(key) && keys.add(key)) {
+                    "Invalid product decision key"
+                }
+                key
+            }
+        }
+        return FinanceProductDecisions(parse("productKeys"), parse("confirmedProductKeys"))
     }
 
     fun personalInflation(json: JSONObject): FinancePersonalInflation {

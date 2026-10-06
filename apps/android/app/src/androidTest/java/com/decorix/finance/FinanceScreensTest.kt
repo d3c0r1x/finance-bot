@@ -88,6 +88,27 @@ class FinanceScreensTest {
         compose.onNodeWithText("Конфеты · Вы отметили как «не брать».").assertIsDisplayed()
     }
 
+    @Test fun doNotBuySeparatesModelGuessesAndSupportsHumanDecision() {
+        var decision: Pair<String, String>? = null
+        val chips = FinanceAdviceGroup("chips", "Чипсы", 2, "20.00", 0, 2, 0, 0,
+            false, "harmful", "", "2026-10-06T10:00:00Z")
+        val tea = FinanceAdviceGroup("tea", "Чай", 2, null, 2, 0, 2, 0,
+            true, "unnecessary", "Проверьте привычку", "2026-10-06T10:00:00Z")
+        val report = FinanceDoNotBuy(true, "available", listOf(chips), listOf(tea))
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            doNotBuy = report, productDecisions = FinanceProductDecisions(emptyList(), emptyList())),
+            onDoNotBuyDecision = { key, action -> decision = key to action })
+
+        compose.onNodeWithText("Не брать").performScrollTo().performClick()
+        compose.onNodeWithText("Догадки модели").assertIsDisplayed()
+        compose.onNodeWithText("Чай").assertIsDisplayed()
+        compose.onNodeWithText("Сумма неизвестна").assertIsDisplayed()
+        compose.onNodeWithText("Подтвердить «не брать»").performClick()
+        assertEquals("tea" to "confirm", decision)
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Model guesses").assertIsDisplayed()
+    }
+
     @Test fun personalInflationShowsReceiptOnlyDisclosureAndCoreBasketInRussianAndEnglish() {
         val inflation = FinancePersonalInflation(
             available = true, reasonCode = "available", asOf = "2026-10-06T12:00:00Z", windowDays = 90,
@@ -450,6 +471,7 @@ class FinanceScreensTest {
                       onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
                       onShoppingDecision: (String, String) -> Unit = { _, _ -> },
                       onShoppingCopy: (String) -> Unit = {},
+                      onDoNotBuyDecision: (String, String) -> Unit = { _, _ -> },
                       onPersonalInflationLoad: () -> Unit = {},
                       onRecurringLoad: () -> Unit = {},
                       onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> }) {
@@ -464,6 +486,7 @@ class FinanceScreensTest {
                 onCreateTelegramLink = onCreateTelegramLink,
                 onNotificationPreferencesSave = onNotificationPreferencesSave,
                 onShoppingDecision = onShoppingDecision, onShoppingCopy = onShoppingCopy,
+                onDoNotBuyDecision = onDoNotBuyDecision,
                 onPersonalInflationLoad = onPersonalInflationLoad,
                 onRecurringLoad = onRecurringLoad,
                 onRecurringDecision = onRecurringDecision,
