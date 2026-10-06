@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 06:54, Europe/Moscow.
+Updated: 2026-10-06 07:05, Europe/Moscow.
 
 ## Global plan
 
@@ -32,13 +32,14 @@ Updated: 2026-10-06 06:54, Europe/Moscow.
 | E2.2 Web profile/dashboard/transactions | Web RU/EN, CRUD/repeat/void, filters | IN PROGRESS — offline F03–F09 acceptance complete; live Keycloak/API E2E remains |
 | E2.3 Android OIDC slice | Login + transaction create/list APK E2E | COMPLETE |
 | E2 | Web/profile plus Android first API flow | IN PROGRESS | E1 | none |
-| E3 Budgets and debts | Core/Web/Android budgets, proposals, rolling food, debts, reports, text drafts and category/day charts | IN PROGRESS — F25/F26/F30/F32 acceptance complete; approved F31 charts verified; price/waste series, remaining F-parity, live API/auth and scale gates remain |
-| E4 Python and Telegram parity | Telegram gateway, receipt pipeline, local AI, import and Telegram flows | IN PROGRESS — F01/F02/F04/F05/F07/F25/F30/F32 acceptance complete; F10 external storage/ClamAV gate, F11, receipts/imports and remaining F-parity/runtime integrations remain |
+| E3 Budgets and debts | Core/Web/Android budgets, proposals, rolling food, debts, reports, text drafts and charts | IN PROGRESS — F25/F26/F30/F31/F32 acceptance complete; remaining F-parity, live API/auth and scale gates remain |
+| E4 Python and Telegram parity | Telegram gateway, receipt pipeline, local AI, import and Telegram flows | IN PROGRESS — F10 storage/ClamAV, F01/F02/F04/F05/F07/F25/F30/F32 acceptance complete; F11, imports and remaining F-parity/runtime integrations remain |
 | F25 | Rolling food consistency | COMPLETE — reports, Telegram captions, and scheduled digest share Core DTO formatting | F32 | pending |
 | F26 | Safe-to-spend cash planning | COMPLETE — current recurring history, payday boundary, reserve and no-plan cases verified | F38 | pending |
-| F31 | Report charts and PNG | IN PROGRESS — Web/Android/PNG category, day and limit charts verified; F40 daily optional series now available; price series awaits F33 | F33, F40 | pending |
-| F31.2 | Daily optional-spend chart in Web, Android and Telegram | LOCAL GREEN — Web, Python/Telegram, contracts and isolated Android instrumentation pass; commit/push next | F40.3 | pending |
+| F31 | Report charts and PNG | COMPLETE — Web/Android/PNG category, day, limit, real price-history and optional-spend charts; text fallback | F33, F40 | a07f7cb |
+| F31.2 | Daily optional-spend chart in Web, Android and Telegram | COMPLETE — local gates and GitHub workflows GREEN | F40.3 | a07f7cb |
 | F32 | Durable daily and weekly digest delivery | COMPLETE — PostgreSQL schedules/outbox, Core API, Python worker, Web/Android settings | F25 rendering | pending |
+| F33 | Authoritative price projection and replay | COMPLETE — Go projection, Core API, Web/Telegram actual-history charts; ClickHouse/Redpanda CI replay GREEN | F34 | a07f7cb |
 | F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
 | F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
@@ -48,17 +49,17 @@ Updated: 2026-10-06 06:54, Europe/Moscow.
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
 | F40.3 | Web, Android and Telegram optional-spend presentation | COMPLETE — local client gates and GitHub regression GREEN | F40.2 | ec1a373 |
+| F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F31.2 — display Core's authoritative optional-spend-per-day series in Web, Android and Telegram report charts/text.
-- Status: LOCAL_GREEN_COMMIT_PENDING — F31.2 acceptance and client regression are GREEN; commit/push next. F40.3 is committed/pushed as `ec1a373119263914f23f5e5f7fcbd021bd2947a7`, local gates and all GitHub workflows GREEN.
-- Acceptance: RU/EN Web and Android and Telegram PNG/text show the same `optionalByDay` dates and values; render only when F40 waste report is available; unavailable/partial states never create daily totals or placeholder chart lines; existing expense/category/limit charts and text fallback remain intact.
-- Data boundary: consume `optionalByDay` as returned by Core; it already includes exact zero days for complete reports. Never infer, interpolate, or recalculate client-side. Price series remains a separate F33-dependent F31 gate.
-- Design: reuse report window/timezone and per-member `user_product_decisions`; send bounded authorized facts to stateless Go advice analytics; keep approved financial data in PostgreSQL.
-- User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `ec1a373` (F31.2 changes uncommitted).
-- Updated at: 2026-10-06 06:54 Europe/Moscow.
+- ID and outcome: F41 — preserve model-only product hypotheses as reviewable suggestions; only a human decision may block or allow a product.
+- Status: ACTIVE — scope selected from `PLAN.md`; existing F20/F40 behavior under review before writing focused RED acceptance.
+- Acceptance: model-only “do not buy” evidence never hides a purchase and never becomes a user decision; explicit owner confirm/allow persists member-scoped provenance, affects only the chosen product, and is reversible/audited; existing user decisions remain authoritative.
+- Data boundary: model evidence is advisory and separate from confirmed `user_product_decisions`; all blocking and visibility decisions remain Core/PostgreSQL-owned.
+- User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `a07f7cb`.
+- Updated at: 2026-10-06 07:05 Europe/Moscow.
 
 ## Verification evidence
 
@@ -69,7 +70,8 @@ Updated: 2026-10-06 06:54, Europe/Moscow.
 | F34 Web | `pnpm --dir apps/web test`; `pnpm --dir apps/web build` | F34 worktree | PASS, 40/40; build pass | Catalog and one-purchase search; chart only with two real points |
 | F34 Python / contracts | presentation + Telegram pytest; `tools/contracts` pytest | F34 worktree | PASS, 84 passed; 48 passed/2 optional skipped | `/price` response validation, PNG behavior, public/private/Telegram schemas |
 | F34 Core suite | `:services:core:check --no-daemon` | F34 worktree | PASS | Full Core unit/check gate; focused PostgreSQL acceptance also passed |
-| F33 live event store | tagged Kafka/ClickHouse replay | no endpoint configured | NOT_RUN (explicit test SKIP) | Separate F33 runtime gate; F34 acceptance itself is complete |
+| F33 live event store | tagged Kafka/ClickHouse replay | GitHub run `37411323045` on `a07f7cb` | PASS | `go-price-integration`: ClickHouse and Redpanda started; price projection/replay and recurring projection/replay passed |
+| F10 private receipt storage | `.github/workflows/receipt-storage.yml` integration | GitHub run `37406496544` on `68253b7` | PASS | Authenticated SeaweedFS S3 operations and real ClamAV malware scan passed |
 | F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
 | F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, commit `b1e64c4` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
 | F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
@@ -99,7 +101,7 @@ Updated: 2026-10-06 06:54, Europe/Moscow.
 
 ## Next action
 
-- Review the final staged file list, commit and push F31.2, then record its remote CI result before starting the next unfinished main-plan goal.
+- F31/F33/F10 gates are closed with local and CI evidence. For F41, inspect existing F20/F40 decision and suggestion seams, add focused policy and PostgreSQL acceptance tests, observe RED, then implement the smallest Core/Web/Android/Telegram slice.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
@@ -137,6 +139,7 @@ Updated: 2026-10-06 06:54, Europe/Moscow.
 - Web and Android render Core `optionalByDay` dates and exact zero/non-zero amounts only when waste data is available. Telegram PNG adds a distinct optional-spend series to the daily graph; text fallback lists the exact Core dates and amounts. Python rejects incomplete available series and non-empty unavailable series rather than filling values.
 - A text-renderer call initially used names discarded during unpacking; stack trace traced all six failures to that single call. Keeping `from_date`/`to_date` fixes it; the focused renderer suite passes 24/24 and the complete presentation/Telegram suite passes 114/114.
 - F31.2 implementation is GREEN locally. Remaining action is separate feature commit/push and GitHub check; F31's price series remains F33-dependent.
+- Commit `a07f7cb65cfab5dc76698bc9dc84ff28e1ca473d` is on `origin/feat/saas-rewrite`; GitHub workflows `37411323031` and `37411323045` started and are pending.
 - Preserve current expense/category/limit chart behavior, report text fallback, and existing user files. Commit goal separately only after local and CI gates.
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
@@ -1111,3 +1114,11 @@ Updated: 2026-10-06 06:54, Europe/Moscow.
 - Existing Core `RecurringProjectionPolicy` supports F26 safe-to-spend but does not expose the F38 read model or ranges. F38 will keep F26 regression behavior while adding its shared Go implementation and member-scoped view.
 - Observed RED: `go test ./recurring -count=1` fails because `Transaction` and `BuildProjection` are not implemented. The first deterministic fixture covers local timezone, weekly/monthly series, amount/interval ranges, next dates, warning/overdue separation, income and no-fake-zero behavior.
 - Next: implement the Go policy and its golden contract fixture, then add event projection and authenticated Core/client acceptance.
+
+## E3.42 F10, F31 and F33 acceptance closure — 2026-10-06 07:05 MSK
+
+- F33 tagged integration gate is GREEN on GitHub run `37411323045`, commit `a07f7cb`: Go tests/vet passed; ClickHouse and Redpanda started; Kafka-to-ClickHouse price projection/replay passed.
+- F31 now has authoritative price-history charts via F34 for Web and Telegram PNG (only two or more real receipt points), Core-backed optional-spend charts via F31.2, existing category/day/limit charts, and text fallback. F31.2 local Web/Python/contracts/Android gates and both GitHub workflows `37411323031` and `37411323045` passed.
+- F10 storage gate is GREEN on GitHub run `37406496544`, commit `68253b7`: authenticated SeaweedFS S3 operations and real ClamAV malware scanning passed.
+- Contracts regression after parity updates: `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` — 42 passed. No product code changed in this evidence update.
+- F10, F31 and F33 are complete. Next: F41, preserve model-only product hypotheses as reviewable suggestions and require explicit human decision before any product block/allow behavior.

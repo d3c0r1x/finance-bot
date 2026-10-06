@@ -123,7 +123,7 @@ features:
     feature: "Фото чека, прогресс, draft; `expenses.py`"
     target: "J receipt job; P OCR worker; W upload/review"
     acceptance: "Длительный job показывает статус; повтор update не создаёт второй job"
-    status: in_progress
+    status: complete
     tests:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - services/core/src/test/java/com/decorix/finance/core/api/ReceiptImageValidatorTest.java
@@ -136,7 +136,7 @@ features:
       - tools/contracts/test_contracts.py
       - .github/workflows/receipt-storage.yml
     evidence:
-      - "Core validates JPEG/PNG uploads, stores private quarantine objects, scans with ClamAV, runs a durable leased OCR job, saves one owner-scoped review draft and OCR evidence, and never posts a transaction. RU/EN Web tests cover upload, bounded progress polling and opening OCR review. Full local checks pass: Core 177 tests (0 failures, 2 container-gated skips), Python/contracts 211 passed/3 skipped, Web 34/34 plus production build, legacy smoke/handler/receipt scripts pass. Authenticated SeaweedFS S3 and real ClamAV EICAR integration tests are wired in receipt-storage.yml but have not run because this host has neither Docker nor Podman; F10 stays in progress pending that gate."
+      - "Core validates JPEG/PNG uploads, stores private quarantine objects, scans with ClamAV, runs a durable leased OCR job, saves one owner-scoped review draft and OCR evidence, and never posts a transaction. RU/EN Web tests cover upload, bounded progress polling and opening OCR review. Full local checks pass: Core 177 tests (0 failures, 2 container-gated skips), Python/contracts 211 passed/3 skipped, Web 34/34 plus production build, legacy smoke/handler/receipt scripts pass. GitHub run 37406496544 passed the authenticated SeaweedFS S3 operations and real ClamAV malware-scanning integration on commit 68253b7; F10 is complete."
     intentional_differences: []
   - id: F11
     feature: "Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
@@ -427,7 +427,7 @@ features:
     feature: "Графики категорий, лимитов, дней, цен, необязательного"
     target: "W charts; P PNG renderer из готового DTO"
     acceptance: "Данные одни; при недоступном renderer остаётся текст; экспорт PNG читаем"
-    status: in_progress
+    status: complete
     tests:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - apps/web/src/App.test.tsx
@@ -435,7 +435,7 @@ features:
       - services/python/presentation/tests/test_report_renderer.py
       - tools/contracts/test_contracts.py
     evidence:
-      - "Core-owned period/category/day/limit data drives RU/EN Web and Android charts plus Telegram PNG; zero-spend dates stay present, overrun bars cap at 100% while exact negative remaining stays visible, and PNG failure falls back to text. F31.2 now plots authoritative F40 optionalByDay values in Web, Android and Telegram PNG, and lists exact dates/amounts in Telegram text fallback. Unavailable/partial waste has no daily series; Python validates complete windows and never fills client values. GREEN: Web 49/49 plus TypeScript/Vite build, Python presentation/Telegram 114 passed, contracts 42 passed, Android 46/46 on isolated FinanceBotF38 and APK installed/launched (SHA-256 AACE4090332EE28A769688F50E62EFE080818A7B445F824540F0A66BD9BE3C5A). F31 remains in progress for authoritative F33 price history."
+      - "Core-owned period/category/day/limit data drives RU/EN Web and Android charts plus Telegram PNG; zero-spend dates stay present, overrun bars cap at 100% while exact negative remaining stays visible, and PNG failure falls back to text. F34 renders the authoritative F33 purchase history as real price charts in Web and Telegram PNG, only with at least two actual points; single-purchase history has no invented baseline/chart. F31.2 plots authoritative F40 optionalByDay values in Web, Android and Telegram PNG, and lists exact dates/amounts in Telegram text fallback. Unavailable/partial waste has no daily series; Python validates complete windows and never fills client values. GREEN: Web 49/49 plus TypeScript/Vite build, Python presentation/Telegram 114 passed, contracts 42 passed, Android 46/46 on isolated FinanceBotF38 and APK installed/launched (SHA-256 AACE4090332EE28A769688F50E62EFE080818A7B445F824540F0A66BD9BE3C5A). Commit `a07f7cb65cfab5dc76698bc9dc84ff28e1ca473d` pushed; GitHub workflows 37411323031 and 37411323045 passed. F31 complete."
     intentional_differences: []
   - id: F32
     feature: "Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
@@ -460,7 +460,7 @@ features:
     feature: "Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
     target: "G price projection; J query API"
     acceptance: "Новый чек не входит в собственную baseline; разные упаковки/бренды не сливаются автоматически"
-    status: in_progress
+    status: complete
     tests:
       - services/analytics-go/prices/projection_test.go
       - services/analytics-go/prices/kafka_worker_test.go
@@ -469,7 +469,7 @@ features:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - tools/contracts/test_contracts.py
     evidence:
-      - "Go `price-projection.v1` computes exact unit prices, prior-only medians and bounded up/down signals; it excludes the current receipt, future points, conflicting known brands/packages and cross-member history. Core writes `receipt.confirmed` to the transactional outbox and exposes owner/member-authorized price history through Core and BFF. The Go Kafka group writes to ClickHouse before synchronous offset commit, retries boundedly, and sends invalid event metadata to DLQ without financial payload. Public and internal schemas consistently define median, change, fractional relative value (0.125000 means 12.5 percent), signal and history. Web lazily loads this Core result only for confirmed receipt items and plots real purchase points; no-history response shows current price without invented baseline or chart. F34 adds member-scoped catalog/search, Web route and Telegram `/price` PNG over this history API. Its acceptance is complete; the F33 Kafka/ClickHouse replay remains a separate NOT_RUN runtime gate because endpoints are unavailable. Docker, Podman and WSL are absent; the CI integration job has not run remotely. F31 report price/waste series remain absent until F33/F40 authoritative datasets are ready."
+      - "Go `price-projection.v1` computes exact unit prices, prior-only medians and bounded up/down signals; it excludes the current receipt, future points, conflicting known brands/packages and cross-member history. Core writes `receipt.confirmed` to the transactional outbox and exposes owner/member-authorized price history through Core and BFF. The Go Kafka group writes to ClickHouse before synchronous offset commit, retries boundedly, and sends invalid event metadata to DLQ without financial payload. Public and internal schemas consistently define median, change, fractional relative value (0.125000 means 12.5 percent), signal and history. Web lazily loads this Core result only for confirmed receipt items and plots real purchase points; no-history response shows current price without invented baseline or chart. F34 adds member-scoped catalog/search, Web route and Telegram `/price` PNG over this history API. GitHub run 37411323045 passed Go tests/vet and its `go-price-integration` job started ClickHouse and Redpanda, then passed Kafka-to-ClickHouse price projection/replay and recurring projection/replay on commit `a07f7cb`; the F33 runtime gate is complete."
     intentional_differences: []
   - id: F34
     feature: "Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
