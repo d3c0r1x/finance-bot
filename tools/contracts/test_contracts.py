@@ -796,6 +796,36 @@ def test_advice_waste_internal_contract_is_strict_and_fixture_matches_schema():
     Draft202012Validator(report_document, format_checker=FormatChecker()).validate(expected_report)
 
 
+def test_advice_evidence_internal_contract_is_strict_and_fixture_matches_schema():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+    operation = spec["paths"]["/internal/v1/analytics/advice/evidence-groups"]["post"]
+    assert operation["operationId"] == "groupAdviceEvidence"
+    assert operation["security"] == [{"serviceBearer": []}]
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/EvidenceRequest",
+    }
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/EvidenceResponse",
+    }
+    schemas = spec["components"]["schemas"]
+    for name in ("EvidenceRequest", "EvidenceLine", "EvidenceResponse", "EvidenceGroup"):
+        assert schemas[name]["additionalProperties"] is False
+    fixture = json.loads((ROOT / "contracts/analytics/advice-evidence.v1.json").read_text("utf-8"))
+    request_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/EvidenceRequest",
+    }
+    response_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": schemas},
+        "$ref": "#/components/schemas/EvidenceResponse",
+    }
+    Draft202012Validator(request_document, format_checker=FormatChecker()).validate(fixture["input"])
+    Draft202012Validator(response_document, format_checker=FormatChecker()).validate(
+        dict(fixture["expected"], inputVersion="0" * 64))
+
+
 def test_finance_report_exposes_server_computed_local_day_chart_data():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     report = spec["components"]["schemas"]["FinanceReport"]

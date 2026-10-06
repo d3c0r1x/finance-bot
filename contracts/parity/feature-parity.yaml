@@ -617,9 +617,13 @@ features:
     feature: "«Не брать», отдельные догадки модели, подтверждение/разрешение"
     target: "J decisions и policy; G evidence groups"
     acceptance: "Model-only догадка не скрывает покупку и не становится целью без решения человека"
-    status: planned
-    tests: []
-    evidence: []
+    status: in_progress
+    tests:
+      - services/analytics-go/advice/evidence_test.go
+      - services/analytics-go/advice/evidence_api_test.go
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "F41.1 groups at least two harmful/unnecessary receipt verdicts by Core-supplied stable product key. Go returns versioned counts, exact-or-null amounts, latest advice, and source counts; only an exclusively model-sourced group is marked modelOnly. A modelOnly flag is evidence, not a purchase block or user decision. Strict authenticated internal HTTP and golden OpenAPI fixture are locally GREEN: full Go tests/vet and 43 contract tests pass. Core member-scoped decision overlay, list/query API, and RU/EN Web/Telegram/Android controls remain F41.2/F41.3 work."
     intentional_differences: []
   - id: F42
     feature: "Пересчёт старых verdict по текущим правилам и отчёт изменений"

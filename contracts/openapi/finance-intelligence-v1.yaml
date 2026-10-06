@@ -118,6 +118,26 @@ paths:
         '400': { description: Request is malformed or contains invalid receipt facts }
         '401': { description: Internal service token is missing or invalid }
         '413': { description: Request exceeds the supported body size }
+  /internal/v1/analytics/advice/evidence-groups:
+    post:
+      operationId: groupAdviceEvidence
+      security:
+        - serviceBearer: []
+      description: Groups bounded, Core-authorized confirmed receipt facts across purchase history. Model-only is evidence classification; Core owns all personal decisions and purchase visibility.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvidenceRequest' }
+      responses:
+        '200':
+          description: Versioned product evidence groups with model-only provenance kept separate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceResponse' }
+        '400': { description: Request is malformed or contains invalid receipt facts }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the supported body size }
   /internal/v1/budget-proposals:
     post:
       operationId: createHistoryBudgetShares
@@ -519,6 +539,60 @@ components:
           propertyNames: { pattern: '^[A-Z]{3}$' }
           additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
       description: No series yields empty lists and null totals. Cross-currency totals are reported by currency only.
+    EvidenceRequest:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/EvidenceLine' }
+      description: Core selects confirmed receipt items tied to posted personal expenses. Go cannot authorize callers or mutate decisions.
+    EvidenceLine:
+      type: object
+      additionalProperties: false
+      required: [itemId, productKey, name, lineSum, verdict, verdictSource, advice, purchasedAt, itemVersion]
+      properties:
+        itemId: { type: string, format: uuid }
+        productKey: { type: string, maxLength: 256, pattern: '^[a-zа-я0-9]*$' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        lineSum: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,17})\.\d{2}$' }
+        verdict: { type: string, enum: [useful, neutral, harmful, unnecessary, ''] }
+        verdictSource: { type: string, maxLength: 32 }
+        advice: { type: string, maxLength: 500 }
+        purchasedAt: { type: string, format: date-time }
+        itemVersion: { type: integer, minimum: 1 }
+    EvidenceResponse:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, inputVersion, groups]
+      properties:
+        algorithmVersion: { type: string, const: advice-evidence.v1 }
+        inputVersion: { type: string, pattern: '^[0-9a-f]{64}$' }
+        groups:
+          type: array
+          maxItems: 25000
+          items: { $ref: '#/components/schemas/EvidenceGroup' }
+      description: Empty groups mean no product has two optional verdicts; no personal block is implied.
+    EvidenceGroup:
+      type: object
+      additionalProperties: false
+      required: [productKey, productName, count, amount, missingAmountCount, ruleCount, modelCount,
+                 unmarkedCount, modelOnly, latestVerdict, latestAdvice, lastPurchasedAt]
+      properties:
+        productKey: { type: string, minLength: 1, maxLength: 256, pattern: '^[a-zа-я0-9]+$' }
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        count: { type: integer, minimum: 2, maximum: 50000 }
+        amount: { type: [string, 'null'], pattern: '^\d+\.\d{2}$', description: Null if any contributing receipt amount is missing. }
+        missingAmountCount: { type: integer, minimum: 0, maximum: 50000 }
+        ruleCount: { type: integer, minimum: 0, maximum: 50000 }
+        modelCount: { type: integer, minimum: 0, maximum: 50000 }
+        unmarkedCount: { type: integer, minimum: 0, maximum: 50000, description: Default, human, unknown or absent source. }
+        modelOnly: { type: boolean, description: True only when every contributing optional verdict came from a model; never a block decision. }
+        latestVerdict: { type: string, enum: [harmful, unnecessary] }
+        latestAdvice: { type: string, maxLength: 500 }
+        lastPurchasedAt: { type: string, format: date-time }
     WasteRequest:
       type: object
       additionalProperties: false

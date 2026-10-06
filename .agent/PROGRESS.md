@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 07:05, Europe/Moscow.
+Updated: 2026-10-06 07:23, Europe/Moscow.
 
 ## Global plan
 
@@ -49,17 +49,19 @@ Updated: 2026-10-06 07:05, Europe/Moscow.
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
 | F40.3 | Web, Android and Telegram optional-spend presentation | COMPLETE — local client gates and GitHub regression GREEN | F40.2 | ec1a373 |
+| F41 | Personal “do not buy” list, separate model hypotheses and human decisions | IN PROGRESS — Go grouping local GREEN; Core and clients remain | F40 | pending |
+| F41.1 | Go evidence groups for the personal “do not buy” list | COMMIT_PENDING — full Go and contract gates GREEN | F40 facts | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F41 — preserve model-only product hypotheses as reviewable suggestions; only a human decision may block or allow a product.
-- Status: ANALYSIS — bounded design presented; no F41 product code changed while awaiting design approval.
-- Acceptance: model-only “do not buy” evidence never hides a purchase and never becomes a user decision; explicit owner confirm/allow persists member-scoped provenance, affects only the chosen product, and is reversible/audited; existing user decisions remain authoritative.
-- Data boundary: model evidence is advisory and separate from confirmed `user_product_decisions`; all blocking and visibility decisions remain Core/PostgreSQL-owned.
+- ID and outcome: F41.1 — Go groups receipt verdict evidence into stable product groups; F41.2 owns Core decisions and F41.3 client controls.
+- Status: COMMIT_PENDING — observed Go policy/API and contract RED; full Go tests/vet and contracts now GREEN. Review, commit, push, then verify CI.
+- Acceptance: two or more `harmful`/`unnecessary` verdicts on the same normalized key form a group; exclusively model-sourced groups are marked `modelOnly`; mixed/unknown provenance stays explicit; one-off evidence does not form a group; sums remain exact or nullable when evidence lacks amounts; request validation is strict and output order deterministic.
+- Data boundary: Go receives bounded, already authorized receipt facts and returns evidence only. Core/PostgreSQL later overlays personal `allowed`/`confirmed` decisions; Go never writes business tables or decides to hide purchases.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, and no placeholder financial data.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `a07f7cb`.
-- Updated at: 2026-10-06 07:05 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7a0f992`.
+- Updated at: 2026-10-06 07:23 Europe/Moscow.
 
 ## Verification evidence
 
@@ -72,6 +74,13 @@ Updated: 2026-10-06 07:05, Europe/Moscow.
 | F34 Core suite | `:services:core:check --no-daemon` | F34 worktree | PASS | Full Core unit/check gate; focused PostgreSQL acceptance also passed |
 | F33 live event store | tagged Kafka/ClickHouse replay | GitHub run `37411323045` on `a07f7cb` | PASS | `go-price-integration`: ClickHouse and Redpanda started; price projection/replay and recurring projection/replay passed |
 | F10 private receipt storage | `.github/workflows/receipt-storage.yml` integration | GitHub run `37406496544` on `68253b7` | PASS | Authenticated SeaweedFS S3 operations and real ClamAV malware scan passed |
+| F41.1 Go baseline | `go test ./... -count=1` | HEAD `7a0f992` before F41 code; Go 1.27.1 SHA-256-verified portable toolchain | PASS | advice, prices, recurring and projector tests all pass |
+| F41.1 observed RED | `go test ./advice -run TestBuildEvidenceGroups -count=1` | new test only, no F41 production code | FAIL expected | Compiler reports missing `EvidenceRequest`, `EvidenceLine`, `BuildEvidenceGroups`, `EvidenceAlgorithmVersion` |
+| F41.1 HTTP/contract RED | focused Go HTTP and Python contract tests | F41.1 tests before handler/schema | FAIL expected | Missing `NewEvidenceHandler` and OpenAPI evidence-groups path |
+| F41.1 focused | `go test ./advice -run 'TestEvidence|TestBuildEvidenceGroups' -count=1` | F41.1 working tree | PASS | Threshold, source classification, nullable amount, stable hash/order, strict HTTP and golden fixture |
+| F41.1 Go regression | `go test ./... -count=1`; `go vet ./...` | F41.1 working tree, portable Go 1.27.1 | PASS | All Go packages and vet pass |
+| F41.1 Go build | `go build -o %TEMP%/finance-bot-analytics-f41.exe ./cmd/analytics-api` | F41.1 working tree | PASS | Analytics API binary built; registered evidence-groups route compiles |
+| F41.1 contracts | `pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | F41.1 working tree | PASS, 43 tests | Authenticated internal path, strict request/response schemas and golden fixture validate |
 | F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
 | F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, commit `b1e64c4` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
 | F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
@@ -101,7 +110,7 @@ Updated: 2026-10-06 07:05, Europe/Moscow.
 
 ## Next action
 
-- F31/F33/F10 gates are closed with local and CI evidence. F41 next requires approval of the bounded design; after approval, add focused Go policy and PostgreSQL/API RED acceptance, then implement the agreed Core and RU/EN clients.
+- Review the exact F41.1 staged paths, commit and push after local GREEN, then verify GitHub CI; continue with F41.2 Core member-scoped evidence/decisions.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
