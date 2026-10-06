@@ -82,6 +82,7 @@ export type FinanceWasteReport = {
   available: boolean; reasonCode: string; completeness: 'complete' | 'partial';
   reviewedSpend: string | null; optionalSpend: string | null; optionalShare: string | null;
   reviewedItemCount: number; optionalItemCount: number; missingAmountCount: number;
+  optionalByDay: Record<string, string>;
   bySource: Record<string, string>;
   topItems: Array<{ name: string; amount: string; verdict: string; source: string }>;
   corrected: Array<{ productName: string; count: number; amount: string }>;

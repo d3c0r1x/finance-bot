@@ -1222,6 +1222,9 @@ private fun ReportScreen(state: FinanceUiState, language: String,
             val dailyMaximum = report.expenseByDay.values.maxByOrNull {
                 it.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO
             } ?: "0.00"
+            val optionalDailyMaximum = report.waste.optionalByDay.values.maxByOrNull {
+                it.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO
+            } ?: "0.00"
             LazyColumn(Modifier.weight(1f).testTag("report-results"), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                 item {
                     Card(Modifier.fillMaxWidth()) {
@@ -1291,6 +1294,19 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                         Text("${entry.key}: ${entry.value} ${report.currency}")
                         LinearProgressIndicator(progress = { amountFraction(entry.value, dailyMaximum) },
                             modifier = Modifier.fillMaxWidth())
+                    }
+                }
+                if (report.waste.available && report.waste.optionalByDay.isNotEmpty()) {
+                    item {
+                        Text(if (russian) "Необязательные покупки по дням" else "Optional purchases by day",
+                            style = MaterialTheme.typography.titleMedium)
+                    }
+                    items(report.waste.optionalByDay.toSortedMap().entries.toList()) { entry ->
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("${entry.key}: ${entry.value} ${report.currency}")
+                            LinearProgressIndicator(progress = { amountFraction(entry.value, optionalDailyMaximum) },
+                                modifier = Modifier.fillMaxWidth())
+                        }
                     }
                 }
             }

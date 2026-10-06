@@ -75,6 +75,7 @@ const copy = {
     monthlyFamilyBudget: 'Семейный месячный лимит', monthlyPersonalBudget: 'Личный месячный лимит',
     reportWindow: 'Даты и часовой пояс',
     dailyExpenses: 'Расходы по дням', budgetUsage: 'Использование месячных лимитов',
+    dailyOptionalSpend: 'Необязательные покупки по дням',
     optionalPurchases: 'Необязательные покупки', wasteOfReviewed: 'от проверенных', wasteReviewedItems: 'Проверенных позиций',
     wasteOptionalItems: 'Необязательных позиций', wasteSource: 'Источник', wasteTopItems: 'Необязательные позиции',
     wasteCorrected: 'Исправленные позиции', wasteMissingAmounts: 'Не все позиции чеков имеют сумму ({count}); итоги не рассчитаны.',
@@ -143,6 +144,7 @@ const copy = {
     monthlyFamilyBudget: 'Family monthly limit', monthlyPersonalBudget: 'Personal monthly limit',
     reportWindow: 'Dates and time zone',
     dailyExpenses: 'Daily expenses', budgetUsage: 'Monthly budget usage',
+    dailyOptionalSpend: 'Optional purchases by day',
     optionalPurchases: 'Optional purchases', wasteOfReviewed: 'of reviewed', wasteReviewedItems: 'Reviewed items',
     wasteOptionalItems: 'Optional items', wasteSource: 'Source', wasteTopItems: 'Optional items',
     wasteCorrected: 'Corrected items', wasteMissingAmounts: 'Some receipt items have no amount ({count}); totals not calculated.',
@@ -897,6 +899,9 @@ function ReportPanel({ t, tenantId, language }: { t: Translations; tenantId: str
               month={report.data.toDate.slice(0, 7)} format={format} />}
           <ReportBarChart label={t.expenseCategories} values={Object.entries(report.data.expenseByCategory)} format={format} empty={t.empty} />
           <ReportBarChart label={t.dailyExpenses} values={Object.entries(report.data.expenseByDay)} format={format} empty={t.empty} />
+          {report.data.waste.available && <ReportBarChart label={t.dailyOptionalSpend}
+            values={Object.entries(report.data.waste.optionalByDay).sort(([left], [right]) => left.localeCompare(right))}
+            format={format} empty={t.empty} />}
         </div>
       </>}
   </section>;

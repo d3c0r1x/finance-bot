@@ -118,6 +118,7 @@ class FinanceModelsTest {
              "waste":{"available":true,"reasonCode":"available","completeness":"complete",
                "reviewedSpend":"120.00","optionalSpend":"20.00","optionalShare":"0.166667",
                "reviewedItemCount":5,"optionalItemCount":2,"missingAmountCount":0,
+               "optionalByDay":{"2026-10-01":"0.00","2026-10-02":"13.00"},
                "bySource":{"model":"13.00","rule":"7.00"},
                "topItems":[{"name":"Сок","amount":"13.00","verdict":"optional","source":"model"}],
                "corrected":[{"productName":"Молоко","count":1,"amount":"30.00"}]}}
@@ -132,6 +133,7 @@ class FinanceModelsTest {
         assertNull(report.weekendSharePercent)
         assertEquals("-14000.50", report.monthlyBudgetRemaining)
         assertEquals("20.00", report.waste.optionalSpend)
+        assertEquals(mapOf("2026-10-01" to "0.00", "2026-10-02" to "13.00"), report.waste.optionalByDay)
         assertEquals("13.00", report.waste.bySource["model"])
         assertEquals("Сок", report.waste.topItems.single().name)
         assertEquals("Молоко", report.waste.corrected.single().productName)
@@ -149,13 +151,14 @@ class FinanceModelsTest {
                "historyWeeks":0,"paceStatus":"insufficient_history","paceShare":null},
              "waste":{"available":false,"reasonCode":"missing_amounts","completeness":"partial",
                "reviewedSpend":null,"optionalSpend":null,"optionalShare":null,"reviewedItemCount":2,
-               "optionalItemCount":0,"missingAmountCount":1,"bySource":{},"topItems":[],"corrected":[]}}
+               "optionalItemCount":0,"missingAmountCount":1,"bySource":{},"optionalByDay":{},"topItems":[],"corrected":[]}}
         """.trimIndent()))
 
         assertEquals(false, report.waste.available)
         assertEquals("missing_amounts", report.waste.reasonCode)
         assertNull(report.waste.optionalSpend)
         assertEquals(1, report.waste.missingAmountCount)
+        assertEquals(emptyMap<String, String>(), report.waste.optionalByDay)
     }
 
     @Test fun parsesBudgetOverviewAndRollingFoodStatusWithoutRecomputingMoney() {

@@ -360,6 +360,22 @@ class FinanceScreensTest {
         compose.onNodeWithText("Source model: 13.00 RUB").assertIsDisplayed()
     }
 
+    @Test fun reportShowsCoreOptionalSpendByDayFromAvailableWaste() {
+        val waste = report().waste.copy(optionalByDay = mapOf(
+            "2026-10-01" to "0.00", "2026-10-02" to "13.00", "2026-10-03" to "7.00"))
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            report = report().copy(toDate = "2026-10-03", waste = waste)))
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithTag("report-results").performScrollToIndex(4)
+        compose.onNodeWithText("Необязательные покупки по дням").assertIsDisplayed()
+        compose.onNodeWithTag("report-results").performScrollToIndex(5)
+        compose.onNodeWithText("2026-10-01: 0.00 RUB").assertIsDisplayed()
+        compose.onNodeWithTag("report-results").performScrollToIndex(6)
+        compose.onNodeWithText("2026-10-02: 13.00 RUB").assertIsDisplayed()
+        compose.onNodeWithTag("report-results").performScrollToIndex(7)
+        compose.onNodeWithText("2026-10-03: 7.00 RUB").assertIsDisplayed()
+    }
+
     @Test fun reportUnavailableWasteShowsReasonWithoutZeroAmount() {
         val unavailable = FinanceWasteReport(false, "missing_amounts", "partial", null, null, null,
             2, 0, 1, emptyMap(), emptyList(), emptyList())
@@ -368,6 +384,7 @@ class FinanceScreensTest {
         compose.onNodeWithText("Отчёты").performScrollTo().performClick()
         compose.onNodeWithTag("report-results").performScrollToIndex(1)
         compose.onNodeWithText("Не все позиции чеков имеют сумму (1); итоги не рассчитаны.").assertIsDisplayed()
+        compose.onNodeWithText("Необязательные покупки по дням").assertDoesNotExist()
         compose.onNodeWithText("0.00 ₽").assertDoesNotExist()
     }
 
@@ -503,5 +520,6 @@ class FinanceScreensTest {
         waste = FinanceWasteReport(true, "available", "complete", "120.00", "20.00", "0.166667",
             5, 2, 0, mapOf("model" to "13.00", "rule" to "7.00"),
             listOf(FinanceWasteItem("Сок", "13.00", "optional", "model")),
-            listOf(FinanceWasteCorrection("Молоко", 1, "30.00"))))
+            listOf(FinanceWasteCorrection("Молоко", 1, "30.00")),
+            optionalByDay = mapOf("2026-10-01" to "0.00")))
 }

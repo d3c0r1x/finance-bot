@@ -435,7 +435,7 @@ features:
       - services/python/presentation/tests/test_report_renderer.py
       - tools/contracts/test_contracts.py
     evidence:
-      - "The user-approved F31 slice is verified: Core-owned period/category/day/limit data drives RU/EN Web and Android charts plus Telegram PNG; zero-spend dates stay present, overrun bars cap at 100% while exact negative remaining stays visible, and PNG failure falls back to text. No price or optional-purchase placeholders exist. Current regression evidence: Core 201 passed/2 integration skips, Web 36/36 plus TypeScript, Android emulator 26/26, Python report/digest/worker/Telegram command 71/71, and contracts 46 passed/2 skipped. F31 remains in progress only for price and optional-purchase series, which wait for authoritative F33/F40 data."
+      - "Core-owned period/category/day/limit data drives RU/EN Web and Android charts plus Telegram PNG; zero-spend dates stay present, overrun bars cap at 100% while exact negative remaining stays visible, and PNG failure falls back to text. F31.2 now plots authoritative F40 optionalByDay values in Web, Android and Telegram PNG, and lists exact dates/amounts in Telegram text fallback. Unavailable/partial waste has no daily series; Python validates complete windows and never fills client values. GREEN: Web 49/49 plus TypeScript/Vite build, Python presentation/Telegram 114 passed, contracts 42 passed, Android 46/46 on isolated FinanceBotF38 and APK installed/launched (SHA-256 AACE4090332EE28A769688F50E62EFE080818A7B445F824540F0A66BD9BE3C5A). F31 remains in progress for authoritative F33 price history."
     intentional_differences: []
   - id: F32
     feature: "Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
@@ -598,7 +598,7 @@ features:
     feature: "Сумма/доля необязательного, источники verdict, исправленные позиции"
     target: "G advice analytics; J decisions overlay"
     acceptance: "Знаменатель — позиции с сохранённым verdict; null не становится neutral evidence; owner-level allow исправление видно отдельно"
-    status: in_progress
+    status: complete
     tests:
       - services/analytics-go/advice/waste_test.go
       - services/analytics-go/advice/waste_api_test.go
@@ -611,7 +611,7 @@ features:
       - services/python/telegram_gateway/tests/test_commands.py
     evidence:
       - "F40.1 implements the versioned Go advice-waste.v1 algorithm and authenticated internal API. Exact reviewed/optional totals, verdict/source provenance, owner-allowed correction visibility, deterministic input hash, local-day series, missing-amount behavior and strict request validation have golden/unit/contract coverage. F40.2 supplies only confirmed receipt lines joined to posted expense transactions in the exact member-local report window, applies each line owner's allowed decision, preserves nullable evidence, stops above 50,000 lines, and calls Go only after Core's database transaction ends. Analytics/query outage and overflow return explicit partial unavailability while finance totals remain available; no-line reports return complete no_reviewed_items. Core report/PostgreSQL acceptance (6 focused report tests), full Core check and contracts 42 passed locally. GitHub runs 37406496536 (Core/PostgreSQL), 37406496576 (Python/contracts), 37406496591 (bot) and 37406496544 (private S3 rerun) passed. Web/Android/Telegram presentation remains open as F40.3."
-      - "F40.3 renders Core-owned optional/reviewed totals, share, source totals, top optional items and owner-allowed corrections in RU/EN Web and Android; Telegram PNG/text/caption show the same available values or an explicit unavailable reason/count without placeholder totals. GREEN: Web 49/49 plus TypeScript/Vite production build; Python presentation/Telegram 112 passed; Android instrumentation 45/45 with debug APK installed and launched on isolated emulator-5556, SHA-256 87D8757BA4FE4D9356476F620109B4797088FCAA2DBA973331FFE7047CF09F89. Local `git diff --check` passes; feature commit pending. F31 optional-by-day chart remains separate."
+      - "F40.3 renders Core-owned optional/reviewed totals, share, source totals, top optional items and owner-allowed corrections in RU/EN Web and Android; Telegram PNG/text/caption show the same available values or an explicit unavailable reason/count without placeholder totals. GREEN: Web 49/49 plus TypeScript/Vite production build; Python presentation/Telegram 112 passed; Android instrumentation 45/45 with debug APK installed and launched on isolated emulator-5556, SHA-256 87D8757BA4FE4D9356476F620109B4797088FCAA2DBA973331FFE7047CF09F89. GitHub runs 37409599306 (general tests) and 37409599307 (Python/contracts) pass. Feature commit `ec1a373119263914f23f5e5f7fcbd021bd2947a7` is pushed. F31.2 optional-by-day chart is tracked separately."
     intentional_differences: []
   - id: F41
     feature: "«Не брать», отдельные догадки модели, подтверждение/разрешение"

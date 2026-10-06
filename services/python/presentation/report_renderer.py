@@ -98,11 +98,13 @@ def _validated_report(report: Mapping[str, object]) -> tuple[
         budget = (_money(raw_limit, "monthlyBudgetLimit"),
                   _signed_money(raw_remaining, "monthlyBudgetRemaining"))
     food_status = _validated_rolling_food_status(report.get("rolling7FoodStatus"))
-    _validated_waste(report.get("waste"), present="waste" in report)
+    _validated_waste(report.get("waste"), present="waste" in report,
+                     from_date=from_date, to_date=to_date)
     return from_date, to_date, categories, days, budget, food_status
 
 
-def _validated_waste(value: object, *, present: bool) -> Mapping[str, object] | None:
+def _validated_waste(value: object, *, present: bool,
+                     from_date: date | None = None, to_date: date | None = None) -> Mapping[str, object] | None:
     if not present:
         return None
     if not isinstance(value, Mapping):
@@ -118,6 +120,22 @@ def _validated_waste(value: object, *, present: bool) -> Mapping[str, object] | 
         raise ValueError("waste.reasonCode is invalid")
     if completeness not in {"complete", "partial"}:
         raise ValueError("waste.completeness is invalid")
+    raw_optional_days = value.get("optionalByDay")
+    if not isinstance(raw_optional_days, Mapping):
+        raise ValueError("waste.optionalByDay must be an object")
+    optional_days: dict[str, str] = {}
+    for key, amount in raw_optional_days.items():
+        if not isinstance(key, str):
+            raise ValueError("waste.optionalByDay keys must be ISO local dates")
+        try:
+            parsed = date.fromisoformat(key)
+        except ValueError as error:
+            raise ValueError("waste.optionalByDay keys must be ISO local dates") from error
+        if (parsed.isoformat() != key or from_date is None or to_date is None
+                or parsed < from_date or parsed > to_date):
+            raise ValueError("waste.optionalByDay dates must be canonical and inside the report window")
+        _money(amount, f"waste.optionalByDay.{key}")
+        optional_days[key] = amount
     if value["available"]:
         if reason != "available":
             raise ValueError("available waste must have available reason")
@@ -128,6 +146,10 @@ def _validated_waste(value: object, *, present: bool) -> Mapping[str, object] | 
             raise ValueError("waste.optionalShare must be a decimal ratio")
         if Decimal(share_value) > 1:
             raise ValueError("waste.optionalShare must be between zero and one")
+        expected_days = {(from_date + timedelta(days=offset)).isoformat()
+                         for offset in range((to_date - from_date).days + 1)}
+        if set(optional_days) != expected_days:
+            raise ValueError("available waste must include every report date in optionalByDay")
         sources = value.get("bySource")
         if not isinstance(sources, Mapping):
             raise ValueError("waste.bySource must be an object")
@@ -157,7 +179,9 @@ def _validated_waste(value: object, *, present: bool) -> Mapping[str, object] | 
         if reason == "available" or any(value.get(field) is not None
                                         for field in ("reviewedSpend", "optionalSpend", "optionalShare")):
             raise ValueError("unavailable waste cannot include totals")
-    return value
+        if optional_days:
+            raise ValueError("unavailable waste cannot include optionalByDay totals")
+    return {**value, "_validatedOptionalByDay": optional_days}
 
 
 def _waste_lines(waste: Mapping[str, object] | None, currency: str) -> list[str]:
@@ -186,6 +210,10 @@ def _waste_lines(waste: Mapping[str, object] | None, currency: str) -> list[str]
                  for item in waste["topItems"][:5])
     lines.extend(f"Corrected: {item['productName']} · {item['amount']} {currency}"
                  for item in waste["corrected"][:5])
+    optional_days = waste.get("_validatedOptionalByDay", {})
+    if optional_days:
+        lines.append("Daily optional purchases: " + ", ".join(
+            f"{day}: {amount} {currency}" for day, amount in sorted(optional_days.items())))
     return lines
 
 
@@ -242,7 +270,8 @@ def _required_text(report: Mapping[str, object], field: str) -> str:
 
 def render_report_png(report: Mapping[str, object]) -> bytes:
     from_date, to_date, categories, days, budget, _food_status = _validated_report(report)
-    waste = _validated_waste(report.get("waste"), present="waste" in report)
+    waste = _validated_waste(report.get("waste"), present="waste" in report,
+                             from_date=from_date, to_date=to_date)
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as error:
@@ -305,7 +334,9 @@ def render_report_png(report: Mapping[str, object]) -> bytes:
         y = top + gridline * (bottom - top) // 3
         draw.line((left, y, right, y), fill="#e2e8f0", width=1)
     values = [days[key] for key in sorted(days)]
-    max_day = max(values, default=Decimal("0"))
+    optional_days = waste.get("_validatedOptionalByDay", {}) if waste and waste["available"] else {}
+    optional_values = [_money(optional_days[key], f"waste.optionalByDay.{key}") for key in sorted(optional_days)]
+    max_day = max([*values, *optional_values], default=Decimal("0"))
     points = []
     for index, value in enumerate(values):
         x = left + (right - left) * index / max(1, len(values) - 1)
@@ -316,9 +347,23 @@ def render_report_png(report: Mapping[str, object]) -> bytes:
         draw.line(points, fill="#5d9c54", width=4, joint="curve")
     for x, y in points:
         draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill="#5d9c54")
+    if optional_values:
+        optional_points = []
+        for index, value in enumerate(optional_values):
+            x = left + (right - left) * index / max(1, len(optional_values) - 1)
+            ratio = float(value / max_day) if max_day > 0 else 0.0
+            y = bottom - ratio * (bottom - top - 12)
+            optional_points.append((round(x), round(y)))
+        if len(optional_points) > 1:
+            draw.line(optional_points, fill="#d77441", width=4, joint="curve")
+        for x, y in optional_points:
+            draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill="#d77441")
     draw.text((left, 506), from_date.isoformat(), fill="#68778e", font=subtitle_font)
     end_label = to_date.isoformat()
     draw.text((right - 94, 506), end_label, fill="#68778e", font=subtitle_font)
+    if optional_values:
+        draw.ellipse((190, 534, 202, 546), fill="#d77441")
+        draw.text((208, 530), "Optional purchases", fill="#25354b", font=font)
 
     if waste_lines:
         draw.text((38, 552), "Optional spending", fill="#25354b", font=font)
@@ -384,7 +429,7 @@ def rolling_food_lines(status: Mapping[str, object] | None, currency: str, langu
 
 
 def report_text(report: Mapping[str, object]) -> str:
-    _from_date, _to_date, categories, days, budget, food_status = _validated_report(report)
+    from_date, to_date, categories, days, budget, food_status = _validated_report(report)
     currency = _required_text(report, "currency")
     lines = [
         f"Finance report: {_required_text(report, 'fromDate')} — {_required_text(report, 'toDate')}",
@@ -399,7 +444,8 @@ def report_text(report: Mapping[str, object]) -> str:
     if budget is not None:
         lines.append(f"Monthly budget: {budget[0]:.2f} {currency}; remaining: {budget[1]:.2f} {currency}")
     lines.extend(rolling_food_lines(food_status, currency))
-    lines.extend(_waste_lines(_validated_waste(report.get("waste"), present="waste" in report), currency))
+    lines.extend(_waste_lines(_validated_waste(report.get("waste"), present="waste" in report,
+                                               from_date=from_date, to_date=to_date), currency))
     return "\n".join(lines)
 
 

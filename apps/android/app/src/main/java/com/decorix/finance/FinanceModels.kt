@@ -138,6 +138,7 @@ data class FinanceWasteReport(
     val bySource: Map<String, String>,
     val topItems: List<FinanceWasteItem>,
     val corrected: List<FinanceWasteCorrection>,
+    val optionalByDay: Map<String, String> = emptyMap(),
 )
 
 data class FinanceWasteItem(val name: String, val amount: String, val verdict: String, val source: String)
@@ -443,6 +444,7 @@ internal object FinanceModels {
             bySource = stringMap(json, "bySource"),
             topItems = topItems,
             corrected = corrected,
+            optionalByDay = stringMap(json, "optionalByDay"),
         )
     }
 

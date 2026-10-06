@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Chat, InlineKeyboardMarkup, Message, Me
 
 from services.python.telegram_gateway.app import build_dispatcher
 import services.python.telegram_gateway.app as telegram_app
+from services.python.presentation.report_renderer import report_text
 
 
 @pytest.mark.parametrize("command", ["/start", "/menu", "/help", "Меню"])
@@ -1159,6 +1160,8 @@ def test_report_command_uses_shared_report_dto_and_renders_photo_with_family_sco
               "waste": {"available": True, "reasonCode": "available", "completeness": "complete",
                   "reviewedSpend": "120.00", "optionalSpend": "20.00", "optionalShare": "0.166667",
                   "reviewedItemCount": 5, "optionalItemCount": 2, "missingAmountCount": 0,
+                  "optionalByDay": {f"2026-09-{day:02d}": "2.00" if day == 28 else "0.00" for day in range(28, 31)}
+                      | {f"2026-10-{day:02d}": "3.00" if day == 1 else "0.00" for day in range(1, 5)},
                   "bySource": {"model": "13.00"},
                   "topItems": [{"name": "Сок", "amount": "13.00", "verdict": "optional", "source": "model"}],
                   "corrected": [{"productName": "Молоко", "count": 1, "amount": "30.00"}]}}
@@ -1214,6 +1217,11 @@ def test_report_command_accepts_custom_dates_and_text_fallback(monkeypatch):
               "expenseByDay": {f"2026-09-{day:02d}": "0.00" for day in range(1, 31)},
               "weekendSharePercent": 25, "monthlyBudgetLimit": "20000.00",
               "monthlyBudgetRemaining": "19924.50", "rolling7FoodStatus": None}
+    report["waste"] = {"available": True, "reasonCode": "available", "completeness": "complete",
+        "reviewedSpend": "30.00", "optionalSpend": "2.50", "optionalShare": "0.083333",
+        "reviewedItemCount": 3, "optionalItemCount": 1, "missingAmountCount": 0,
+        "optionalByDay": {f"2026-09-{day:02d}": "2.50" if day == 2 else "0.00" for day in range(1, 31)},
+        "bySource": {}, "topItems": [], "corrected": []}
 
     class FakeCore:
         async def get_report(self, token, *, period, month=None, from_date=None, to_date=None, scope="personal"):
@@ -1224,7 +1232,8 @@ def test_report_command_accepts_custom_dates_and_text_fallback(monkeypatch):
         sent.append(method)
 
     monkeypatch.setattr(Bot, "__call__", record_request)
-    monkeypatch.setattr(telegram_app, "render_report", lambda _report: ("text/plain; charset=utf-8", b"report text"))
+    monkeypatch.setattr(telegram_app, "render_report", lambda value: (
+        "text/plain; charset=utf-8", report_text(value).encode("utf-8")))
     message = Message(
         message_id=106,
         date=datetime(2026, 10, 4, tzinfo=timezone.utc),
@@ -1245,7 +1254,8 @@ def test_report_command_accepts_custom_dates_and_text_fallback(monkeypatch):
 
     assert calls == [("custom", None, "2026-09-01", "2026-09-30", "personal")]
     assert len(sent) == 1
-    assert sent[0].text == "report text"
+    assert "Daily optional purchases:" in sent[0].text
+    assert "2026-09-01: 0.00 RUB, 2026-09-02: 2.50 RUB" in sent[0].text
     assert sent[0].reply_markup.keyboard[0][0].text == "Меню"
 
 

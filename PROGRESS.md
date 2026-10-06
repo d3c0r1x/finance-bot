@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 06:02, Europe/Moscow.
+Updated: 2026-10-06 06:54, Europe/Moscow.
 
 ## Global plan
 
@@ -36,28 +36,29 @@ Updated: 2026-10-06 06:02, Europe/Moscow.
 | E4 Python and Telegram parity | Telegram gateway, receipt pipeline, local AI, import and Telegram flows | IN PROGRESS — F01/F02/F04/F05/F07/F25/F30/F32 acceptance complete; F10 external storage/ClamAV gate, F11, receipts/imports and remaining F-parity/runtime integrations remain |
 | F25 | Rolling food consistency | COMPLETE — reports, Telegram captions, and scheduled digest share Core DTO formatting | F32 | pending |
 | F26 | Safe-to-spend cash planning | COMPLETE — current recurring history, payday boundary, reserve and no-plan cases verified | F38 | pending |
-| F31 | Report charts and PNG | IN PROGRESS — Web/Android/PNG category, day and limit charts verified; price/waste awaits F33/F40 | F33, F40 | pending |
+| F31 | Report charts and PNG | IN PROGRESS — Web/Android/PNG category, day and limit charts verified; F40 daily optional series now available; price series awaits F33 | F33, F40 | pending |
+| F31.2 | Daily optional-spend chart in Web, Android and Telegram | LOCAL GREEN — Web, Python/Telegram, contracts and isolated Android instrumentation pass; commit/push next | F40.3 | pending |
 | F32 | Durable daily and weekly digest delivery | COMPLETE — PostgreSQL schedules/outbox, Core API, Python worker, Web/Android settings | F25 rendering | pending |
 | F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
 | F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 | F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
 | F39 | Mute and restore recurring series | COMPLETE — local gates and GitHub rerun pass | F38 | b1e64c4 + 2de08d9 |
-| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1/F40.2 GREEN; F40.3 commit pending | F39 | pending |
+| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | COMPLETE — Go, Core, Web, Android, Telegram and GitHub regression verified | F39 | ec1a373 |
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
 | F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
-| F40.3 | Web, Android and Telegram optional-spend presentation | COMMIT_PENDING — client gates GREEN; record feature commit next | F40.2 | pending |
+| F40.3 | Web, Android and Telegram optional-spend presentation | COMPLETE — local client gates and GitHub regression GREEN | F40.2 | ec1a373 |
 
 ## Current goal
 
-- ID and outcome: F40.3 — present real optional-spend totals, verdict sources and allowed corrections consistently in Web, Android and Telegram.
-- Status: COMMIT_PENDING — Web, Telegram and Android client gates are GREEN; commit F40.3, then record its SHA.
-- Acceptance: available results show exact optional/reviewed amounts, share, source breakdown, top optional items and allowed corrections; partial/unavailable results show reason/count only without fabricated totals; Telegram PNG keeps text fallback useful; RU/EN Web and Android agree with Core values.
-- F40 boundary: Core resolves report window, tenant/member scope, confirmed receipt lines and per-owner allowed decisions. Go aggregates; Web, Android and Telegram render shared Core DTO. Missing line amounts produce unavailable partial data, never fabricated totals. F31 later renders the real daily optional-spend series.
+- ID and outcome: F31.2 — display Core's authoritative optional-spend-per-day series in Web, Android and Telegram report charts/text.
+- Status: LOCAL_GREEN_COMMIT_PENDING — F31.2 acceptance and client regression are GREEN; commit/push next. F40.3 is committed/pushed as `ec1a373119263914f23f5e5f7fcbd021bd2947a7`, local gates and all GitHub workflows GREEN.
+- Acceptance: RU/EN Web and Android and Telegram PNG/text show the same `optionalByDay` dates and values; render only when F40 waste report is available; unavailable/partial states never create daily totals or placeholder chart lines; existing expense/category/limit charts and text fallback remain intact.
+- Data boundary: consume `optionalByDay` as returned by Core; it already includes exact zero days for complete reports. Never infer, interpolate, or recalculate client-side. Price series remains a separate F33-dependent F31 gate.
 - Design: reuse report window/timezone and per-member `user_product_decisions`; send bounded authorized facts to stateless Go advice analytics; keep approved financial data in PostgreSQL.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `68253b7`.
-- Updated at: 2026-10-06 06:02 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `ec1a373` (F31.2 changes uncommitted).
+- Updated at: 2026-10-06 06:54 Europe/Moscow.
 
 ## Verification evidence
 
@@ -98,7 +99,7 @@ Updated: 2026-10-06 06:02, Europe/Moscow.
 
 ## Next action
 
-- Add RED tests for RU/EN Web and Android, Telegram PNG/text, and explicit unavailable/partial states in F40.3.
+- Review the final staged file list, commit and push F31.2, then record its remote CI result before starting the next unfinished main-plan goal.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
@@ -122,7 +123,21 @@ Updated: 2026-10-06 06:02, Europe/Moscow.
 - Web report panel is localized RU/EN and uses only the Core waste DTO. Android parses nullable totals and renders the same details and availability states. Telegram PNG grows to include source/top/correction columns; text fallback and caption preserve partial reasons.
 - GREEN: Web 49/49 and TypeScript/Vite production build; Python presentation/Telegram 112 passed; Android test compile and debug APK build passed; Android instrumentation 45/45 on isolated `FinanceBotF38` / `emulator-5556`; installed and launched. APK SHA-256 `87D8757BA4FE4D9356476F620109B4797088FCAA2DBA973331FFE7047CF09F89`. `git diff --check` passes.
 - Local Android used SHA-256-verified portable Temurin 17 from the per-user cache and Unity Android SDK; no project SDK configuration changed. Existing `Quest_Test` emulator was not touched.
-- Current Git commit is pending; do not start F31 until F40.3 is committed and pushed.
+- F40.3 was committed and pushed as `ec1a373119263914f23f5e5f7fcbd021bd2947a7`. Python/contracts `37409599307` and general tests `37409599306` passed. F40 is complete.
+
+## E3.41 F31.2 daily optional-spend chart — 2026-10-06 06:37 MSK
+
+- User-approved F31 design excludes placeholder series. F40.3 now supplies Core's complete `optionalByDay` map, including exact zero days for available reports.
+- Goal: render those exact daily values in RU/EN Web, Android, Telegram PNG and Telegram text. Hide the series unless the waste result is available; partial/unavailable states retain their reason and counts without a chart or inferred amounts.
+- Observed RED: Web report test cannot find the optional-by-day figure; Python renderer tests do not find the orange PNG series or daily text row (2 failed, 22 passed); Android instrumented-test Kotlin compilation reports missing `optionalByDay` model property.
+- First step complete: fixtures cover populated and zero-valued rows plus empty unavailable series. Implement contract parsing and localized client rendering, then run the focused gates.
+- Android instrumentation attempt: 45/46 passed; the new test searched for optional days while scrolled to the first waste card. The section is correctly later in the virtualized `LazyColumn`; advance to its verified item indexes before asserting its date rows.
+- Focused Android rerun reached all available-state assertions, then found a second test harness error: Compose allows one `setContent` per test. Keep unavailable-state coverage in the existing separate test instead of resetting content within one test.
+- GREEN: Web 49/49 and TypeScript/Vite build; Python presentation/Telegram 114 passed; contracts 42 passed; Android debug and instrumentation APKs built, 46/46 tests pass on isolated `FinanceBotF38` / `emulator-5556`. APK installed and launched; SHA-256 `AACE4090332EE28A769688F50E62EFE080818A7B445F824540F0A66BD9BE3C5A`. `git diff --check` passes.
+- Web and Android render Core `optionalByDay` dates and exact zero/non-zero amounts only when waste data is available. Telegram PNG adds a distinct optional-spend series to the daily graph; text fallback lists the exact Core dates and amounts. Python rejects incomplete available series and non-empty unavailable series rather than filling values.
+- A text-renderer call initially used names discarded during unpacking; stack trace traced all six failures to that single call. Keeping `from_date`/`to_date` fixes it; the focused renderer suite passes 24/24 and the complete presentation/Telegram suite passes 114/114.
+- F31.2 implementation is GREEN locally. Remaining action is separate feature commit/push and GitHub check; F31's price series remains F33-dependent.
+- Preserve current expense/category/limit chart behavior, report text fallback, and existing user files. Commit goal separately only after local and CI gates.
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
 

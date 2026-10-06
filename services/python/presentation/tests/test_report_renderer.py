@@ -34,6 +34,7 @@ def test_renderer_outputs_readable_png_from_server_report_dto():
     waste = {"available": True, "reasonCode": "available", "completeness": "complete",
              "reviewedSpend": "120.00", "optionalSpend": "20.00", "optionalShare": "0.166667",
              "reviewedItemCount": 5, "optionalItemCount": 2, "missingAmountCount": 0,
+             "optionalByDay": {"2026-10-01": "0.00", "2026-10-02": "13.00", "2026-10-03": "7.00"},
              "bySource": {"model": "13.00", "rule": "7.00"},
              "topItems": [{"name": "Сок", "amount": "13.00", "verdict": "optional", "source": "model"}],
              "corrected": [{"productName": "Молоко", "count": 1, "amount": "30.00"}]}
@@ -46,6 +47,8 @@ def test_renderer_outputs_readable_png_from_server_report_dto():
         assert image.size[1] > 640
         assert len(image.getcolors(maxcolors=1_000_000) or []) > 3
         assert image.getpixel((300, 195)) == (120, 174, 230)
+        chart_colors = image.crop((518, 220, 920, 500)).getcolors(maxcolors=1_000_000) or []
+        assert any(color == (215, 116, 65) for _count, color in chart_colors)
 
 
 def test_text_report_includes_available_optional_spend_evidence():
@@ -53,6 +56,7 @@ def test_text_report_includes_available_optional_spend_evidence():
         "available": True, "reasonCode": "available", "completeness": "complete",
         "reviewedSpend": "120.00", "optionalSpend": "20.00", "optionalShare": "0.166667",
         "reviewedItemCount": 5, "optionalItemCount": 2, "missingAmountCount": 0,
+        "optionalByDay": {"2026-10-01": "0.00", "2026-10-02": "13.00", "2026-10-03": "7.00"},
         "bySource": {"model": "13.00", "rule": "7.00"},
         "topItems": [{"name": "Сок", "amount": "13.00", "verdict": "optional", "source": "model"}],
         "corrected": [{"productName": "Молоко", "count": 1, "amount": "30.00"}],
@@ -64,6 +68,7 @@ def test_text_report_includes_available_optional_spend_evidence():
     assert "Source model: 13.00 RUB" in text
     assert "Сок: 13.00 RUB (model)" in text
     assert "Corrected: Молоко · 30.00 RUB" in text
+    assert "Daily optional purchases: 2026-10-01: 0.00 RUB, 2026-10-02: 13.00 RUB, 2026-10-03: 7.00 RUB" in text
 
 
 def test_text_report_explains_partial_waste_without_zero_placeholders():
@@ -71,13 +76,14 @@ def test_text_report_explains_partial_waste_without_zero_placeholders():
         "available": False, "reasonCode": "missing_amounts", "completeness": "partial",
         "reviewedSpend": None, "optionalSpend": None, "optionalShare": None,
         "reviewedItemCount": 2, "optionalItemCount": 0, "missingAmountCount": 1,
-        "bySource": {}, "topItems": [], "corrected": [],
+        "optionalByDay": {}, "bySource": {}, "topItems": [], "corrected": [],
     }}
 
     text = report_text(report)
 
     assert "Optional purchases unavailable: 1 receipt item has no amount; totals not calculated" in text
     assert "Optional purchases: 0.00" not in text
+    assert "Daily optional purchases:" not in text
 
     content_type, data = render_report(report, png_renderer=lambda _report: unavailable_png())
     assert content_type == "text/plain; charset=utf-8"
@@ -93,6 +99,31 @@ def test_renderer_falls_back_to_text_when_image_support_is_unavailable():
     assert b"Expenses: 60.00 RUB" in data
     assert b"food: 10.00 RUB" in data
     assert b"2026-10-03: 50.00 RUB" in data
+
+
+def test_png_does_not_draw_optional_series_for_unavailable_waste():
+    report = {**REPORT, "waste": {
+        "available": False, "reasonCode": "missing_amounts", "completeness": "partial",
+        "reviewedSpend": None, "optionalSpend": None, "optionalShare": None,
+        "reviewedItemCount": 2, "optionalItemCount": 0, "missingAmountCount": 1,
+        "optionalByDay": {}, "bySource": {}, "topItems": [], "corrected": [],
+    }}
+
+    with Image.open(io.BytesIO(render_report_png(report))) as image:
+        assert all(color != (215, 116, 65) for _count, color in image.getcolors(maxcolors=1_000_000) or [])
+
+
+def test_available_waste_requires_explicit_optional_value_for_every_report_date():
+    report = {**REPORT, "waste": {
+        "available": True, "reasonCode": "available", "completeness": "complete",
+        "reviewedSpend": "20.00", "optionalSpend": "7.00", "optionalShare": "0.35",
+        "reviewedItemCount": 2, "optionalItemCount": 1, "missingAmountCount": 0,
+        "optionalByDay": {"2026-10-01": "0.00", "2026-10-03": "7.00"},
+        "bySource": {}, "topItems": [], "corrected": [],
+    }}
+
+    with pytest.raises(ValueError, match="every report date"):
+        render_report_png(report)
 
 
 def test_png_caps_overrun_bar_and_keeps_exact_negative_remaining_visible():
