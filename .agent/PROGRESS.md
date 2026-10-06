@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 23:46, Europe/Moscow.
+Updated: 2026-10-06 23:52, Europe/Moscow.
 
 ## Global plan
 
@@ -60,18 +60,18 @@ Updated: 2026-10-06 23:46, Europe/Moscow.
 | F41.3c | Android list and human controls | COMMITTED — 50/50 instrumentation and APK launch; GitHub run not found | F41.2b | ccfcf6a |
 | F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — Core preview/apply and durable audit complete; client actions and batch history remain | F41 | pending |
 | F42.1 | Deterministic preview policy for eligible receipt lines | COMPLETE — local Core regression passed | F42 | 6f80afc |
-| F42.2 | Persist preview, apply safely, audit and report changes through Core API | COMMIT_PENDING — focused PostgreSQL and full Core checks pass; contracts awaiting CI | F42.1 | pending |
+| F42.2 | Persist preview, apply safely, audit and report changes through Core API | COMMITTED — local PostgreSQL/Core checks pass; contract pytest unavailable, GitHub run not found | F42.1 | d41888c |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F42.2 — persist receipt verdict previews and apply them with stale-state protection and audit.
-- Status: COMMIT_PENDING — observed RED for missing route; PostgreSQL acceptance and full Core check GREEN.
+- Status: COMMITTED — `d41888c` pushed; observed RED for missing route; PostgreSQL acceptance and full Core check GREEN. Contract pytest unavailable locally; no GitHub run found.
 - Acceptance: preview makes no financial writes; apply changes only eligible receipt verdict fields; preserves receipt/transaction totals; stores before/after snapshot; stale state returns 412 without partial writes; retry is idempotent; tenant/member scope enforced.
 - Changed files: Core recalculation API/service/controller, migration V35, OpenAPI schemas/routes, PostgreSQL acceptance tests, nullable historical line sum handling, parity and this progress log.
 - User choices: maintain F01–F60 scope, Android RU/EN, separate goal commits, Keycloak + OIDC, no placeholder financial data. Personal MVP takes priority; V2 remains deferred.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `6f80afc` plus uncommitted F42.2 changes.
-- Updated at: 2026-10-06 23:46 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `d41888c`; only unrelated user-owned untracked files remain.
+- Updated at: 2026-10-06 23:52 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -1199,11 +1199,11 @@ Updated: 2026-10-06 23:46, Europe/Moscow.
 - M2 environment audit is complete but runtime remains BLOCKED: durable PostgreSQL and Keycloak are absent; current PostgreSQL listener is temporary test infrastructure; Tailscale Funnel is unconfigured. Public ingress remains closed until auth and durable storage work.
 - Next: commit this independently tested policy slice, then write PostgreSQL acceptance for explicit preview/apply, audit snapshots, stale-version handling, and unchanged receipt totals before implementation.
 
-## E4.62 F42.2 durable preview and apply API — 2026-10-06 23:46 MSK
+## E4.62 F42.2 durable preview and apply API — 2026-10-06 23:52 MSK
 
 - Observed RED: PostgreSQL acceptance returned 404 for the absent preview route. Added acceptance for preview-only behavior, apply/idempotence, unchanged totals, durable audit, and stale item rejection with no partial write.
 - Added V35 RLS-protected recalculation runs and snapshots. Core API scopes run to active tenant member, restricts viewers, stores exact before/after line state, rejects stale versions/state with 412, changes only receipt review fields, records `receipt.verdicts_recalculated`, and makes repeated apply idempotent.
 - Historical receipt line sum may be null; preview preserves null without inventing a value. OpenAPI declares API and CSRF-protected BFF routes.
 - GREEN: targeted PostgreSQL recalculation tests passed; full `:services:core:check --no-daemon` passed, 241 tests, 0 failures, 2 skipped. `git diff --check` passed. Contract pytest NOT_RUN: local Python environment has no pytest/PyYAML/jsonschema; CI contract gate remains required.
-- F42.1 commit `6f80afc` is pushed. F42.2 commit pending review. M2 runtime remains BLOCKED; test PostgreSQL is temporary Codex infrastructure and public ingress remains closed.
-- Next: stage only F42.2-owned files, inspect staged diff, commit and push; then add user-facing preview/apply flow and remaining F42 batch/change-history behavior.
+- F42.1 `6f80afc` and F42.2 `d41888c` are pushed. GitHub Actions returned no run for `d41888c`; remote gates remain unverified. M2 runtime remains BLOCKED; test PostgreSQL is temporary Codex infrastructure and public ingress remains closed.
+- Next: add user-facing preview/apply flow and remaining F42 batch/change-history behavior. Preserve unrelated untracked files.
