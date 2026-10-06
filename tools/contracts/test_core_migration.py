@@ -404,6 +404,7 @@ def test_persisted_core_events_match_public_json_schema():
         "transaction": json.loads(Path("contracts/events/finance.transaction.v1.schema.json").read_text(encoding="utf-8")),
         "budget": json.loads(Path("contracts/events/finance.budget.v1.schema.json").read_text(encoding="utf-8")),
         "debt": json.loads(Path("contracts/events/finance.debt.v1.schema.json").read_text(encoding="utf-8")),
+        "receipt": json.loads(Path("contracts/events/finance.receipt.v1.schema.json").read_text(encoding="utf-8")),
     }
     with psycopg.connect(dsn) as conn:
         if conn.execute("SELECT to_regclass('public.outbox_events')").fetchone()[0] is None:
