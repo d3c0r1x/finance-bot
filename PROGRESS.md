@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 05:53, Europe/Moscow.
+Updated: 2026-10-06 06:02, Europe/Moscow.
 
 ## Global plan
 
@@ -43,21 +43,21 @@ Updated: 2026-10-06 05:53, Europe/Moscow.
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 | F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
 | F39 | Mute and restore recurring series | COMPLETE — local gates and GitHub rerun pass | F38 | b1e64c4 + 2de08d9 |
-| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1 and F40.2 locally green; client presentation remains | F39 | pending |
+| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1 and F40.2 complete; client presentation remains | F39 | pending |
 | F40.1 | Versioned Go advice-spend algorithm and internal API | COMPLETE — local gates and GitHub regression pass | F39 | f3da7a0 |
-| F40.2 | Core member-scoped receipt facts and report API integration | COMMIT_PENDING — local gates green; push and CI verification remain | F40.1 | pending |
-| F40.3 | Web, Android and Telegram optional-spend presentation | PLANNED | F40.2 | pending |
+| F40.2 | Core member-scoped receipt facts and report API integration | COMPLETE — local and GitHub checks pass | F40.1 | 68253b7 |
+| F40.3 | Web, Android and Telegram optional-spend presentation | ANALYSIS — preserve explicit availability states across existing report surfaces | F40.2 | pending |
 
 ## Current goal
 
-- ID and outcome: F40.2 — supply correctly scoped confirmed receipt facts through the Core report DTO.
-- Status: COMMIT_PENDING — Core report integration is green locally; focused PostgreSQL/API tests and full Core/contracts gates pass.
-- Acceptance: use the report's exact date window and timezone; include only confirmed receipts joined to posted expense transactions; personal scope selects the requester, family scope applies each receipt owner's allow decision; retain null verdicts and nullable amounts honestly; cap handoff at Go's 50,000 rows; analytics failure or overflow leaves the finance report usable with an explicit unavailable result; no external call holds a database transaction open.
+- ID and outcome: F40.3 — present real optional-spend totals, verdict sources and allowed corrections consistently in Web, Android and Telegram.
+- Status: ANALYSIS — F40.2 is committed and GitHub-verified; add client acceptance tests before implementation.
+- Acceptance: available results show exact optional/reviewed amounts, share, source breakdown, top optional items and allowed corrections; partial/unavailable results show reason/count only without fabricated totals; Telegram PNG keeps text fallback useful; RU/EN Web and Android agree with Core values.
 - F40 boundary: Core resolves report window, tenant/member scope, confirmed receipt lines and per-owner allowed decisions. Go aggregates; Web, Android and Telegram render shared Core DTO. Missing line amounts produce unavailable partial data, never fabricated totals. F31 later renders the real daily optional-spend series.
 - Design: reuse report window/timezone and per-member `user_product_decisions`; send bounded authorized facts to stateless Go advice analytics; keep approved financial data in PostgreSQL.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `f3da7a0`.
-- Updated at: 2026-10-06 05:53 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `68253b7`.
+- Updated at: 2026-10-06 06:02 Europe/Moscow.
 
 ## Verification evidence
 
@@ -80,10 +80,11 @@ Updated: 2026-10-06 05:53, Europe/Moscow.
 | F40.1 Go algorithm/API | `go test ./... -count=1`; `go vet ./...`; build `./cmd/analytics-api` | F40.1 working tree | PASS | Exact money, denominator, corrections, provenance, day series, required-field validation; Go package regression clean. |
 | F40.1 contract | `.venv\\Scripts\\python.exe -m pytest tools/contracts/test_contracts.py -q` | F40.1 working tree | PASS, 41 passed | OpenAPI operation and strict golden fixture schemas validate. Pytest cache warning is permission-only. |
 | F40.1 GitHub regression | Actions `37403107898`, `37403107896`, `37403107903` | commit `f3da7a0` | PASS | Go/contracts, Core PostgreSQL/contracts, and general bot test workflows all completed successfully. |
-| F40.2 Core PostgreSQL/API | isolated `finance_test_f40_20261006`; focused report tests | working tree based on `f3da7a0` | PASS, 6 tests | Personal/family receipt scope, per-owner allow decision, null verdict/amount, 50,001-line cap, analytics outage, Telegram/shared report and existing local-date/rolling-food/digest regressions. |
-| F40.2 Core suite | `:services:core:check --no-daemon` | working tree based on `f3da7a0` | PASS | Core compile, test and check tasks pass. PostgreSQL acceptance is recorded separately above. |
-| F40.2 contracts | `.venv\\Scripts\\python.exe -m pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | working tree based on `f3da7a0` | PASS, 42 passed | FinanceReport now requires strict waste result schema; complete Go fixture and unavailable fallback validate. |
-| F40.2 diff hygiene | `git diff --check` | working tree based on `f3da7a0` | PASS | No whitespace errors. |
+| F40.2 Core PostgreSQL/API | isolated `finance_test_f40_20261006`; focused report tests | commit `68253b7` (verified pre-commit) | PASS, 6 tests | Personal/family receipt scope, per-owner allow decision, null verdict/amount, 50,001-line cap, analytics outage, Telegram/shared report and existing local-date/rolling-food/digest regressions. |
+| F40.2 Core suite | `:services:core:check --no-daemon` | commit `68253b7` (verified pre-commit) | PASS | Core compile, test and check tasks pass. PostgreSQL acceptance is recorded separately above. |
+| F40.2 contracts | `.venv\\Scripts\\python.exe -m pytest tools/contracts/test_contracts.py -q -p no:cacheprovider` | commit `68253b7` (verified pre-commit) | PASS, 42 passed | FinanceReport now requires strict waste result schema; complete Go fixture and unavailable fallback validate. |
+| F40.2 diff hygiene | `git diff --check` | commit `68253b7` (verified pre-commit) | PASS | No whitespace errors. |
+| F40.2 GitHub regression | Actions `37406496536`, `37406496576`, `37406496591`, `37406496544` | commit `68253b7e8e3fe5444ed0acf83e85f9fa27dbf848` | PASS | Core/PostgreSQL, Python/contracts and bot workflows passed. Private S3/ClamAV workflow first timed out; failed job rerun passed. |
 
 ## Failures and attempts
 
@@ -92,20 +93,28 @@ Updated: 2026-10-06 05:53, Europe/Moscow.
 - F39 Android test first asserted a virtualized `LazyColumn` row before it was composed; `performScrollTo` could not target an off-screen row. A second attempt used an out-of-range item index. Root-cause review found the UI row existed but test navigation assumed visibility/index semantics. A minimal seven-item fixture and valid scroll to index 6 passed; full instrumentation then passed 42/42. One initial manual launch used the wrong activity package; manifest namespace confirmed `com.decorix.finance.MainActivity`, and corrected launch succeeded.
 - F40.1 additional RED tests caught omitted/null required API fields returning 200, repeated products losing their product key, and Go byte-length checks rejecting valid Cyrillic names. Strict decoding, key preservation and Unicode character counts fixed all three.
 - F40.2 decision overlay RED: the receipt input contained the expected member/product key, and PostgreSQL had the matching allowed decision, but Java's `user_id = ANY (?::uuid[])` lookup returned no overlay. Removing the array lookup and applying tenant-scoped rows against the bounded fact owner/key sets made the PostgreSQL acceptance pass. Facts: both SQL-array variants failed; direct RLS-scoped SQL found the decision; tenant-scoped lookup passed the same acceptance. Likely cause is JDBC UUID-array binding; no claim that the driver internals were independently proven.
+- F40.2 CI: the unrelated private receipt S3 integration timed out once in SeaweedFS HTTP; rerunning the failed GitHub job passed. Core/PostgreSQL, contracts and bot workflows passed on commit `68253b7`.
 - GitHub PostgreSQL run `37398375404` failed after the new receipt acceptance left a `receipt.confirmed` outbox event for the shared contract validator. `test_core_migration.py` mapped transaction, budget and debt events but omitted receipt. Added the receipt schema mapping. Local contract suite passes 54/2 skips; local integration test connects only after using the migrator role, but its cleaned database has no persisted events, so CI must verify event replay.
 
 ## Next action
 
-- Commit and push F40.2; verify GitHub Core/PostgreSQL, bot and contract regression workflows, then start F40.3 presentation.
+- Add RED tests for RU/EN Web and Android, Telegram PNG/text, and explicit unavailable/partial states in F40.3.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
 - Observed RED: authenticated report did not include `waste`. Added PostgreSQL/API acceptance for personal and family scope, owner-specific allow decisions, null verdict/amount and report usability during analytics outage. Added a 50,001-line fixture to prove overflow stays in Core and never reaches Go.
 - Core now selects only confirmed receipt lines joined to posted expense transactions inside the exact local-date window. It computes each item key with the shared product identity policy, overlays allowed decisions by receipt owner, preserves nullable evidence and sends at most 50,000 rows to Go.
 - Core ends its receipt/decision read transaction before HTTP. Query/analytics outage and overflow return an explicit partial unavailable DTO while normal finance totals remain available. Empty selections return complete `no_reviewed_items` without HTTP.
-- GREEN: six focused PostgreSQL report/API tests; full `:services:core:check`; contracts 42 passed; `git diff --check` clean. CI remains pending.
+- GREEN: six focused PostgreSQL report/API tests; full `:services:core:check`; contracts 42 passed; `git diff --check` clean.
 - Root cause analysis: two failed Java array-filter variants omitted a stored allowed decision. Direct application-role SQL under the same tenant RLS context found it; tenant-scoped lookup followed by owner/key filtering passed. Most likely failure was PostgreSQL JDBC UUID-array binding. Further internal-driver debugging was unnecessary after the replacement passed the target test.
-- Status: COMMIT_PENDING. Next: commit/push this goal and verify GitHub workflows before F40.3.
+- F40.2 commit `68253b7` pushed. Actions `37406496536`, `37406496576`, `37406496591`, and rerun `37406496544` passed.
+- Status: COMPLETE. Next: start F40.3 client tests.
+
+## E3.38 F40.2 pushed and CI GREEN — 2026-10-06 06:02 MSK
+
+- F40.2 commit `68253b7e8e3fe5444ed0acf83e85f9fa27dbf848` is on `origin/feat/saas-rewrite`.
+- GitHub Core/PostgreSQL (`37406496536`), Python/contracts (`37406496576`), Telegram/bot (`37406496591`) and private receipt storage (`37406496544`) workflows pass. S3/ClamAV passed after rerunning its first HTTP timeout.
+- F40.2 is complete. F40.3 begins with client acceptance tests for available data, correction/source disclosure and honest unavailable states.
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
 
