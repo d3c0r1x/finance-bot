@@ -1263,3 +1263,10 @@ Updated: 2026-10-07 00:16, Europe/Moscow.
 - Initial run skipped PostgreSQL tests because test connection variables were unset. Reused the pre-existing isolated `finance_test_codex_20261004` database on local PostgreSQL 18.6 at port 55432; did not alter the legacy `finance_test` database. Focused recalculation preview/history tests passed against PostgreSQL. Full `:services:core:check` then passed: 245 tests, 0 failures, 2 skips; PostgreSQL `TransactionApiPostgresTest` passed 102/102 with 0 skips.
 - Verification: Web tests 60/60 and production build pass; contract tests 47/47 pass; full Core check and live PostgreSQL acceptance pass; `git diff --check` passes. The first compile attempt caught missing `HistoryCursor`; fixed before the passing API run. Tests were written before endpoint implementation, but no feature-level RED was observed because first executable run hit that compile error. Existing untracked user files remain untouched.
 - No commit yet. GitHub CI status not queried for this change. Next: commit/push F42.6 and check whether GitHub starts CI. M2 public HTTPS and alltime runtime remain separate deployment gates.
+
+## E4.69 F42.6 commit and acceptance — 2026-10-07 00:32 MSK
+
+- Commit `8b741c0 feat(F42.6): add recalculation history` pushed to `origin/feat/saas-rewrite`.
+- Full verification is GREEN: Core 245 tests, 0 failures, 2 skips; PostgreSQL 18.6 acceptance 102/102; Web 60/60 and production build; contracts 47/47; `git diff --check`.
+- F42 is complete at local feature acceptance and parity now records owner-scoped run history, stored changes, and bounded pages. `gh run list --commit 8b741c0` returned `[]`; remote CI did not start. Public HTTPS/alltime runtime are still not deployed.
+- Next plan goal is F43. First inspect acceptance and existing advice analytics; write a failing focused test before implementation.
