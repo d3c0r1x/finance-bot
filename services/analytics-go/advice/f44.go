@@ -43,7 +43,7 @@ type F44Decision struct {
 type F44Purchase struct {
 	ProductKey  string    `json:"productKey"`
 	Name        string    `json:"name"`
-	LineSum     string    `json:"lineSum"`
+	LineSum     *string   `json:"lineSum"`
 	PurchasedAt time.Time `json:"purchasedAt"`
 }
 
@@ -63,9 +63,9 @@ type F44Candidate struct {
 	Unit               string `json:"unit"`
 	MonthlyRate        string `json:"monthlyRate"`
 	CountTarget        int    `json:"countTarget"`
-	MonthlySpend       string `json:"monthlySpend"`
+	MonthlySpend       *string `json:"monthlySpend"`
 	MonthlyLimit       string `json:"monthlyLimit,omitempty"`
-	EstimatedReduction string `json:"estimatedReduction"`
+	EstimatedReduction *string `json:"estimatedReduction"`
 	PurchaseCount      int    `json:"purchaseCount"`
 	EvidenceCount      int    `json:"evidenceCount"`
 }
@@ -73,7 +73,7 @@ type F44Candidate struct {
 type F44SkippedCandidate struct {
 	ProductKey   string `json:"productKey"`
 	Name         string `json:"name"`
-	MonthlySpend string `json:"monthlySpend"`
+	MonthlySpend *string `json:"monthlySpend"`
 	ReasonCode   string `json:"reasonCode"`
 }
 
@@ -114,9 +114,15 @@ func BuildF44Candidates(request F44Request) (F44Report, error) {
 	purchases := make([]f44Purchase, 0, len(request.Purchases))
 	byProduct := make(map[string][]f44Purchase)
 	for _, purchase := range request.Purchases {
-		amount, ok := new(big.Rat).SetString(purchase.LineSum)
+		var amount *big.Rat
+		if purchase.LineSum != nil {
+			var ok bool
+			amount, ok = new(big.Rat).SetString(*purchase.LineSum)
+			if !ok || !f44MoneyPattern.MatchString(*purchase.LineSum) || amount.Sign() < 0 {
+				return F44Report{}, errors.New("invalid F44 purchase")
+			}
+		}
 		if !f44ValidIdentity(purchase.ProductKey, purchase.Name) ||
-			!ok || !f44MoneyPattern.MatchString(purchase.LineSum) || amount.Sign() < 0 ||
 			purchase.PurchasedAt.IsZero() || purchase.PurchasedAt.After(request.AsOf) {
 			return F44Report{}, errors.New("invalid F44 purchase")
 		}
@@ -207,30 +213,47 @@ func f44Candidate(key, name string, entries []f44Purchase, unit string, evidence
 	}
 	start := max(0, len(entries)-6)
 	usual := new(big.Rat)
+	unknownAmount := false
 	for _, entry := range entries[start:] {
-		usual.Add(usual, entry.amount)
+		if entry.amount == nil {
+			unknownAmount = true
+		} else {
+			usual.Add(usual, entry.amount)
+		}
 	}
-	usual.Quo(usual, big.NewRat(int64(len(entries[start:])), 1))
-	monthlySpend := f44Round(new(big.Rat).Mul(rate, usual), 2)
-	countSaving := new(big.Rat).Mul(usual, new(big.Rat).Sub(rate, big.NewRat(int64(target), 1)))
+	if !unknownAmount {
+		usual.Quo(usual, big.NewRat(int64(len(entries[start:])), 1))
+	}
 	countTarget := 0
 	if unit == "count" {
 		countTarget = int(target)
 	}
 	candidate := &F44Candidate{
 		Key: key, ProductKey: key, Name: name, Unit: unit, MonthlyRate: rate.FloatString(2), CountTarget: countTarget,
-		MonthlySpend: monthlySpend.FloatString(2), PurchaseCount: len(entries), EvidenceCount: evidence,
+		PurchaseCount: len(entries), EvidenceCount: evidence,
 	}
 	if unit == "count" {
-		candidate.EstimatedReduction = f44Round(countSaving, 2).FloatString(2)
+		if !unknownAmount {
+			monthlySpend := f44Round(new(big.Rat).Mul(rate, usual), 2).FloatString(2)
+			reduction := f44Round(new(big.Rat).Mul(usual, new(big.Rat).Sub(rate, big.NewRat(int64(target), 1))), 2).FloatString(2)
+			candidate.MonthlySpend = &monthlySpend
+			candidate.EstimatedReduction = &reduction
+		}
 		return candidate, nil
 	}
+	if unknownAmount {
+		return nil, &F44SkippedCandidate{ProductKey: key, Name: name, ReasonCode: "missing_amounts"}
+	}
+	monthlySpend := f44Round(new(big.Rat).Mul(rate, usual), 2)
+	monthlySpendText := monthlySpend.FloatString(2)
+	candidate.MonthlySpend = &monthlySpendText
 	limit := f44MoneyStep(monthlySpend, usual)
 	if limit == nil || new(big.Rat).Sub(monthlySpend, limit).Cmp(big.NewRat(f44MinMoneySaving, 1)) < 0 {
-		return nil, &F44SkippedCandidate{ProductKey: key, Name: name, MonthlySpend: monthlySpend.FloatString(2), ReasonCode: "minimum_savings"}
+		return nil, &F44SkippedCandidate{ProductKey: key, Name: name, MonthlySpend: candidate.MonthlySpend, ReasonCode: "minimum_savings"}
 	}
 	candidate.MonthlyLimit = limit.FloatString(2)
-	candidate.EstimatedReduction = f44Round(new(big.Rat).Sub(monthlySpend, limit), 2).FloatString(2)
+	reduction := f44Round(new(big.Rat).Sub(monthlySpend, limit), 2).FloatString(2)
+	candidate.EstimatedReduction = &reduction
 	return candidate, nil
 }
 
@@ -298,8 +321,22 @@ func f44RoundInt(value *big.Rat) int64 {
 
 func f44SortCandidates(candidates []F44Candidate) {
 	sort.Slice(candidates, func(i, j int) bool {
-		a, _ := new(big.Rat).SetString(candidates[i].EstimatedReduction)
-		b, _ := new(big.Rat).SetString(candidates[j].EstimatedReduction)
+		if (candidates[i].EstimatedReduction == nil) != (candidates[j].EstimatedReduction == nil) {
+			return candidates[i].EstimatedReduction != nil
+		}
+		if candidates[i].EstimatedReduction == nil {
+			a, _ := new(big.Rat).SetString(candidates[i].MonthlyRate)
+			b, _ := new(big.Rat).SetString(candidates[j].MonthlyRate)
+			if cmp := a.Cmp(b); cmp != 0 {
+				return cmp > 0
+			}
+			if candidates[i].PurchaseCount != candidates[j].PurchaseCount {
+				return candidates[i].PurchaseCount > candidates[j].PurchaseCount
+			}
+			return candidates[i].Key < candidates[j].Key
+		}
+		a, _ := new(big.Rat).SetString(*candidates[i].EstimatedReduction)
+		b, _ := new(big.Rat).SetString(*candidates[j].EstimatedReduction)
 		if cmp := a.Cmp(b); cmp != 0 {
 			return cmp > 0
 		}

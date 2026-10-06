@@ -79,7 +79,7 @@ func (purchase *F44Purchase) UnmarshalJSON(data []byte) error {
 	type purchaseAlias F44Purchase
 	var decoded purchaseAlias
 	if err := unmarshalRequiredWasteObject(data,
-		[]string{"productKey", "name", "lineSum", "purchasedAt"}, nil, &decoded); err != nil {
+		[]string{"productKey", "name", "lineSum", "purchasedAt"}, map[string]bool{"lineSum": true}, &decoded); err != nil {
 		return err
 	}
 	*purchase = F44Purchase(decoded)
