@@ -158,6 +158,14 @@ class FinanceApi(context: Context) {
         execute("/api/v1/tenants/$tenantId/analytics/recurring", "GET"),
     ))
 
+    fun muteRecurringSeries(tenantId: String, seriesId: String): FinanceRecurringProjection = FinanceModels.recurringProjection(JSONObject(
+        execute("/api/v1/tenants/$tenantId/analytics/recurring/${android.net.Uri.encode(seriesId)}/mute", "PUT", "{}"),
+    ))
+
+    fun unmuteRecurringSeries(tenantId: String, seriesId: String): FinanceRecurringProjection = FinanceModels.recurringProjection(JSONObject(
+        execute("/api/v1/tenants/$tenantId/analytics/recurring/${android.net.Uri.encode(seriesId)}/mute", "DELETE", "{}"),
+    ))
+
     fun markShoppingBought(tenantId: String, productKey: String): FinanceShoppingList = FinanceModels.shoppingList(JSONObject(
         execute("/api/v1/tenants/$tenantId/shopping/${android.net.Uri.encode(productKey)}/bought", "POST", "{}"),
     ))

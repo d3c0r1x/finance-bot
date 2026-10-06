@@ -143,7 +143,8 @@ class FinanceScreensTest {
         val overdue = recurring("22222222222222222222222222222222", "service", "Сервис", "expense", "500.00", -1, "2026-10-05")
         val income = recurring("33333333333333333333333333333333", "salary", "Зарплата", "income", "120000.00", 4, "2026-10-10")
         val projection = FinanceRecurringProjection("recurring.v1", "complete", "Europe/Moscow", "2026-10-05T21:00:00Z",
-            listOf(due, overdue), listOf(income), listOf(due), listOf(overdue), income, "2571.43", mapOf("RUB" to "2571.43"))
+            listOf(due, overdue), listOf(income), listOf(due), listOf(overdue), income, "2571.43", mapOf("RUB" to "2571.43"),
+            emptyList())
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), recurringProjection = projection))
 
         compose.onNodeWithText("Регулярные").performScrollTo().performClick()
@@ -177,9 +178,27 @@ class FinanceScreensTest {
         compose.onNodeWithTag("recurring-projection").assertIsDisplayed()
     }
 
+    @Test fun recurringScreenOffersReminderMuteAction() {
+        val due = recurring("11111111111111111111111111111111", "rent", "Аренда", "expense", "100.00", 3, "2026-10-09")
+        val muted = due.copy(id = "44444444444444444444444444444444", key = "backup", name = "Облако")
+        val projection = FinanceRecurringProjection("recurring.v1", "complete", "Europe/Moscow", "2026-10-05T21:00:00Z",
+            listOf(due), emptyList(), emptyList(), emptyList(), null, null, emptyMap(), listOf(muted))
+        var decision: Pair<String, Boolean>? = null
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), recurringProjection = projection),
+            onRecurringDecision = { id, muted -> decision = id to muted })
+
+        compose.onNodeWithText("Регулярные").performScrollTo().performClick()
+        compose.onNodeWithText("Отключить напоминание").performScrollTo().assertIsDisplayed().performClick()
+        assertEquals(due.id to true, decision)
+        compose.onNodeWithTag("recurring-projection").performScrollToIndex(6)
+        compose.onNodeWithText("Отключённые напоминания").assertIsDisplayed()
+        compose.onNodeWithText("Восстановить напоминание").assertIsDisplayed().performClick()
+        assertEquals(muted.id to false, decision)
+    }
+
     @Test fun recurringScreenShowsNoFakeTotalsWithoutHistory() {
         val empty = FinanceRecurringProjection("recurring.v1", "complete", "Europe/Moscow", "2026-10-05T21:00:00Z",
-            emptyList(), emptyList(), emptyList(), emptyList(), null, null, emptyMap())
+            emptyList(), emptyList(), emptyList(), emptyList(), null, null, emptyMap(), emptyList())
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), recurringProjection = empty))
         compose.onNodeWithText("Регулярные").performScrollTo().performClick()
         compose.onNodeWithText("Пока нет найденных регулярных операций.").assertIsDisplayed()
@@ -389,7 +408,8 @@ class FinanceScreensTest {
                       onShoppingDecision: (String, String) -> Unit = { _, _ -> },
                       onShoppingCopy: (String) -> Unit = {},
                       onPersonalInflationLoad: () -> Unit = {},
-                      onRecurringLoad: () -> Unit = {}) {
+                      onRecurringLoad: () -> Unit = {},
+                      onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> }) {
         val language = mutableStateOf("ru")
         compose.setContent {
         MaterialTheme {
@@ -403,6 +423,7 @@ class FinanceScreensTest {
                 onShoppingDecision = onShoppingDecision, onShoppingCopy = onShoppingCopy,
                 onPersonalInflationLoad = onPersonalInflationLoad,
                 onRecurringLoad = onRecurringLoad,
+                onRecurringDecision = onRecurringDecision,
                 onUpdateDraft = onUpdateDraft, onConfirmDraft = onConfirmDraft, onCancelDraft = onCancelDraft,
                 onLogout = {},
                 onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = {},

@@ -1032,3 +1032,29 @@ def test_recurring_projection_routes_require_member_bound_responses():
     assert private["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "ResolveTelegramActorContext"
     )
+    for path, security, csrf_required in (
+        ("/api/v1/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", None, False),
+        ("/bff/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", [{"bffSession": []}], True),
+    ):
+        for method in ("put", "delete"):
+            operation = spec["paths"][path][method]
+            assert operation.get("security") == security
+            if csrf_required:
+                assert any(parameter == {"$ref": "#/components/parameters/CsrfToken"}
+                           for parameter in operation["parameters"])
+            assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+                "RecurringProjection"
+            )
+            assert {"403", "404", "503"}.issubset(operation["responses"])
+    for action in ("mute", "unmute"):
+        telegram = spec["paths"][f"/internal/v1/telegram/actions/recurring/{{seriesId}}/{action}"]["post"]
+        assert telegram["security"] == [{"telegramServiceToken": []}]
+        assert telegram["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "ResolveTelegramActorContext"
+        )
+        assert telegram["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "RecurringProjection"
+        )
+    projection_schema = spec["components"]["schemas"]["RecurringProjection"]
+    assert "mutedSeries" in projection_schema["required"]
+    assert projection_schema["properties"]["mutedSeries"]["items"]["$ref"].endswith("RecurringSeries")

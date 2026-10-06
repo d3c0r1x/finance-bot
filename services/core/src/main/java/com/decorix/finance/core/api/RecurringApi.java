@@ -13,7 +13,8 @@ public final class RecurringApi {
                                       List<RecurringSeries> expenseSeries, List<RecurringSeries> incomeSeries,
                                       List<RecurringSeries> dueSoon, List<RecurringSeries> overdue,
                                       RecurringSeries nextIncome, String monthlyExpenseEstimate,
-                                      Map<String, String> monthlyExpenseEstimates) {}
+                                      Map<String, String> monthlyExpenseEstimates,
+                                      List<RecurringSeries> mutedSeries) {}
 
     public record RecurringSeries(String id, String key, String name, String category, String type, String currency,
                                   String amount, String minAmount, String maxAmount, String periodCode,

@@ -102,6 +102,22 @@ public class TelegramActionController {
         return actions.recurring(request);
     }
 
+    @PostMapping("/actions/recurring/{seriesId}/mute")
+    RecurringProjection muteRecurring(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @PathVariable String seriesId, @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.muteRecurring(request, seriesId);
+    }
+
+    @PostMapping("/actions/recurring/{seriesId}/unmute")
+    RecurringProjection unmuteRecurring(
+            @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,
+            @PathVariable String seriesId, @RequestBody ResolveRequest request) {
+        requireServiceToken(suppliedToken);
+        return actions.unmuteRecurring(request, seriesId);
+    }
+
     @PostMapping("/shopping/{productKey}/bought")
     ShoppingList markShoppingBought(
             @RequestHeader(name = "X-Finance-Service-Token", required = false) String suppliedToken,

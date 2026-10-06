@@ -359,6 +359,21 @@ class TelegramCoreClient:
         body = await self._post_json("actions/recurring", {"token": actor_context_token}, expected_status=200)
         return self._validated_recurring_projection(body)
 
+    async def mute_recurring_series(self, actor_context_token: str, series_id: str) -> dict:
+        return await self._recurring_decision(actor_context_token, series_id, "mute")
+
+    async def unmute_recurring_series(self, actor_context_token: str, series_id: str) -> dict:
+        return await self._recurring_decision(actor_context_token, series_id, "unmute")
+
+    async def _recurring_decision(self, actor_context_token: str, series_id: str, action: str) -> dict:
+        if not isinstance(actor_context_token, str) or not actor_context_token \
+                or not isinstance(series_id, str) or not re.fullmatch(r"[0-9a-f]{32}", series_id):
+            raise TelegramCoreError("unavailable")
+        body = await self._post_json(
+            f"actions/recurring/{quote(series_id, safe='')}/{action}",
+            {"token": actor_context_token}, expected_status=200)
+        return self._validated_recurring_projection(body)
+
     async def mark_shopping_bought(self, actor_context_token: str, product_key: str) -> dict:
         return await self._shopping_decision(actor_context_token, product_key, "bought")
 
@@ -620,7 +635,8 @@ class TelegramCoreClient:
     @staticmethod
     def _validated_recurring_projection(body: object) -> dict:
         required = {"algorithmVersion", "completeness", "timeZone", "asOf", "expenseSeries", "incomeSeries",
-                    "dueSoon", "overdue", "nextIncome", "monthlyExpenseEstimate", "monthlyExpenseEstimates"}
+                    "dueSoon", "overdue", "nextIncome", "monthlyExpenseEstimate", "monthlyExpenseEstimates",
+                    "mutedSeries"}
         if not isinstance(body, dict) or not required <= body.keys() or body.get("algorithmVersion") != "recurring.v1" \
                 or body.get("completeness") != "complete" or not isinstance(body.get("timeZone"), str) \
                 or not body["timeZone"] or len(body["timeZone"]) > 64 \
@@ -636,7 +652,7 @@ class TelegramCoreClient:
         except (TelegramCoreError, ZoneInfoNotFoundError, ValueError):
             raise TelegramCoreError("unavailable")
 
-        fields = ("expenseSeries", "incomeSeries", "dueSoon", "overdue")
+        fields = ("expenseSeries", "incomeSeries", "dueSoon", "overdue", "mutedSeries")
         if any(not isinstance(body.get(field), list) or len(body[field]) > 5000 for field in fields):
             raise TelegramCoreError("unavailable")
         ids: set[str] = set()
@@ -680,6 +696,11 @@ class TelegramCoreClient:
 
         expenses = [series(item, "expense") for item in body["expenseSeries"]]
         incomes = [series(item, "income") for item in body["incomeSeries"]]
+        muted_series = []
+        for item in body["mutedSeries"]:
+            if not isinstance(item, dict) or item.get("type") not in {"expense", "income"}:
+                raise TelegramCoreError("unavailable")
+            muted_series.append(series(item, item["type"]))
         expense_by_id = {item["id"]: item for item in expenses}
         income_by_id = {item["id"]: item for item in incomes}
         expected_soon = [item["id"] for item in expenses if 0 <= item["daysUntil"] <= 3]

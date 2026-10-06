@@ -577,9 +577,20 @@ features:
     feature: "Отключение/возврат серии; `services/mutelist.py`"
     target: "J preferences по user+tenant+section"
     acceptance: "Отключение не удаляет расход и не затрагивает другого пользователя"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/ProductPriceHistoryServiceTest.java
+      - services/python/telegram_gateway/tests/test_commands.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/python/presentation/tests/test_report_renderer.py
+      - apps/web/src/RecurringPanel.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Core rechecks active tenant membership and current series ID; RLS-protected `muted_suggestions` stores tenant/member/recurring preferences. Muted series leave active expense/income, due-soon, overdue, next-income and monthly totals, while the transaction ledger stays unchanged. Authenticated Core, CSRF-protected BFF and Telegram actor actions return a restorable projection. Web, Android and Telegram expose localized mute/restore controls."
+      - "GREEN: Core `:services:core:check` and four focused PostgreSQL/API/BFF/Telegram service tests; Web 49/49 plus TypeScript/Vite production build; Python presentation/Telegram 109 passed; contracts 54 passed/2 optional skips; Android emulator instrumentation 42/42. Debug APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E` installed and launched on `emulator-5556`."
     intentional_differences: []
   - id: F40
     feature: "Сумма/доля необязательного, источники verdict, исправленные позиции"

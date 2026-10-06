@@ -40,6 +40,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.awt.image.BufferedImage;
@@ -101,6 +102,8 @@ class TransactionApiPostgresTest {
     private static final AtomicReference<String> LAST_SHOPPING_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_PERSONAL_INFLATION_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> LAST_RECURRING_REQUEST = new AtomicReference<>("");
+    private static final AtomicBoolean RECURRING_FIXTURE_ENABLED = new AtomicBoolean();
+    private static final String RECURRING_SERIES_ID = "abcdef0123456789abcdef0123456789";
     private static final String ANALYTICS_SERVICE_TOKEN = "integration-analytics-price-token";
     private static final HttpServer AI_SERVER = startAiServer();
     private static final String JDBC_URL = System.getenv("FINANCE_TEST_JDBC_URL");
@@ -167,6 +170,7 @@ class TransactionApiPostgresTest {
 
     @BeforeEach
     void createTenantAndMembership() {
+        RECURRING_FIXTURE_ENABLED.set(false);
         cleanupReceiptPhotoFixtures();
         grantAppPrivileges();
         subject = "keycloak|integration-" + UUID.randomUUID();
@@ -3901,6 +3905,7 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.algorithmVersion").value("recurring.v1"))
                 .andExpect(jsonPath("$.completeness").value("complete"))
                 .andExpect(jsonPath("$.expenseSeries").isEmpty())
+                .andExpect(jsonPath("$.mutedSeries").isEmpty())
                 .andExpect(jsonPath("$.monthlyExpenseEstimate").doesNotExist());
         org.junit.jupiter.api.Assertions.assertEquals(tenantId.toString(),
                 com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.tenantId"));
@@ -3922,6 +3927,117 @@ class TransactionApiPostgresTest {
         mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/recurring", UUID.randomUUID())
                         .with(jwt().jwt(token -> token.subject(subject))))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void recurringMuteIsMemberScopedRestorableAndKeepsTransactions() throws Exception {
+        RECURRING_FIXTURE_ENABLED.set(true);
+        var ownerAuth = jwt().jwt(token -> token.subject(subject));
+        mvc.perform(post("/api/v1/tenants/{tenantId}/transactions", tenantId)
+                        .with(ownerAuth)
+                        .header("Idempotency-Key", "recurring-mute-preserve-transaction-0001")
+                        .contentType("application/json")
+                        .content("{\"type\":\"expense\",\"amount\":\"12.34\",\"currency\":\"RUB\","
+                                + "\"categoryCode\":\"utilities\",\"description\":\"Internet\","
+                                + "\"occurredAt\":\"2026-10-03T10:00:00Z\"}"))
+                .andExpect(status().isCreated());
+        int transactionCountBefore = tenantTransactionCount();
+        org.junit.jupiter.api.Assertions.assertEquals(1, transactionCountBefore);
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/recurring", tenantId).with(ownerAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseSeries[0].id").value(RECURRING_SERIES_ID))
+                .andExpect(jsonPath("$.monthlyExpenseEstimate").value("1500.00"))
+                .andExpect(jsonPath("$.mutedSeries").isEmpty());
+
+        mvc.perform(put("/api/v1/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", tenantId,
+                                RECURRING_SERIES_ID).with(ownerAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseSeries").isEmpty())
+                .andExpect(jsonPath("$.dueSoon").isEmpty())
+                .andExpect(jsonPath("$.mutedSeries[0].id").value(RECURRING_SERIES_ID))
+                .andExpect(jsonPath("$.monthlyExpenseEstimates").isEmpty())
+                .andExpect(jsonPath("$.monthlyExpenseEstimate").doesNotExist());
+
+        String memberSubject = "keycloak|recurring-mute-member-" + UUID.randomUUID();
+        UUID memberId = addTenantMember(memberSubject, "Taylor", "member");
+        mvc.perform(delete("/api/v1/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", tenantId,
+                                RECURRING_SERIES_ID)
+                        .with(jwt().jwt(token -> token.subject(memberSubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseSeries[0].id").value(RECURRING_SERIES_ID))
+                .andExpect(jsonPath("$.mutedSeries").isEmpty());
+        org.junit.jupiter.api.Assertions.assertEquals(1, recurringMuteCount(userIdFor(subject)));
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/recurring", tenantId).with(ownerAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseSeries").isEmpty())
+                .andExpect(jsonPath("$.mutedSeries[0].id").value(RECURRING_SERIES_ID));
+
+        mvc.perform(delete("/bff/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", tenantId,
+                                RECURRING_SERIES_ID)
+                        .with(oidcLogin().idToken(token -> token.subject(subject))).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseSeries[0].id").value(RECURRING_SERIES_ID))
+                .andExpect(jsonPath("$.mutedSeries").isEmpty())
+                .andExpect(jsonPath("$.monthlyExpenseEstimate").value("1500.00"));
+
+        mvc.perform(put("/api/v1/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", tenantId,
+                                "00000000000000000000000000000000").with(ownerAuth))
+                .andExpect(status().isNotFound());
+        org.junit.jupiter.api.Assertions.assertEquals(0, recurringMuteCount(userIdFor(subject)));
+        org.junit.jupiter.api.Assertions.assertEquals(0, recurringMuteCount(memberId));
+        org.junit.jupiter.api.Assertions.assertEquals(transactionCountBefore, tenantTransactionCount());
+    }
+
+    @Test
+    void telegramActorCanMuteAndRestoreCurrentRecurringSeries() throws Exception {
+        RECURRING_FIXTURE_ENABLED.set(true);
+        long telegramUserId = newTelegramUserId();
+        String linkResponse = mvc.perform(post("/api/v1/me/telegram-link")
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String code = com.jayway.jsonpath.JsonPath.read(linkResponse, "$.code");
+        mvc.perform(post("/internal/v1/telegram/link-codes/redeem")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"code\":\"" + code + "\",\"telegramUserId\":" + telegramUserId + "}"))
+                .andExpect(status().isOk());
+        String contextResponse = mvc.perform(post("/internal/v1/telegram/actor-contexts")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + telegramUserId + ",\"tenantId\":\"" + tenantId + "\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String actorToken = com.jayway.jsonpath.JsonPath.read(contextResponse, "$.token");
+        String body = "{\"token\":\"" + actorToken + "\"}";
+
+        mvc.perform(post("/internal/v1/telegram/actions/recurring/{seriesId}/mute", RECURRING_SERIES_ID)
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseSeries").isEmpty())
+                .andExpect(jsonPath("$.mutedSeries[0].id").value(RECURRING_SERIES_ID));
+        mvc.perform(post("/internal/v1/telegram/actions/recurring/{seriesId}/unmute", RECURRING_SERIES_ID)
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseSeries[0].id").value(RECURRING_SERIES_ID))
+                .andExpect(jsonPath("$.mutedSeries").isEmpty());
+    }
+
+    private int tenantTransactionCount() {
+        return transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT count(*) FROM transactions WHERE tenant_id = ?", Integer.class, tenantId);
+        });
+    }
+
+    private int recurringMuteCount(UUID userId) {
+        return transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT count(*) FROM muted_suggestions WHERE tenant_id = ? AND user_id = ? "
+                    + "AND section = 'recurring'", Integer.class, tenantId, userId);
+        });
     }
 
     @Test
@@ -4974,11 +5090,28 @@ class TransactionApiPostgresTest {
                 String timeZone = com.jayway.jsonpath.JsonPath.read(LAST_RECURRING_REQUEST.get(), "$.timeZone");
                 String startOfDay = Instant.parse(asOf).atZone(ZoneId.of(timeZone)).toLocalDate()
                         .atStartOfDay(ZoneId.of(timeZone)).toInstant().toString();
-                String response = """
-                        {"algorithmVersion":"recurring.v1","completeness":"complete","timeZone":"%s","asOf":"%s",
-                         "expenseSeries":[],"incomeSeries":[],"dueSoon":[],"overdue":[],"nextIncome":null,
-                         "monthlyExpenseEstimate":null,"monthlyExpenseEstimates":{}}
-                        """.formatted(timeZone, startOfDay);
+                String response;
+                if (RECURRING_FIXTURE_ENABLED.get()) {
+                    LocalDate today = Instant.parse(asOf).atZone(ZoneId.of(timeZone)).toLocalDate();
+                    String series = """
+                            {"id":"%s","key":"internet utilities","name":"Internet","category":"utilities",
+                             "type":"expense","currency":"RUB","amount":"1500.00","minAmount":"1500.00",
+                             "maxAmount":"1500.00","periodCode":"month","periodDays":30,
+                             "minIntervalDays":30,"maxIntervalDays":30,"occurrences":3,
+                             "lastDate":"%s","nextDate":"%s","daysUntil":1}
+                            """.formatted(RECURRING_SERIES_ID, today.minusDays(29), today.plusDays(1));
+                    response = """
+                            {"algorithmVersion":"recurring.v1","completeness":"complete","timeZone":"%s","asOf":"%s",
+                             "expenseSeries":[%s],"incomeSeries":[],"dueSoon":[%s],"overdue":[],"nextIncome":null,
+                             "monthlyExpenseEstimate":"1500.00","monthlyExpenseEstimates":{"RUB":"1500.00"}}
+                            """.formatted(timeZone, startOfDay, series, series);
+                } else {
+                    response = """
+                            {"algorithmVersion":"recurring.v1","completeness":"complete","timeZone":"%s","asOf":"%s",
+                             "expenseSeries":[],"incomeSeries":[],"dueSoon":[],"overdue":[],"nextIncome":null,
+                             "monthlyExpenseEstimate":null,"monthlyExpenseEstimates":{}}
+                            """.formatted(timeZone, startOfDay);
+                }
                 byte[] body = response.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
                 exchange.sendResponseHeaders(200, body.length);

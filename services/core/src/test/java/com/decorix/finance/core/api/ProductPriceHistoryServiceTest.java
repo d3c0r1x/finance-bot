@@ -31,6 +31,7 @@ class ProductPriceHistoryServiceTest {
         UUID tenantId = UUID.randomUUID(); UUID ownerId = UUID.randomUUID(); String subject = "keycloak-subject";
         JdbcTemplate jdbc = mock(JdbcTemplate.class); TransactionTemplate transaction = mock(TransactionTemplate.class);
         ProductPriceHistoryClient analytics = mock(ProductPriceHistoryClient.class);
+        RecurringDecisionService recurringDecisions = mock(RecurringDecisionService.class);
         when(transaction.execute(any(TransactionCallback.class))).thenAnswer(invocation -> {
             TransactionCallback callback = invocation.getArgument(0);
             return callback.doInTransaction(mock(TransactionStatus.class));
@@ -41,13 +42,17 @@ class ProductPriceHistoryServiceTest {
         when(jdbc.queryForObject(eq("SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?"),
                 eq(String.class), eq(tenantId), eq(ownerId))).thenReturn("Europe/Moscow");
         var expected = new RecurringProjection("recurring.v1", "complete", "Europe/Moscow",
-                java.time.Instant.parse("2026-10-06T00:00:00+03:00"), List.of(), List.of(), List.of(), List.of(), null, null, java.util.Map.of());
+                java.time.Instant.parse("2026-10-06T00:00:00+03:00"), List.of(), List.of(), List.of(), List.of(),
+                null, null, java.util.Map.of(), List.of());
         when(analytics.recurring(eq(tenantId), eq(ownerId), any(), eq("Europe/Moscow"))).thenReturn(expected);
+        when(recurringDecisions.apply(tenantId, ownerId, expected)).thenReturn(expected);
 
-        var service = new ProductPriceHistoryService(jdbc, transaction, analytics);
+        var service = new ProductPriceHistoryService(jdbc, transaction, analytics,
+                new ShoppingDecisionService(jdbc, transaction), recurringDecisions);
 
         assertEquals(expected, service.recurring(tenantId, subject));
         verify(analytics).recurring(eq(tenantId), eq(ownerId), any(), eq("Europe/Moscow"));
+        verify(recurringDecisions).apply(tenantId, ownerId, expected);
     }
 
     @Test

@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 03:11, Europe/Moscow.
+Updated: 2026-10-06 04:09, Europe/Moscow.
 
 ## Global plan
 
@@ -41,17 +41,18 @@ Updated: 2026-10-06 03:11, Europe/Moscow.
 | F35 | Receipt-cadence shopping suggestions | COMPLETE — Core, Go, Telegram, Web, Android | F34 | d001969 |
 | F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
-| F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | this goal |
+| F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
+| F39 | Mute and restore recurring series | COMMIT_PENDING — Core, Telegram, Web, Android and contracts verified | F38 | pending |
 
 ## Current goal
 
-- ID and outcome: F38 — detect recurring expenses and income, expose amount/interval ranges, warn three days ahead, keep overdue series out of upcoming.
-- Status: COMPLETE — projection, member-scoped API/BFF, Telegram/Web/Android surfaces, contract and regression acceptance all GREEN.
-- Acceptance: preserve v1's minimum three occurrences, 25% amount-range bound, weekly/monthly interval bands, 25% interval tolerance/60% share, local timezone dates, future-only income, 3-day upcoming warning and overdue separation; show amount/interval ranges.
-- Ruling: F26 has a Java recurrence detector for safe-to-spend; F38 must share its verified behavior and move analytics calculation into the planned Go ownership boundary without changing F26 results. F39 mute/unmute remains separate.
+- ID and outcome: F39 — mute and restore recurring reminder series per tenant and member.
+- Status: COMMIT_PENDING — acceptance and regression gates pass; goal commit is next.
+- Acceptance: muted IDs are series IDs scoped by tenant/member/`recurring`; muted series disappear from active, due, overdue, income and monthly totals; restore returns them; another member cannot mute/unmute them; transaction rows remain unchanged; stale IDs cannot be muted; authenticated API, CSRF BFF and Telegram actor actions; Web, Android and Telegram controls.
+- Design: reuse RLS-protected `muted_suggestions`; validate series existence against the member's current analytics projection; Core owns the overlay, clients call Core actions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `03a306f` plus current F38 work.
-- Updated at: 2026-10-06 03:11 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7c18051` plus current F39 work.
+- Updated at: 2026-10-06 04:09 Europe/Moscow.
 
 ## Verification evidence
 
@@ -63,15 +64,29 @@ Updated: 2026-10-06 03:11, Europe/Moscow.
 | F34 Python / contracts | presentation + Telegram pytest; `tools/contracts` pytest | F34 worktree | PASS, 84 passed; 48 passed/2 optional skipped | `/price` response validation, PNG behavior, public/private/Telegram schemas |
 | F34 Core suite | `:services:core:check --no-daemon` | F34 worktree | PASS | Full Core unit/check gate; focused PostgreSQL acceptance also passed |
 | F33 live event store | tagged Kafka/ClickHouse replay | no endpoint configured | NOT_RUN (explicit test SKIP) | Separate F33 runtime gate; F34 acceptance itself is complete |
-| F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | F38 branch work | PASS; local Kafka/ClickHouse integration SKIP | Go/Core/Python/contracts/Web/Android coverage recorded in E3.27; CI workflow provisions Redpanda + ClickHouse |
+| F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
+| F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, worktree at `7c18051` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
+| F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | worktree at `7c18051` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
+| F39 Python/contracts | presentation + Telegram pytest; `tools/contracts` pytest | worktree at `7c18051` | PASS, 109 passed; 54 passed/2 optional skips | Client validation, callbacks, renderer, route security and muted-series schema |
+| F39 Android | `:app:connectedDebugAndroidTest`; launch debug APK | emulator `emulator-5556`, worktree at `7c18051` | PASS, 42/42 | APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E`; installed and launched |
 
 ## Failures and attempts
 
 - First PostgreSQL attempt targeted shared `finance_test`, whose non-empty schema had no Flyway history. Retried on newly created, isolated `finance_test_f34_catalog_20261005`; targeted acceptance passed. The shared test database was not changed.
+- F39 Web build first caught an inferred fixture type that rejected nullable totals; explicit `RecurringProjection` typing fixed the test-only issue, then 49 tests and build passed.
+- F39 Android test first asserted a virtualized `LazyColumn` row before it was composed; `performScrollTo` could not target an off-screen row. A second attempt used an out-of-range item index. Root-cause review found the UI row existed but test navigation assumed visibility/index semantics. A minimal seven-item fixture and valid scroll to index 6 passed; full instrumentation then passed 42/42. One initial manual launch used the wrong activity package; manifest namespace confirmed `com.decorix.finance.MainActivity`, and corrected launch succeeded.
 
 ## Next action
 
-- Begin F39: inspect the legacy mute/unmute rules and existing member preferences, write independent RED acceptance, then implement the smallest cross-client goal.
+- Commit and push fully green F39, then start F40 verdict/evidence analytics from `PLAN.md`.
+
+## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
+
+- F39 implements tenant/member/`recurring` mute preferences in the existing RLS-protected `muted_suggestions` table. Core validates current active membership and series existence before write; muted series leave active lists and derived warning/income/expense totals, while underlying transaction rows remain unchanged. Owner can restore; another member cannot affect that preference.
+- Authenticated Core API, CSRF-protected Web BFF, Telegram actor actions, Python callbacks, Web controls and Android controls share the same projection. Both clients show localized restore lists and handle muted-only history without fake totals.
+- GREEN: Core full check plus four focused PostgreSQL/API/BFF/Telegram service tests; Web 49/49 and production build; Python presentation/Telegram 109 passed; contracts 54 passed/2 optional skips; Android emulator instrumentation 42/42. APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E` installed and launched on `emulator-5556`.
+- Android test attempts exposed off-screen `LazyColumn` virtualization and a wrong synthetic item index; root-cause review corrected the fixture and scroll target. Web build caught and fixed a test fixture's narrow inferred type. Final reruns passed. `git diff --check` remains to verify before commit.
+- Status: COMMIT_PENDING. Next: review staged F39-only diff, commit, push, check GitHub CI, then continue with F40.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
@@ -937,6 +952,22 @@ Updated: 2026-10-06 03:11, Europe/Moscow.
 - GREEN: Go `go test ./... -count=1` + `go vet ./...`; Core `:services:core:check --no-daemon` and isolated PostgreSQL API/BFF member-scope acceptance; Python presentation/Telegram 106 passed; contracts 54 passed/2 optional skips; Web 48/48 plus production build; Android emulator instrumentation 41/41. APK installed and launched on isolated `emulator-5556`, SHA-256 `B0C275204C68A1F2FA9F02EB6E64F09BB327EA757B3ED3DD7D455B357E99F1C7`. `git diff --check` clean.
 - Tagged Kafka/ClickHouse live integration remains NOT_RUN locally: required external endpoints are not configured. The integration test is part of the project and `.github/workflows/contracts.yml` provisions Redpanda and ClickHouse for CI.
 - Next: F39 mute/unmute recurring series, without deleting the underlying financial transactions or changing another member's view.
+
+## E3.28 F39 recurring reminder preferences — 2026-10-06 03:25 MSK
+
+- F39 inherits `services/mutelist.py`: a muted recurrence remains in transaction history, leaves the active reminder list, and can be restored. Preferences stay separate by tenant, member, and section.
+- Reuse RLS-protected `muted_suggestions`, whose `section` constraint already includes `recurring`; store the stable 32-character series ID. Core rechecks active membership and that the series still exists. Muted rows move to a restore list; active recurring totals use only unmuted series.
+- Acceptance spans authenticated Core API/BFF, Telegram actor actions, Web CSRF, Android OIDC, localized restore controls, stale IDs, no transaction deletion, and two-member isolation.
+- CI follow-up after F38 push: regular tests and all contracts/Go/Kafka/ClickHouse jobs passed at `7c18051`; the recurring event replay and projection steps both passed. Fixes in `4808dce`, `d7e446b`, and `7c18051` are pushed.
+- Local shell lacks Go; GitHub runner verifies Go gates. Existing isolated PostgreSQL test server at `127.0.0.1:55438` supports Core acceptance.
+- Next: implement Core overlay and actions against the observed RED test.
+
+## E3.29 F39 acceptance RED — 2026-10-06 03:37 MSK
+
+- Added PostgreSQL API acceptance for an authenticated member's recurring projection, mute, another member's attempted unmute, owner's restore through CSRF-protected BFF, stale-ID rejection, preference-row isolation, and preserved transaction count.
+- Test `:services:core:test --tests com.decorix.finance.core.api.TransactionApiPostgresTest.recurringMuteIsMemberScopedRestorableAndKeepsTransactions` reaches the live Core test context and fails because response lacks `mutedSeries`. This is the intended RED.
+- First fixture attempt returned 502 because it used Go snake-case fields while the test HTTP fixture serves Core camel-case JSON. Corrected fixture shape; rerun reached the missing contract field. No product code changed.
+- Next: implement member-scoped overlay and Core routes, then rerun this acceptance.
 
 ## E3.21 F35 shopping cadence suggestions — 2026-10-05 23:39 MSK
 

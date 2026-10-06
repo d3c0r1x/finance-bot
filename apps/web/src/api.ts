@@ -189,6 +189,7 @@ export type RecurringProjection = {
   algorithmVersion: 'recurring.v1'; completeness: 'complete'; timeZone: string; asOf: string;
   expenseSeries: RecurringSeries[]; incomeSeries: RecurringSeries[]; dueSoon: RecurringSeries[]; overdue: RecurringSeries[];
   nextIncome: RecurringSeries | null; monthlyExpenseEstimate: string | null; monthlyExpenseEstimates: Record<string, string>;
+  mutedSeries: RecurringSeries[];
 };
 export type ReceiptItemPage = { items: ReceiptItem[]; page: number; totalItems: number; hasMore: boolean };
 export type ReceiptRepeatWarning = {
@@ -403,6 +404,12 @@ export const api = {
   ),
   getRecurringProjection: (tenantId: string) => request<RecurringProjection>(
     `/bff/tenants/${tenantId}/analytics/recurring`,
+  ),
+  muteRecurringSeries: (tenantId: string, seriesId: string) => request<RecurringProjection>(
+    `/bff/tenants/${tenantId}/analytics/recurring/${encodeURIComponent(seriesId)}/mute`, { method: 'PUT' },
+  ),
+  unmuteRecurringSeries: (tenantId: string, seriesId: string) => request<RecurringProjection>(
+    `/bff/tenants/${tenantId}/analytics/recurring/${encodeURIComponent(seriesId)}/mute`, { method: 'DELETE' },
   ),
   markShoppingBought: (tenantId: string, productKey: string) => request<ShoppingList>(
     `/bff/tenants/${tenantId}/shopping/${encodeURIComponent(productKey)}/bought`, { method: 'POST' },

@@ -27,20 +27,29 @@ public class ProductPriceHistoryService {
     private final TransactionTemplate transaction;
     private final ProductPriceHistoryClient analytics;
     private final ShoppingDecisionService shoppingDecisions;
+    private final RecurringDecisionService recurringDecisions;
 
     @Autowired
     public ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
                                       ProductPriceHistoryClient analytics,
-                                      ShoppingDecisionService shoppingDecisions) {
+                                      ShoppingDecisionService shoppingDecisions,
+                                      RecurringDecisionService recurringDecisions) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.analytics = analytics;
         this.shoppingDecisions = shoppingDecisions;
+        this.recurringDecisions = recurringDecisions;
     }
 
     ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
                                ProductPriceHistoryClient analytics) {
-        this(jdbc, transaction, analytics, new ShoppingDecisionService(jdbc, transaction));
+        this(jdbc, transaction, analytics, new ShoppingDecisionService(jdbc, transaction),
+                new RecurringDecisionService(jdbc, transaction));
+    }
+
+    ProductPriceHistoryService(JdbcTemplate jdbc, TransactionTemplate transaction,
+                               ProductPriceHistoryClient analytics, ShoppingDecisionService shoppingDecisions) {
+        this(jdbc, transaction, analytics, shoppingDecisions, new RecurringDecisionService(jdbc, transaction));
     }
 
     public PriceComparison get(UUID tenantId, String subject, UUID receiptId, UUID itemId) {
@@ -169,34 +178,74 @@ public class ProductPriceHistoryService {
     }
 
     public RecurringProjection recurring(UUID tenantId, String subject) {
+        MemberScope member = recurringMember(tenantId, subject);
+        return recurringProjection(tenantId, member);
+    }
+
+    /** Rechecks the active Telegram member before requesting that member's recurring history. */
+    public RecurringProjection recurring(UUID tenantId, UUID ownerUserId) {
+        MemberScope member = recurringMember(tenantId, ownerUserId);
+        return recurringProjection(tenantId, member);
+    }
+
+    public RecurringProjection muteRecurring(UUID tenantId, String subject, String seriesId) {
+        return setRecurringMute(tenantId, recurringMember(tenantId, subject), seriesId, true);
+    }
+
+    public RecurringProjection muteRecurring(UUID tenantId, UUID ownerUserId, String seriesId) {
+        return setRecurringMute(tenantId, recurringMember(tenantId, ownerUserId), seriesId, true);
+    }
+
+    public RecurringProjection unmuteRecurring(UUID tenantId, String subject, String seriesId) {
+        return setRecurringMute(tenantId, recurringMember(tenantId, subject), seriesId, false);
+    }
+
+    public RecurringProjection unmuteRecurring(UUID tenantId, UUID ownerUserId, String seriesId) {
+        return setRecurringMute(tenantId, recurringMember(tenantId, ownerUserId), seriesId, false);
+    }
+
+    private RecurringProjection recurringProjection(UUID tenantId, MemberScope member) {
+        RecurringProjection source = analytics.recurring(tenantId, member.userId(), Instant.now(), member.timezone());
+        return recurringDecisions.apply(tenantId, member.userId(), source);
+    }
+
+    private RecurringProjection setRecurringMute(UUID tenantId, MemberScope member, String seriesId, boolean mute) {
+        String id = RecurringDecisionService.requireSeriesId(seriesId);
+        RecurringProjection source = analytics.recurring(tenantId, member.userId(), Instant.now(), member.timezone());
+        boolean exists = source.expenseSeries().stream().anyMatch(series -> id.equals(series.id()))
+                || source.incomeSeries().stream().anyMatch(series -> id.equals(series.id()));
+        if (!exists) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring series not found");
+        if (mute) recurringDecisions.mute(tenantId, member.userId(), id);
+        else recurringDecisions.unmute(tenantId, member.userId(), id);
+        return recurringDecisions.apply(tenantId, member.userId(), source);
+    }
+
+    private MemberScope recurringMember(UUID tenantId, String subject) {
         if (tenantId == null || subject == null || subject.isBlank()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
         }
         MemberScope member = transaction.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
             UUID userId = memberUserId(tenantId, subject);
-            if (userId == null) return null;
-            return new MemberScope(userId, profileTimezone(tenantId, userId));
+            return userId == null ? null : new MemberScope(userId, profileTimezone(tenantId, userId));
         });
         if (member == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
-        return analytics.recurring(tenantId, member.userId(), Instant.now(), member.timezone());
+        return member;
     }
 
-    /** Rechecks the active Telegram member before requesting that member's recurring history. */
-    public RecurringProjection recurring(UUID tenantId, UUID ownerUserId) {
+    private MemberScope recurringMember(UUID tenantId, UUID ownerUserId) {
         if (tenantId == null || ownerUserId == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
         }
         MemberScope member = transaction.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
-            List<UUID> members = jdbc.query("SELECT user_id FROM memberships WHERE tenant_id = ? AND user_id = ? AND status = 'active'",
+            List<UUID> members = jdbc.query("SELECT user_id FROM memberships WHERE tenant_id = ? AND user_id = ? "
+                            + "AND status = 'active'",
                     (rs, row) -> rs.getObject("user_id", UUID.class), tenantId, ownerUserId);
-            if (members.isEmpty()) return null;
-            UUID userId = members.get(0);
-            return new MemberScope(userId, profileTimezone(tenantId, userId));
+            return members.isEmpty() ? null : new MemberScope(members.get(0), profileTimezone(tenantId, members.get(0)));
         });
         if (member == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Recurring projection not found");
-        return analytics.recurring(tenantId, member.userId(), Instant.now(), member.timezone());
+        return member;
     }
 
     private ShoppingList shoppingForMember(UUID tenantId, UUID userId) {

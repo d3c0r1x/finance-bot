@@ -265,7 +265,7 @@ def test_recurring_renderer_separates_three_day_warnings_and_overdue_series():
         "algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "Europe/Moscow",
         "asOf": "2026-08-20T00:00:00+03:00", "expenseSeries": [phone, old], "incomeSeries": [],
         "dueSoon": [phone], "overdue": [old], "nextIncome": None, "monthlyExpenseEstimate": "857.14",
-        "monthlyExpenseEstimates": {"RUB": "857.14"},
+        "monthlyExpenseEstimates": {"RUB": "857.14"}, "mutedSeries": [],
     })
     soon = text.split("Регулярные расходы:")[0]
     overdue = text.split("Просрочено (не входит в предупреждения):")[-1]
@@ -281,9 +281,23 @@ def test_recurring_renderer_shows_no_fake_totals_without_history():
         "algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "UTC",
         "asOf": "2026-08-20T00:00:00Z", "expenseSeries": [], "incomeSeries": [], "dueSoon": [],
         "overdue": [], "nextIncome": None, "monthlyExpenseEstimate": None, "monthlyExpenseEstimates": {},
+        "mutedSeries": [],
     })
     assert "минимум 3" in text
     assert "0,00" not in text
+
+
+def test_recurring_renderer_keeps_muted_series_visible_without_counting_them_active():
+    muted = _recurring_series("4", "Cloud backup", "2026-08-15", "2026-08-22", 2)
+    text = render_recurring_projection({
+        "algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "UTC",
+        "asOf": "2026-08-20T00:00:00Z", "expenseSeries": [], "incomeSeries": [], "dueSoon": [],
+        "overdue": [], "nextIncome": None, "monthlyExpenseEstimate": None, "monthlyExpenseEstimates": {},
+        "mutedSeries": [muted],
+    })
+    assert "Отключённые напоминания" in text and "Cloud backup" in text
+    assert "Пока не нашёл регулярных операций" not in text
+    assert "В месяц на расходы" not in text
 
 
 def _recurring_series(identifier, name, last, next_date, days):

@@ -630,7 +630,7 @@ def test_core_client_requests_and_validates_empty_recurring_projection():
     response = {"algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "Europe/Moscow",
                 "asOf": "2026-10-06T00:00:00+03:00", "expenseSeries": [], "incomeSeries": [],
                 "dueSoon": [], "overdue": [], "nextIncome": None, "monthlyExpenseEstimate": None,
-                "monthlyExpenseEstimates": {}}
+                "monthlyExpenseEstimates": {}, "mutedSeries": []}
 
     async def get_recurring(request):
         seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
@@ -653,16 +653,45 @@ def test_core_client_validates_recurring_warning_scope_and_monthly_total():
 
     due = recurring_series("1", "Phone plan", "2026-08-15", "2026-08-22", 2)
     old = recurring_series("2", "Old payment", "2026-08-06", "2026-08-13", -7)
+    muted = recurring_series("3", "Muted payment", "2026-08-15", "2026-08-22", 2)
     body = {"algorithmVersion": "recurring.v1", "completeness": "complete", "timeZone": "Europe/Moscow",
             "asOf": "2026-08-20T00:00:00+03:00", "expenseSeries": [due, old], "incomeSeries": [],
             "dueSoon": [due], "overdue": [old], "nextIncome": None, "monthlyExpenseEstimate": "857.14",
-            "monthlyExpenseEstimates": {"RUB": "857.14"}}
+            "monthlyExpenseEstimates": {"RUB": "857.14"}, "mutedSeries": [muted]}
 
     assert TelegramCoreClient._validated_recurring_projection(body) == body
     with pytest.raises(TelegramCoreError):
         TelegramCoreClient._validated_recurring_projection({**body, "dueSoon": [old]})
     with pytest.raises(TelegramCoreError):
         TelegramCoreClient._validated_recurring_projection({**body, "monthlyExpenseEstimate": "999.00"})
+    missing_muted = {key: value for key, value in body.items() if key != "mutedSeries"}
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_recurring_projection(missing_muted)
+    with pytest.raises(TelegramCoreError):
+        TelegramCoreClient._validated_recurring_projection({**body, "mutedSeries": [due]})
+
+
+def test_core_client_posts_recurring_mute_action_with_actor_context():
+    seen = []
+    series_id = "a" * 32
+
+    async def mute(request):
+        seen.append((request.path, request.headers.get("X-Finance-Service-Token"), await request.json()))
+        return web.json_response({"algorithmVersion": "recurring.v1", "completeness": "complete",
+            "timeZone": "UTC", "asOf": "2026-10-06T00:00:00Z", "expenseSeries": [], "incomeSeries": [],
+            "dueSoon": [], "overdue": [], "nextIncome": None, "monthlyExpenseEstimate": None,
+            "monthlyExpenseEstimates": {}, "mutedSeries": []})
+
+    async def exercise():
+        app = web.Application()
+        app.router.add_post(f"/internal/v1/telegram/actions/recurring/{series_id}/mute", mute)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "telegram-service-secret")
+            return await client.mute_recurring_series("opaque-actor-context", series_id)
+
+    assert asyncio.run(exercise())["mutedSeries"] == []
+    assert seen == [(f"/internal/v1/telegram/actions/recurring/{series_id}/mute", "telegram-service-secret",
+                     {"token": "opaque-actor-context"})]
 
 
 def recurring_series(identifier, name, last, next_date, days):

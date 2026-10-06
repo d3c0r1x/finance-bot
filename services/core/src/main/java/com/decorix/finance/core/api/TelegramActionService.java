@@ -116,6 +116,24 @@ public class TelegramActionService {
         });
     }
 
+    public RecurringProjection muteRecurring(ResolveRequest request, String seriesId) {
+        return recurringDecision(request, seriesId, true);
+    }
+
+    public RecurringProjection unmuteRecurring(ResolveRequest request, String seriesId) {
+        return recurringDecision(request, seriesId, false);
+    }
+
+    private RecurringProjection recurringDecision(ResolveRequest request, String seriesId, boolean mute) {
+        if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Recurring request is required");
+        return transaction.execute(status -> {
+            ActorContext actor = actorContexts.require(request.token(), "receipt.read");
+            return mute
+                    ? productHistory.muteRecurring(actor.tenantId(), actor.userId(), seriesId)
+                    : productHistory.unmuteRecurring(actor.tenantId(), actor.userId(), seriesId);
+        });
+    }
+
     public ShoppingList markShoppingBought(ResolveRequest request, String productKey) {
         return shoppingDecision(request, productKey, "bought");
     }

@@ -525,6 +525,18 @@ public class WebBffController {
         return productPriceHistory.recurring(tenantId, user.getSubject());
     }
 
+    @PutMapping("/tenants/{tenantId}/analytics/recurring/{seriesId}/mute")
+    RecurringProjection muteRecurring(@PathVariable UUID tenantId, @PathVariable String seriesId,
+                                      @AuthenticationPrincipal OidcUser user) {
+        return productPriceHistory.muteRecurring(tenantId, user.getSubject(), seriesId);
+    }
+
+    @DeleteMapping("/tenants/{tenantId}/analytics/recurring/{seriesId}/mute")
+    RecurringProjection unmuteRecurring(@PathVariable UUID tenantId, @PathVariable String seriesId,
+                                        @AuthenticationPrincipal OidcUser user) {
+        return productPriceHistory.unmuteRecurring(tenantId, user.getSubject(), seriesId);
+    }
+
     @PostMapping("/tenants/{tenantId}/shopping/{productKey}/bought")
     ShoppingList markShoppingBought(@PathVariable UUID tenantId, @PathVariable String productKey,
                                     @AuthenticationPrincipal OidcUser user) {

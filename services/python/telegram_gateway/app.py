@@ -342,6 +342,36 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             return
         await message.answer(text, reply_markup=MAIN_MENU, parse_mode=None)
 
+    async def decide_recurring(callback: CallbackQuery, state: FSMContext) -> None:
+        parts = (callback.data or "").split(":")
+        if len(parts) != 3 or parts[0] != "recurring" or parts[1] not in {"mute", "unmute"} \
+                or not re.fullmatch(r"[0-9a-f]{32}", parts[2]):
+            await callback.answer("Действие устарело. Откройте /recurring снова.", show_alert=True)
+            return
+        if callback.message is None or callback.message.chat.type != "private" or callback.from_user is None:
+            await callback.answer("Действие доступно только в личном чате.", show_alert=True)
+            return
+        actor = (await state.get_data()).get("telegram_actor_context")
+        if not isinstance(actor, dict) or not isinstance(actor.get("token"), str):
+            await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            return
+        try:
+            action = core.mute_recurring_series if parts[1] == "mute" else core.unmute_recurring_series
+            projection = await action(actor["token"], parts[2])
+            text = render_recurring_projection(projection)
+        except TelegramCoreError as error:
+            if error.code == "unauthorized":
+                await state.clear()
+                await callback.answer("Сессия истекла. Выберите пространство командой /menu.", show_alert=True)
+            else:
+                await callback.answer("Не удалось изменить напоминание. Откройте /recurring позже.", show_alert=True)
+            return
+        except (TypeError, ValueError, KeyError):
+            await callback.answer("Регулярные операции получены в неверном формате.", show_alert=True)
+            return
+        await callback.message.edit_text(text, reply_markup=_recurring_keyboard(projection), parse_mode=None)
+        await callback.answer("Напоминание обновлено")
+
     async def show_recurring(message: Message, state: FSMContext) -> None:
         if message.chat.type != "private":
             await message.answer("Регулярные операции доступны только в личном чате с ботом.", reply_markup=MAIN_MENU)
@@ -367,7 +397,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             await message.answer("Регулярные операции получены в неверном формате. Попробуйте позже.",
                                  reply_markup=MAIN_MENU)
             return
-        await message.answer(text, reply_markup=MAIN_MENU, parse_mode=None)
+        await message.answer(text, reply_markup=_recurring_keyboard(projection), parse_mode=None)
 
     async def decide_shopping(callback: CallbackQuery, state: FSMContext) -> None:
         parts = (callback.data or "").split(":")
@@ -1024,6 +1054,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(receive_transaction_draft_edit, F.text)
     router.callback_query.register(decide_transaction_draft, F.data.startswith("draft:"))
     router.callback_query.register(decide_shopping, F.data.startswith("shopping:"))
+    router.callback_query.register(decide_recurring, F.data.startswith("recurring:"))
     router.callback_query.register(decide_transaction_history, F.data.startswith("history:"))
     router.callback_query.register(decide_budget_proposal, F.data.startswith("budget_proposal:"))
 
@@ -1364,6 +1395,19 @@ def _shopping_keyboard(shopping: dict, revision: str) -> InlineKeyboardMarkup | 
             raise ValueError("Muted shopping candidate has no product key")
         buttons.append([InlineKeyboardButton(text=f"Вернуть · {candidate['productName'][:32]}",
                                              callback_data=f"shopping:{revision}:unmute:{index}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+
+
+def _recurring_keyboard(projection: dict) -> InlineKeyboardMarkup | None:
+    buttons = []
+    for item in projection["expenseSeries"] + projection["incomeSeries"]:
+        buttons.append([InlineKeyboardButton(
+            text=f"Отключить · {item['name'][:28]}", callback_data=f"recurring:mute:{item['id']}",
+        )])
+    for item in projection["mutedSeries"]:
+        buttons.append([InlineKeyboardButton(
+            text=f"Вернуть · {item['name'][:28]}", callback_data=f"recurring:unmute:{item['id']}",
+        )])
     return InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
 
 

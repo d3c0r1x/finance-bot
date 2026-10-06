@@ -181,7 +181,7 @@ data class FinanceRecurringProjection(
     val expenseSeries: List<FinanceRecurringSeries>, val incomeSeries: List<FinanceRecurringSeries>,
     val dueSoon: List<FinanceRecurringSeries>, val overdue: List<FinanceRecurringSeries>,
     val nextIncome: FinanceRecurringSeries?, val monthlyExpenseEstimate: String?,
-    val monthlyExpenseEstimates: Map<String, String>,
+    val monthlyExpenseEstimates: Map<String, String>, val mutedSeries: List<FinanceRecurringSeries>,
 )
 
 data class FinanceTransactionDraft(
@@ -540,8 +540,11 @@ internal object FinanceModels {
         val incomeJson = json.getJSONArray("incomeSeries")
         val dueJson = json.getJSONArray("dueSoon")
         val overdueJson = json.getJSONArray("overdue")
+        val mutedJson = json.getJSONArray("mutedSeries")
         require(expenseJson.length() <= 5000 && incomeJson.length() <= 5000
-            && dueJson.length() <= 5000 && overdueJson.length() <= 5000) { "Invalid recurring series count" }
+            && dueJson.length() <= 5000 && overdueJson.length() <= 5000 && mutedJson.length() <= 5000) {
+            "Invalid recurring series count"
+        }
         val ids = mutableSetOf<String>()
 
         fun parseSeries(item: JSONObject, expectedType: String, register: Boolean = true): FinanceRecurringSeries {
@@ -586,6 +589,12 @@ internal object FinanceModels {
 
         val expenses = (0 until expenseJson.length()).map { parseSeries(expenseJson.getJSONObject(it), "expense") }
         val incomes = (0 until incomeJson.length()).map { parseSeries(incomeJson.getJSONObject(it), "income") }
+        val muted = (0 until mutedJson.length()).map { index ->
+            val item = mutedJson.getJSONObject(index)
+            val type = item.getString("type")
+            require(type == "expense" || type == "income") { "Invalid muted recurring series type" }
+            parseSeries(item, type)
+        }
         val byExpenseId = expenses.associateBy { it.id }
         val expectedDueSoon = expenses.filter { it.daysUntil in 0..3 }
         val dueSoon = (0 until dueJson.length()).map { index ->
@@ -628,7 +637,7 @@ internal object FinanceModels {
             "Invalid recurring monthly estimate"
         }
         return FinanceRecurringProjection("recurring.v1", "complete", timezone, asOf, expenses, incomes, dueSoon,
-            overdue, nextIncome, total, estimates)
+            overdue, nextIncome, total, estimates, muted)
     }
 
     fun budgetProposal(json: JSONObject) = BudgetProposal(

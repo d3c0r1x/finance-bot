@@ -668,7 +668,8 @@ def render_recurring_projection(projection: Mapping[str, object]) -> str:
     incomes = projection.get("incomeSeries")
     due_soon = projection.get("dueSoon")
     overdue = projection.get("overdue")
-    if any(not isinstance(items, list) for items in (expenses, incomes, due_soon, overdue)):
+    muted_series = projection.get("mutedSeries")
+    if any(not isinstance(items, list) for items in (expenses, incomes, due_soon, overdue, muted_series)):
         raise ValueError("recurring projection lists are invalid")
     if projection.get("algorithmVersion") != "recurring.v1" or projection.get("completeness") != "complete":
         raise ValueError("recurring projection version is invalid")
@@ -697,7 +698,7 @@ def render_recurring_projection(projection: Mapping[str, object]) -> str:
                 f"интервал {minimum_interval}–{maximum_interval} дн., {when}")
 
     lines = ["🔁 Регулярные расходы и доходы"]
-    if not expenses and not incomes:
+    if not expenses and not incomes and not muted_series:
         lines.extend(("", "Пока не нашёл регулярных операций.",
                       "Для серии нужны минимум 3 похожие операции с недельным или месячным интервалом."))
         return "\n".join(lines)
@@ -717,6 +718,12 @@ def render_recurring_projection(projection: Mapping[str, object]) -> str:
     if overdue:
         lines.extend(("", "Просрочено (не входит в предупреждения):"))
         lines.extend(label(item) for item in overdue[:5] if isinstance(item, Mapping))
+    if muted_series:
+        lines.extend(("", "Отключённые напоминания (можно вернуть в приложении):"))
+        for item in muted_series[:8]:
+            if not isinstance(item, Mapping) or not isinstance(item.get("name"), str) or not item["name"].strip():
+                raise ValueError("muted recurring series is incomplete")
+            lines.append(f"• {item['name'][:100]} — {_format_rub(_recurring_amount(item.get('amount')))} ₽")
     return "\n".join(lines)
 
 

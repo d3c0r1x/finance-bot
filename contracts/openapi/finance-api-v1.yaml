@@ -881,6 +881,45 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Recurring transaction projection is temporarily unavailable }
+  /bff/tenants/{tenantId}/analytics/recurring/{seriesId}/mute:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: seriesId
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    put:
+      operationId: muteBrowserRecurringSeries
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Member's recurring projection with the selected reminder muted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
+    delete:
+      operationId: restoreBrowserRecurringSeries
+      security:
+        - bffSession: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: Member's recurring projection with the selected reminder restored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
   /bff/tenants/{tenantId}/shopping/{productKey}/bought:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -1314,6 +1353,56 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { description: Telegram or recurring analytics service is unavailable }
+  /internal/v1/telegram/actions/recurring/{seriesId}/mute:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    post:
+      operationId: muteTelegramRecurringSeries
+      security:
+        - telegramServiceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Actor's recurring projection with the selected reminder muted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
+  /internal/v1/telegram/actions/recurring/{seriesId}/unmute:
+    parameters:
+      - name: seriesId
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    post:
+      operationId: restoreTelegramRecurringSeries
+      security:
+        - telegramServiceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResolveTelegramActorContext' }
+      responses:
+        '200':
+          description: Actor's recurring projection with the selected reminder restored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
   /internal/v1/telegram/shopping/{productKey}/bought:
     parameters:
       - name: productKey
@@ -3249,6 +3338,39 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { description: Recurring transaction projection is temporarily unavailable }
+  /api/v1/tenants/{tenantId}/analytics/recurring/{seriesId}/mute:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: seriesId
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    put:
+      operationId: muteRecurringSeries
+      responses:
+        '200':
+          description: Member's recurring projection with the selected reminder muted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
+    delete:
+      operationId: restoreRecurringSeries
+      responses:
+        '200':
+          description: Member's recurring projection with the selected reminder restored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RecurringProjection' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Recurring transaction projection is temporarily unavailable }
   /api/v1/tenants/{tenantId}/shopping/{productKey}/bought:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4664,7 +4786,7 @@ components:
       type: object
       additionalProperties: false
       required: [algorithmVersion, completeness, timeZone, asOf, expenseSeries, incomeSeries, dueSoon,
-                 overdue, nextIncome, monthlyExpenseEstimate, monthlyExpenseEstimates]
+                 overdue, nextIncome, monthlyExpenseEstimate, monthlyExpenseEstimates, mutedSeries]
       properties:
         algorithmVersion: { type: string, const: recurring.v1 }
         completeness: { type: string, const: complete }
@@ -4693,7 +4815,11 @@ components:
           maxProperties: 8
           propertyNames: { pattern: '^[A-Z]{3}$' }
           additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
-      description: Series are member-scoped and versioned. Empty history returns empty lists and null totals; overdue items never appear in dueSoon.
+        mutedSeries:
+          type: array
+          maxItems: 5000
+          items: { $ref: '#/components/schemas/RecurringSeries' }
+      description: Series and reminder preferences are member-scoped. Muted items remain visible for restoration but do not appear in active groups or monthly totals. Empty history returns empty lists and null totals; overdue items never appear in dueSoon.
     RecurringSeries:
       type: object
       additionalProperties: false

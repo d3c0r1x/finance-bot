@@ -239,10 +239,12 @@ class FinanceModelsTest {
         val due = """{"id":"11111111111111111111111111111111","key":"rent","name":"Аренда","category":"housing","type":"expense","currency":"RUB","amount":"100.00","minAmount":"95.00","maxAmount":"105.00","periodCode":"week","periodDays":7,"minIntervalDays":7,"maxIntervalDays":7,"occurrences":3,"lastDate":"2026-10-02","nextDate":"2026-10-09","daysUntil":3}"""
         val overdue = """{"id":"22222222222222222222222222222222","key":"service","name":"Сервис","category":"bills","type":"expense","currency":"RUB","amount":"500.00","minAmount":"475.00","maxAmount":"525.00","periodCode":"week","periodDays":7,"minIntervalDays":7,"maxIntervalDays":7,"occurrences":4,"lastDate":"2026-09-28","nextDate":"2026-10-05","daysUntil":-1}"""
         val income = """{"id":"33333333333333333333333333333333","key":"salary","name":"Зарплата","category":null,"type":"income","currency":"RUB","amount":"120000.00","minAmount":"118000.00","maxAmount":"122000.00","periodCode":"month","periodDays":30,"minIntervalDays":29,"maxIntervalDays":31,"occurrences":3,"lastDate":"2026-09-10","nextDate":"2026-10-10","daysUntil":4}"""
+        val muted = """{"id":"44444444444444444444444444444444","key":"cloud backup","name":"Облако","category":"services","type":"expense","currency":"RUB","amount":"900.00","minAmount":"900.00","maxAmount":"900.00","periodCode":"month","periodDays":30,"minIntervalDays":30,"maxIntervalDays":30,"occurrences":3,"lastDate":"2026-09-06","nextDate":"2026-10-06","daysUntil":0}"""
         val projection = FinanceModels.recurringProjection(JSONObject("""
             {"algorithmVersion":"recurring.v1","completeness":"complete","timeZone":"Europe/Moscow","asOf":"2026-10-05T21:00:00Z",
              "expenseSeries":[$due,$overdue],"incomeSeries":[$income],"dueSoon":[$due],"overdue":[$overdue],
-             "nextIncome":$income,"monthlyExpenseEstimate":"2571.43","monthlyExpenseEstimates":{"RUB":"2571.43"}}
+             "nextIncome":$income,"monthlyExpenseEstimate":"2571.43","monthlyExpenseEstimates":{"RUB":"2571.43"},
+             "mutedSeries":[$muted]}
         """.trimIndent()))
 
         assertEquals("Europe/Moscow", projection.timeZone)
@@ -251,6 +253,7 @@ class FinanceModelsTest {
         assertEquals("service", projection.overdue.single().key)
         assertEquals("salary", projection.nextIncome?.key)
         assertEquals("2571.43", projection.monthlyExpenseEstimate)
+        assertEquals("Облако", projection.mutedSeries.single().name)
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -259,7 +262,8 @@ class FinanceModelsTest {
         FinanceModels.recurringProjection(JSONObject("""
             {"algorithmVersion":"recurring.v1","completeness":"complete","timeZone":"Europe/Moscow","asOf":"2026-10-05T21:00:00Z",
              "expenseSeries":[$overdue],"incomeSeries":[],"dueSoon":[$overdue],"overdue":[$overdue],
-             "nextIncome":null,"monthlyExpenseEstimate":"2142.86","monthlyExpenseEstimates":{"RUB":"2142.86"}}
+             "nextIncome":null,"monthlyExpenseEstimate":"2142.86","monthlyExpenseEstimates":{"RUB":"2142.86"},
+             "mutedSeries":[]}
         """.trimIndent()))
     }
 }
