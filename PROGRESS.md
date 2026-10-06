@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 04:09, Europe/Moscow.
+Updated: 2026-10-06 04:15, Europe/Moscow.
 
 ## Global plan
 
@@ -42,17 +42,18 @@ Updated: 2026-10-06 04:09, Europe/Moscow.
 | F36 | Shopping decisions and copy | COMPLETE — bought marks, member-local mute, blocked reason, clipboard | F35 | d758099 |
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 | F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
-| F39 | Mute and restore recurring series | COMMIT_PENDING — Core, Telegram, Web, Android and contracts verified | F38 | pending |
+| F39 | Mute and restore recurring series | COMPLETE — Core, Telegram, Web, Android and contracts verified | F38 | b1e64c4 |
+| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | ANALYSIS | F39 | pending |
 
 ## Current goal
 
-- ID and outcome: F39 — mute and restore recurring reminder series per tenant and member.
-- Status: COMMIT_PENDING — acceptance and regression gates pass; goal commit is next.
-- Acceptance: muted IDs are series IDs scoped by tenant/member/`recurring`; muted series disappear from active, due, overdue, income and monthly totals; restore returns them; another member cannot mute/unmute them; transaction rows remain unchanged; stale IDs cannot be muted; authenticated API, CSRF BFF and Telegram actor actions; Web, Android and Telegram controls.
+- ID and outcome: F40 — optional-spend aggregate, verdict sources and corrected receipt lines.
+- Status: ANALYSIS — read plan and legacy behavior; define independently testable acceptance before implementation.
+- Acceptance: denominator is parsed receipt items; unknown verdicts do not become neutral evidence; preserve verdict provenance and user corrections.
 - Design: reuse RLS-protected `muted_suggestions`; validate series existence against the member's current analytics projection; Core owns the overlay, clients call Core actions.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7c18051` plus current F39 work.
-- Updated at: 2026-10-06 04:09 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `b1e64c4`.
+- Updated at: 2026-10-06 04:15 Europe/Moscow.
 
 ## Verification evidence
 
@@ -65,10 +66,10 @@ Updated: 2026-10-06 04:09, Europe/Moscow.
 | F34 Core suite | `:services:core:check --no-daemon` | F34 worktree | PASS | Full Core unit/check gate; focused PostgreSQL acceptance also passed |
 | F33 live event store | tagged Kafka/ClickHouse replay | no endpoint configured | NOT_RUN (explicit test SKIP) | Separate F33 runtime gate; F34 acceptance itself is complete |
 | F38 recurring projection | `go test ./... -count=1`; `go vet ./...`; tagged integration; Core check/PostgreSQL; Python/contracts; Web; Android | `7c18051` | Local gates PASS; GitHub tests and Go/Kafka/ClickHouse/contracts PASS | Actions runs `37393878671` and `37393878760`; recurring event projection/replay step passed; local live endpoints absent |
-| F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, worktree at `7c18051` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
-| F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | worktree at `7c18051` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
-| F39 Python/contracts | presentation + Telegram pytest; `tools/contracts` pytest | worktree at `7c18051` | PASS, 109 passed; 54 passed/2 optional skips | Client validation, callbacks, renderer, route security and muted-series schema |
-| F39 Android | `:app:connectedDebugAndroidTest`; launch debug APK | emulator `emulator-5556`, worktree at `7c18051` | PASS, 42/42 | APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E`; installed and launched |
+| F39 Core member/API/BFF/Telegram | Four focused Core tests; `:services:core:check --no-daemon` | isolated PostgreSQL `127.0.0.1:55438`, commit `b1e64c4` | PASS | Owner mute/restore, other-member isolation, stale-ID rejection, CSRF BFF restore, Telegram actor actions, unchanged ledger |
+| F39 Web | `pnpm --dir apps/web exec vitest run`; `pnpm --dir apps/web run build` | commit `b1e64c4` | PASS, 49/49; build pass | TypeScript check and Vite production bundle pass |
+| F39 Python/contracts | presentation + Telegram pytest; `tools/contracts` pytest | commit `b1e64c4` | PASS, 109 passed; 54 passed/2 optional skips | Client validation, callbacks, renderer, route security and muted-series schema |
+| F39 Android | `:app:connectedDebugAndroidTest`; launch debug APK | emulator `emulator-5556`, commit `b1e64c4` | PASS, 42/42 | APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E`; installed and launched |
 
 ## Failures and attempts
 
@@ -78,7 +79,7 @@ Updated: 2026-10-06 04:09, Europe/Moscow.
 
 ## Next action
 
-- Commit and push fully green F39, then start F40 verdict/evidence analytics from `PLAN.md`.
+- Read F40's full plan/spec and legacy implementation; define the smallest independent RED acceptance slice.
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
 
@@ -86,7 +87,12 @@ Updated: 2026-10-06 04:09, Europe/Moscow.
 - Authenticated Core API, CSRF-protected Web BFF, Telegram actor actions, Python callbacks, Web controls and Android controls share the same projection. Both clients show localized restore lists and handle muted-only history without fake totals.
 - GREEN: Core full check plus four focused PostgreSQL/API/BFF/Telegram service tests; Web 49/49 and production build; Python presentation/Telegram 109 passed; contracts 54 passed/2 optional skips; Android emulator instrumentation 42/42. APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E` installed and launched on `emulator-5556`.
 - Android test attempts exposed off-screen `LazyColumn` virtualization and a wrong synthetic item index; root-cause review corrected the fixture and scroll target. Web build caught and fixed a test fixture's narrow inferred type. Final reruns passed. `git diff --check` remains to verify before commit.
-- Status: COMMIT_PENDING. Next: review staged F39-only diff, commit, push, check GitHub CI, then continue with F40.
+- Status: COMPLETE. Goal commit: `b1e64c4`. Next: F40 analysis.
+
+## E3.31 F39 commit verified — 2026-10-06 04:15 MSK
+
+- Verified commit `b1e64c4` contains only the green F39 goal and its progress/parity records. `git show --check` passed; unrelated user artifacts remain unstaged.
+- F40 is now the active goal in ANALYSIS. No F40 implementation has started.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 
