@@ -138,8 +138,8 @@ func (store *ClickHouseHTTPStore) History(ctx context.Context, tenantID, ownerID
 		FROM receipt_price_items FINAL
 		WHERE tenant_id = {tenant_id:UUID}
 		  AND owner_user_id = {owner_user_id:UUID}
-		  AND purchased_at < {before:DateTime64(6, 'UTC')}
-		ORDER BY purchased_at DESC, receipt_id, item_id
+		  AND receipt_price_items.purchased_at < {before:DateTime64(6, 'UTC')}
+		ORDER BY receipt_price_items.purchased_at DESC, receipt_id, item_id
 		LIMIT {limit:UInt16}
 		FORMAT JSONEachRow
 		`

@@ -89,7 +89,8 @@ func TestClickHouseStoreReadsDeduplicatedHistoryWithTenantAndOwnerFilters(t *tes
 		query := string(body)
 		for _, required := range []string{
 			"FROM receipt_price_items FINAL", "tenant_id = {tenant_id:UUID}",
-			"owner_user_id = {owner_user_id:UUID}", "purchased_at < {before:DateTime64(6, 'UTC')}",
+			"owner_user_id = {owner_user_id:UUID}",
+			"receipt_price_items.purchased_at < {before:DateTime64(6, 'UTC')}",
 			"LIMIT {limit:UInt16}", "FORMAT JSONEachRow",
 		} {
 			if !strings.Contains(query, required) {
