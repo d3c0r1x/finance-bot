@@ -1,0 +1,100 @@
+{
+  "algorithmVersion": "advice-waste.v1",
+  "input": {
+    "fromDate": "2026-10-04",
+    "toDate": "2026-10-05",
+    "asOf": "2026-10-06T00:00:00Z",
+    "timeZone": "Europe/Moscow",
+    "items": [
+      {
+        "itemId": "00000000-0000-4000-8000-000000000001",
+        "productKey": "milk",
+        "name": "Молоко 1 л",
+        "lineSum": "100.00",
+        "verdict": "neutral",
+        "verdictSource": "unknown",
+        "purchasedAt": "2026-10-04T20:00:00Z",
+        "allowed": false,
+        "itemVersion": 1,
+        "decisionVersion": 0
+      },
+      {
+        "itemId": "00000000-0000-4000-8000-000000000002",
+        "productKey": "chips",
+        "name": "Чипсы",
+        "lineSum": "150.00",
+        "verdict": "harmful",
+        "verdictSource": "model",
+        "purchasedAt": "2026-10-04T21:30:00Z",
+        "allowed": false,
+        "itemVersion": 2,
+        "decisionVersion": 0
+      },
+      {
+        "itemId": "00000000-0000-4000-8000-000000000003",
+        "productKey": "bag",
+        "name": "Пакет-майка",
+        "lineSum": "7.00",
+        "verdict": "unnecessary",
+        "verdictSource": "",
+        "purchasedAt": "2026-10-05T15:00:00Z",
+        "allowed": false,
+        "itemVersion": 1,
+        "decisionVersion": 0
+      },
+      {
+        "itemId": "00000000-0000-4000-8000-000000000004",
+        "productKey": "soda",
+        "name": "Газировка",
+        "lineSum": "50.00",
+        "verdict": "harmful",
+        "verdictSource": "rule",
+        "purchasedAt": "2026-10-05T16:00:00Z",
+        "allowed": true,
+        "itemVersion": 3,
+        "decisionVersion": 4
+      },
+      {
+        "itemId": "00000000-0000-4000-8000-000000000005",
+        "productKey": "tea",
+        "name": "Чай",
+        "lineSum": "900.00",
+        "verdict": null,
+        "verdictSource": "default",
+        "purchasedAt": "2026-10-05T18:00:00Z",
+        "allowed": false,
+        "itemVersion": 1,
+        "decisionVersion": 0
+      }
+    ]
+  },
+  "expected": {
+    "available": true,
+    "reasonCode": "available",
+    "algorithmVersion": "advice-waste.v1",
+    "completeness": "complete",
+    "asOf": "2026-10-06T00:00:00Z",
+    "fromDate": "2026-10-04",
+    "toDate": "2026-10-05",
+    "reviewedSpend": "307.00",
+    "optionalSpend": "157.00",
+    "optionalShare": "0.511",
+    "reviewedItemCount": 4,
+    "optionalItemCount": 2,
+    "missingAmountCount": 0,
+    "byVerdict": [
+      {"verdict": "harmful", "amount": "150.00", "count": 1},
+      {"verdict": "unnecessary", "amount": "7.00", "count": 1}
+    ],
+    "bySource": {"model": "150.00", "unknown": "7.00"},
+    "topItems": [
+      {"itemId": "00000000-0000-4000-8000-000000000002", "name": "Чипсы", "amount": "150.00", "verdict": "harmful", "source": "model"},
+      {"itemId": "00000000-0000-4000-8000-000000000003", "name": "Пакет-майка", "amount": "7.00", "verdict": "unnecessary", "source": "unknown"}
+    ],
+    "repeats": [],
+    "corrected": [
+      {"productKey": "soda", "productName": "Газировка", "count": 1, "amount": "50.00"}
+    ],
+    "optionalByDay": {"2026-10-04": "0.00", "2026-10-05": "157.00"}
+  }
+}

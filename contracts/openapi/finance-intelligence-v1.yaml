@@ -98,6 +98,26 @@ paths:
         '400': { description: Request is malformed or contains unknown fields }
         '401': { description: Internal service token is missing or invalid }
         '503': { description: Transaction history is unavailable or exceeds the supported bound }
+  /internal/v1/analytics/waste:
+    post:
+      operationId: buildAdviceWasteReport
+      security:
+        - serviceBearer: []
+      description: Computes versioned optional-spend evidence from receipt facts already authorized and decision-overlaid by Core. Go does not query business data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WasteRequest' }
+      responses:
+        '200':
+          description: Versioned reviewed spend, optional-spend evidence, corrections, and local-day series
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WasteReport' }
+        '400': { description: Request is malformed or contains invalid receipt facts }
+        '401': { description: Internal service token is missing or invalid }
+        '413': { description: Request exceeds the supported body size }
   /internal/v1/budget-proposals:
     post:
       operationId: createHistoryBudgetShares
@@ -499,6 +519,110 @@ components:
           propertyNames: { pattern: '^[A-Z]{3}$' }
           additionalProperties: { $ref: '#/components/schemas/MoneyAmount' }
       description: No series yields empty lists and null totals. Cross-currency totals are reported by currency only.
+    WasteRequest:
+      type: object
+      additionalProperties: false
+      required: [fromDate, toDate, asOf, timeZone, items]
+      properties:
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        asOf: { type: string, format: date-time }
+        timeZone: { type: string, minLength: 1, maxLength: 64, description: IANA timezone resolved by Core. }
+        items:
+          type: array
+          maxItems: 50000
+          items: { $ref: '#/components/schemas/WasteLine' }
+      description: Core sends only confirmed expense receipt items in the authorized date and member scope; allowed is resolved against each receipt owner's current decision.
+    WasteLine:
+      type: object
+      additionalProperties: false
+      required: [itemId, productKey, name, lineSum, verdict, verdictSource, purchasedAt, allowed, itemVersion, decisionVersion]
+      properties:
+        itemId: { type: string, format: uuid }
+        productKey: { type: string, maxLength: 256, pattern: '^[a-zа-я0-9]*$' }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        lineSum: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,17})\.\d{2}$' }
+        verdict: { type: [string, 'null'], enum: [useful, neutral, harmful, unnecessary, null] }
+        verdictSource: { type: string, maxLength: 32, description: Unknown or absent provenance is reported as unknown. }
+        purchasedAt: { type: string, format: date-time }
+        allowed: { type: boolean, description: Current allow decision for this receipt owner and product key. }
+        itemVersion: { type: integer, minimum: 1 }
+        decisionVersion: { type: integer, minimum: 0 }
+    WasteReport:
+      type: object
+      additionalProperties: false
+      required: [available, reasonCode, algorithmVersion, completeness, asOf, inputVersion, fromDate, toDate,
+                 reviewedSpend, optionalSpend, optionalShare, reviewedItemCount, optionalItemCount, missingAmountCount,
+                 byVerdict, bySource, topItems, repeats, corrected, optionalByDay]
+      properties:
+        available: { type: boolean }
+        reasonCode: { type: string, enum: [available, no_reviewed_items, missing_amounts] }
+        algorithmVersion: { type: string, const: advice-waste.v1 }
+        completeness: { type: string, enum: [complete, partial] }
+        asOf: { type: string, format: date-time }
+        inputVersion: { type: string, pattern: '^[0-9a-f]{64}$' }
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        reviewedSpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        optionalSpend: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
+        optionalShare: { type: [string, 'null'], pattern: '^\d+\.\d{3}$', description: Fraction from 0 to 1; rounded half-even. }
+        reviewedItemCount: { type: integer, minimum: 0, maximum: 50000 }
+        optionalItemCount: { type: integer, minimum: 0, maximum: 50000 }
+        missingAmountCount: { type: integer, minimum: 0, maximum: 50000 }
+        byVerdict:
+          type: array
+          maxItems: 2
+          items: { $ref: '#/components/schemas/WasteVerdictTotal' }
+        bySource:
+          type: object
+          maxProperties: 5
+          propertyNames: { enum: [rule, model, default, unknown, human] }
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+        topItems:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/WasteItemSummary' }
+        repeats:
+          type: array
+          maxItems: 3
+          items: { $ref: '#/components/schemas/WasteProductGroup' }
+        corrected:
+          type: array
+          maxItems: 5
+          items: { $ref: '#/components/schemas/WasteProductGroup' }
+        optionalByDay:
+          type: object
+          maxProperties: 366
+          propertyNames: { pattern: '^\d{4}-\d{2}-\d{2}$' }
+          additionalProperties: { type: string, pattern: '^\d+\.\d{2}$' }
+      description: Null verdicts are excluded from the evidence denominator. Missing amounts make the summary unavailable rather than fabricating totals.
+    WasteVerdictTotal:
+      type: object
+      additionalProperties: false
+      required: [verdict, amount, count]
+      properties:
+        verdict: { type: string, enum: [harmful, unnecessary] }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
+        count: { type: integer, minimum: 1, maximum: 50000 }
+    WasteItemSummary:
+      type: object
+      additionalProperties: false
+      required: [itemId, name, amount, verdict, source]
+      properties:
+        itemId: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
+        verdict: { type: string, enum: [harmful, unnecessary] }
+        source: { type: string, enum: [rule, model, default, unknown, human] }
+    WasteProductGroup:
+      type: object
+      additionalProperties: false
+      required: [productKey, productName, count, amount]
+      properties:
+        productKey: { type: string, maxLength: 256, pattern: '^[a-zа-я0-9]*$' }
+        productName: { type: string, minLength: 1, maxLength: 200 }
+        count: { type: integer, minimum: 1, maximum: 50000 }
+        amount: { type: string, pattern: '^\d+\.\d{2}$' }
     RecurringSeries:
       type: object
       additionalProperties: false

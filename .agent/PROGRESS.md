@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-06 04:35, Europe/Moscow.
+Updated: 2026-10-06 05:11, Europe/Moscow.
 
 ## Global plan
 
@@ -43,17 +43,21 @@ Updated: 2026-10-06 04:35, Europe/Moscow.
 | F37 | Personal basket inflation, 90-day window, top rise/fall | COMPLETE — Go, authenticated Java API, Telegram, Web, Android | F33 projection contract | 41b14f0 |
 | F38 | Recurring expense/income series and warnings | COMPLETE — Go projection, member-scoped Java API, Telegram/Web/Android ranges and warnings | F26 shared recurrence rules | 69a254e |
 | F39 | Mute and restore recurring series | COMPLETE — local gates and GitHub rerun pass | F38 | b1e64c4 + 2de08d9 |
-| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | ANALYSIS | F39 | pending |
+| F40 | Optional-spend aggregate, verdict sources and corrected receipt lines | IN PROGRESS — F40.1 verified locally; Core and clients remain | F39 | pending |
+| F40.1 | Versioned Go advice-spend algorithm and internal API | VERIFYING — local gates green; GitHub regression pending | F39 | pending |
+| F40.2 | Core member-scoped receipt facts and report API integration | PLANNED | F40.1 | pending |
+| F40.3 | Web, Android and Telegram optional-spend presentation | PLANNED | F40.2 | pending |
 
 ## Current goal
 
-- ID and outcome: F40 — report optional spending, verdict provenance and corrected receipt items.
-- Status: ANALYSIS — F39 fully verified; define F40 acceptance and minimal Go/Core/client data boundary before tests.
-- Acceptance: preserve legacy 90-day sums, denominator across all parsed positions, waste verdict totals/source breakdown, member-allowed product overlay, corrected-item visibility, unknown verdict/source semantics, and consistent Web/Android/Telegram output without fabricated data.
-- Design: follow approved ownership: Go computes versioned advice analytics; Java/Core supplies tenant/member-scoped receipt verdict rows and allowed-product decisions; clients render one Core-owned report DTO.
+- ID and outcome: F40.1 — versioned Go algorithm/API for optional-spend report facts.
+- Status: VERIFYING — unit, contract, vet and build gates pass locally; commit and GitHub regression remain.
+- Acceptance: reviewed total includes only persisted non-null verdicts; optional total includes harmful/unnecessary rows except owner-allowed products; null verdict never becomes neutral; unknown source stays `unknown`; corrected items remain visible; local-day series, exact amounts, completeness and deterministic input version match golden fixture.
+- F40 boundary: Core resolves report window, tenant/member scope, confirmed receipt lines and per-owner allowed decisions. Go aggregates; Web, Android and Telegram render shared Core DTO. Missing line amounts produce unavailable partial data, never fabricated totals. F31 later renders the real daily optional-spend series.
+- Design: reuse report window/timezone and per-member `user_product_decisions`; send bounded authorized facts to stateless Go advice analytics; keep approved financial data in PostgreSQL.
 - User choices: maintain full F01–F60 scope, Android RU/EN, separate goal commits, and F33 replay as a distinct integration gate.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `2de08d9`.
-- Updated at: 2026-10-06 04:34 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `a7de34f`.
+- Updated at: 2026-10-06 05:11 Europe/Moscow.
 
 ## Verification evidence
 
@@ -72,17 +76,21 @@ Updated: 2026-10-06 04:35, Europe/Moscow.
 | F39 Android | `:app:connectedDebugAndroidTest`; launch debug APK | emulator `emulator-5556`, commit `b1e64c4` | PASS, 42/42 | APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E`; installed and launched |
 | F39 GitHub PostgreSQL | Actions run `37399400317`; persisted Core event schema check | commit `2de08d9` | PASS | Receipt event validates against `finance.receipt.v1.schema.json`; Core check passed. |
 | F39 GitHub regression | Actions runs `37399400129`, `37399400232` | commit `2de08d9` | PASS | Bot test suite and Python/contracts suite passed. |
+| F40.1 observed RED | Go `go test ./advice -count=1` | tests + golden fixture, HEAD `a7de34f` | FAIL as expected | Compiler reports missing `WasteRequest`, `WasteLine`, `WasteAlgorithmVersion`, and `BuildWasteReport`; behavior is not implemented. |
+| F40.1 Go algorithm/API | `go test ./... -count=1`; `go vet ./...`; build `./cmd/analytics-api` | F40.1 working tree | PASS | Exact money, denominator, corrections, provenance, day series, required-field validation; Go package regression clean. |
+| F40.1 contract | `.venv\\Scripts\\python.exe -m pytest tools/contracts/test_contracts.py -q` | F40.1 working tree | PASS, 41 passed | OpenAPI operation and strict golden fixture schemas validate. Pytest cache warning is permission-only. |
 
 ## Failures and attempts
 
 - First PostgreSQL attempt targeted shared `finance_test`, whose non-empty schema had no Flyway history. Retried on newly created, isolated `finance_test_f34_catalog_20261005`; targeted acceptance passed. The shared test database was not changed.
 - F39 Web build first caught an inferred fixture type that rejected nullable totals; explicit `RecurringProjection` typing fixed the test-only issue, then 49 tests and build passed.
 - F39 Android test first asserted a virtualized `LazyColumn` row before it was composed; `performScrollTo` could not target an off-screen row. A second attempt used an out-of-range item index. Root-cause review found the UI row existed but test navigation assumed visibility/index semantics. A minimal seven-item fixture and valid scroll to index 6 passed; full instrumentation then passed 42/42. One initial manual launch used the wrong activity package; manifest namespace confirmed `com.decorix.finance.MainActivity`, and corrected launch succeeded.
+- F40.1 additional RED tests caught omitted/null required API fields returning 200, repeated products losing their product key, and Go byte-length checks rejecting valid Cyrillic names. Strict decoding, key preservation and Unicode character counts fixed all three.
 - GitHub PostgreSQL run `37398375404` failed after the new receipt acceptance left a `receipt.confirmed` outbox event for the shared contract validator. `test_core_migration.py` mapped transaction, budget and debt events but omitted receipt. Added the receipt schema mapping. Local contract suite passes 54/2 skips; local integration test connects only after using the migrator role, but its cleaned database has no persisted events, so CI must verify event replay.
 
 ## Next action
 
-- Complete F40 analysis: define acceptance cases, owned data path and RED-test commands before implementation.
+- Commit and push F40.1; verify GitHub Go/contracts regression, then begin Core member-scoped integration (F40.2).
 
 ## E3.30 F39 recurring reminder mute and restore — 2026-10-06 04:09 MSK
 
@@ -109,6 +117,23 @@ Updated: 2026-10-06 04:35, Europe/Moscow.
 - Follow-up commit `2de08d9` is pushed. GitHub Core PostgreSQL `37399400317`, Python/contracts `37399400232`, and bot tests `37399400129` all passed.
 - Receipt aggregate schema now validates the persisted `receipt.confirmed` event. F39 is COMPLETE after local gates, emulator delivery proof, and remote regression gates.
 - F40 is active in ANALYSIS. No F40 implementation has started. Next: lock acceptance and smallest independently testable end-to-end slice.
+
+## E3.34 F40.1 acceptance RED — 2026-10-06 04:49 MSK
+
+- F39 completion is verified remotely on commit `2de08d9`; progress-only record `a7de34f` is pushed. Parity validation passes locally.
+- Defined F40 subgoals: Go algorithm/API, Core tenant/member-scoped report integration, then RU/EN Web/Android/Telegram presentation. F31 consumes F40's real daily series after F40.
+- Legacy `waste_summary` denominator uses stored non-null verdict rows; PLAN §8.2 confirms shares use verdict-bearing positions. Null verdict stays outside evidence; allowed decisions apply per receipt owner, including family report scope.
+- `ReportService` already supplies report window, timezone, and personal/family scope. Core must join confirmed receipt items to posted expense transactions, apply `user_product_decisions` by owner, and send bounded facts to Go.
+- Added golden contract `contracts/analytics/advice-waste.v1.json` and behavior tests for denominator, verdict/source totals, corrections, local-day bucketing, missing amounts, validation and input-version stability.
+- Observed RED: Go `go test ./advice -count=1` fails because F40 Go API/model/function are absent. F38 is last green Go production baseline; F39 did not change Go.
+- Next: implement only F40.1 algorithm/API until its gates pass, then commit before Core integration.
+
+## E3.35 F40.1 local GREEN — 2026-10-06 05:11 MSK
+
+- Implemented versioned `advice-waste.v1` exact-money summary, strict service-token endpoint, OpenAPI schemas and golden contract. Null verdicts stay outside denominator; owner-allowed corrections remain visible and leave optional totals; unknown provenance stays unknown; missing reviewed amounts suppress totals.
+- Added deterministic input hash, local-day zero-filled series, exact large sums, half-even share rounding, top optional items/repeats/corrections, bounded inputs and strict required/unknown/null JSON field checks.
+- Extra RED tests found and fixed required-field acceptance, missing repeat product keys, and Unicode character/byte limit mismatch.
+- GREEN: full analytics Go suite, `go vet ./...`, API build, and contracts `41 passed`. `git diff --check` passed. Local gates complete; commit/push and remote regression are next.
 
 ## E6.6 F33 confirmed-item Web price history — 2026-10-05 01:45 MSK
 

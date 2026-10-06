@@ -763,6 +763,39 @@ def test_feature_registry_accounts_for_all_legacy_and_new_parity_ids():
                for feature_id in ("F11", "F12", "F13", "F14", "F59", "F60"))
 
 
+def test_advice_waste_internal_contract_is_strict_and_fixture_matches_schema():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+    operation = spec["paths"]["/internal/v1/analytics/waste"]["post"]
+    assert operation["operationId"] == "buildAdviceWasteReport"
+    assert operation["security"] == [{"serviceBearer": []}]
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WasteRequest",
+    }
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/WasteReport",
+    }
+    request_schema = spec["components"]["schemas"]["WasteRequest"]
+    line_schema = spec["components"]["schemas"]["WasteLine"]
+    report_schema = spec["components"]["schemas"]["WasteReport"]
+    assert request_schema["additionalProperties"] is False
+    assert line_schema["additionalProperties"] is False
+    assert report_schema["additionalProperties"] is False
+    fixture = json.loads((ROOT / "contracts/analytics/advice-waste.v1.json").read_text("utf-8"))
+    request_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": spec["components"]["schemas"]},
+        "$ref": "#/components/schemas/WasteRequest",
+    }
+    Draft202012Validator(request_document, format_checker=FormatChecker()).validate(fixture["input"])
+    expected_report = dict(fixture["expected"], inputVersion="0" * 64)
+    report_document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": {"schemas": spec["components"]["schemas"]},
+        "$ref": "#/components/schemas/WasteReport",
+    }
+    Draft202012Validator(report_document, format_checker=FormatChecker()).validate(expected_report)
+
+
 def test_finance_report_exposes_server_computed_local_day_chart_data():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     report = spec["components"]["schemas"]["FinanceReport"]
