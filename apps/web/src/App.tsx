@@ -11,6 +11,7 @@ import { DoNotBuyPanel } from './DoNotBuyPanel';
 import { PersonalInflationPanel } from './PersonalInflationPanel';
 import { RecurringPanel } from './RecurringPanel';
 import { ImportsPanel } from './ImportsPanel';
+import { AdviceAnalyticsPanel } from './AdviceAnalyticsPanel';
 import './styles.css';
 
 const copy = {
@@ -557,7 +558,8 @@ export function App() {
             onPay={(debtId, version, amount) => payDebt.mutate({ debtId, version, amount })}
             onAdjust={(debtId, version, balance) => adjustDebt.mutate({ debtId, version, balance })}
             onForecast={(debtId) => api.getDebtForecast(activeTenant.tenantId, debtId)} />} />
-          <Route path="/reports" element={<ReportPanel t={t} tenantId={activeTenant.tenantId} language={language} />} />
+          <Route path="/reports" element={<ReportPanel t={t} tenantId={activeTenant.tenantId}
+            language={language} canWrite={activeTenant.role !== 'viewer'} />} />
           <Route path="/receipts" element={<ReceiptsPanel tenantId={activeTenant.tenantId}
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
           <Route path="/products" element={<ProductCatalogPanel tenantId={activeTenant.tenantId} language={language} />} />
@@ -835,7 +837,9 @@ function budgetStatusLabel(t: Translations, status: string): string {
   }
 }
 
-function ReportPanel({ t, tenantId, language }: { t: Translations; tenantId: string; language: Language }) {
+function ReportPanel({ t, tenantId, language, canWrite }: {
+  t: Translations; tenantId: string; language: Language; canWrite: boolean;
+}) {
   const [period, setPeriod] = useState<FinanceReport['period']>('month');
   const [scope, setScope] = useState<FinanceReport['scope']>('personal');
   const [month, setMonth] = useState(() => todayInput().slice(0, 7));
@@ -907,6 +911,7 @@ function ReportPanel({ t, tenantId, language }: { t: Translations; tenantId: str
             format={format} empty={t.empty} />}
         </div>
       </>}
+      <AdviceAnalyticsPanel tenantId={tenantId} language={language} canWrite={canWrite} />
   </section>;
 }
 

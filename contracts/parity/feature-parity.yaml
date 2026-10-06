@@ -647,10 +647,17 @@ features:
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"
     target: "G advice worker; J query"
     acceptance: "Не выдавать оценку за факт экономии/причинность; учитывать пересчёты отдельно"
-    status: planned
-    tests: []
-    evidence: []
-    intentional_differences: []
+    status: complete
+    tests:
+      - services/analytics-go/advice/f43_test.go
+      - services/analytics-go/advice/f43_worker_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/AdviceAnalyticsPanel.test.tsx
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "F43.1 adds deterministic Go calculation for repeated harmful-item ceiling, four member-local weekly trend buckets, cadence after advice, and separate F42 annotations. F43.2 adds member-scoped durable jobs, watermark snapshots, bounded retries, current-input write guard, public/BFF APIs and service-authenticated worker endpoints. F43.3 runs the worker in the existing analytics-api behind explicit opt-in configuration. F43.4 adds RU/EN Web reporting, pending/processing polling, stale/partial/unavailable states, writer-only explicit enqueue, theoretical-ceiling wording and non-causality copy. RED/GREEN: focused Web suite 7/7; full Web suite 67/67; production TypeScript/Vite build passes; Core PostgreSQL acceptance and migration/contracts suites passed; Go `test ./... -count=1` and `vet ./...` passed; `git diff --check` passes. Telegram report routes serve a separate period-based finance DTO and do not expose the stored F43 job/report DTO; F43 remains available in Web rather than introducing a second calculation. Public runtime/HTTPS and remote GitHub CI remain separate deployment gates."
+    intentional_differences:
+      - "F43 analytics is exposed in Web; the Telegram report endpoint cannot consume the stored F43 DTO without a new Core route and Telegram UI contract."
   - id: F44
     feature: "Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
     target: "J goals; G candidate features"

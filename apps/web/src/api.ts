@@ -96,6 +96,36 @@ export type FinanceReport = {
   rolling7FoodStatus: RollingFoodStatus;
   waste: FinanceWasteReport;
 };
+export type AdviceAnalyticsReport = {
+  algorithmVersion: 'advice-f43.v1'; inputWatermark: string; completeness: 'complete' | 'partial'; reasonCode: string;
+  savings: {
+    available: boolean; reasonCode: string; label: string; days: number; monthlyCeiling: string | null;
+    shareOfIncome: string | null; shareOfLimit: string | null;
+    groups: Array<{ productKey: string; name: string; count: number; spend: string; monthlyCeiling: string }>;
+  };
+  trend: {
+    available: boolean; reasonCode: string; weeks: Array<{ start: string; end: string; spend: string;
+      optionalSpend: string; optionalShare: string; itemCount: number; recalculated: boolean }>;
+    delta: string | null; direction: string;
+  };
+  effects: {
+    effects: Array<{ productKey: string; name: string; advice: string; beforeCount: number; afterCount: number;
+      daysBefore: number; daysAfter: number; intervalBefore: string; intervalAfter: string | null;
+      change: string; direction: string; afterSpend: string | null }>;
+    pending: Array<{ productKey: string; name: string; daysAfter: number; daysLeft: number }>;
+    causalityClaim: false;
+  };
+  recalculation: {
+    available: boolean; changedItemCount: number; optionalSpendDelta: string | null;
+    windows: Array<{ start: string; end: string; changedItemCount: number; optionalSpendDelta: string | null }>;
+  };
+};
+export type AdviceAnalyticsJob = {
+  id: string | null; state: 'pending' | 'processing' | 'ready' | 'failed' | 'stale' | null;
+  inputWatermark: string | null; algorithmVersion: 'advice-f43.v1' | null;
+  completeness: 'complete' | 'partial' | null; errorCode: string | null;
+  report: AdviceAnalyticsReport | null; updatedAt: string;
+};
 export type CreateTransaction = Pick<Transaction, 'type' | 'amount' | 'currency' | 'categoryCode' | 'description' | 'source' | 'occurredAt'>
   & { subcategoryCode?: string | null; ownerUserId?: string | null };
 export type UpdateTransaction = CreateTransaction & { debtId?: string | null };
@@ -347,6 +377,12 @@ export const api = {
     query.set('scope', scope);
     return request<FinanceReport>(`/bff/tenants/${tenantId}/reports/period?${query}`);
   },
+  getAdviceAnalytics: (tenantId: string) => request<AdviceAnalyticsJob>(
+    `/bff/tenants/${tenantId}/analytics/advice`,
+  ),
+  requestAdviceAnalytics: (tenantId: string) => request<AdviceAnalyticsJob>(
+    `/bff/tenants/${tenantId}/analytics/advice`, { method: 'POST' },
+  ),
   getBudgets: (tenantId: string) => request<BudgetOverview>(`/bff/tenants/${tenantId}/budgets`),
   updateBudget: (tenantId: string, budgetKey: string, scope: 'family' | 'personal', amount: string, version: number, period: 'monthly' | 'rolling7' = 'monthly') =>
     request<BudgetOverview>(`/bff/tenants/${tenantId}/budgets/${encodeURIComponent(budgetKey)}`, {

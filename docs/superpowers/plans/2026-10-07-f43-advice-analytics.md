@@ -1,6 +1,6 @@
 # F43 Advice Analytics Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver member-scoped savings-ceiling, weekly optional-spend trend, and post-advice purchase-cadence analytics with durable recomputation and honest completeness/status reporting.
 
@@ -48,14 +48,14 @@
 - `BuildF43Report(request F43Request) (F43Report, error)` accepts only the versioned, bounded input contract; returns algorithm version, watermark, completeness, reason codes, savings ceiling, four-window trend, advice effects, and F42 recalculation annotation.
 - The internal Go handler accepts `POST /internal/v1/analytics/advice/f43`, requires the existing analytics service token, rejects unknown/trailing JSON, invalid decimal values and oversized bodies, and returns the exact `F43Report` JSON contract.
 
-- [ ] **Step 1: Write failing golden behavior tests** for: one purchase does not create a savings group; two harmful purchases do; allowed group is excluded; weekly denominator includes unknown verdicts but numerator does not; missing amounts make the report partial; fewer than two populated weeks is unavailable; advice requires two pre-slice purchases; under 21 days is pending; zero later purchases is “less often” without causality language; a 20% cadence change is unchanged while greater than 20% changes direction; F42-only verdict edits do not change purchase facts.
-- [ ] **Step 2: Run `go test ./advice -run 'TestF43' -count=1` from `services/analytics-go`;** observe failure on missing F43 behavior, not a setup error.
-- [ ] **Step 3: Implement decimal-based `BuildF43Report`** by porting the approved legacy boundaries from `services/advice.py`; preserve UTC event instants and apply the input timezone only for seven-day window assignment.
-- [ ] **Step 4: Run the focused Go tests;** all F43 golden assertions pass, with explicit partial/unavailable reasons.
-- [ ] **Step 5: Add authenticated internal-handler tests** for missing/wrong token, malformed/unknown/trailing fields, oversized request, invalid bounds, and valid report; register the route in `analytics-api`.
-- [ ] **Step 6: Run `go test ./...` and `go vet ./...` from `services/analytics-go`;** both pass.
-- [ ] **Step 7: Add OpenAPI schema and fixture parity checks** in `contracts/openapi/finance-intelligence-v1.yaml` for F43 request, report and reason enums; run `python -m pytest tools/contracts/test_contracts.py -q` from repository root.
-- [ ] **Step 8: Commit** as `feat(F43.1): add advice analytics calculation` after focused and regression gates pass.
+- [x] **Step 1: Write failing golden behavior tests** for: one purchase does not create a savings group; two harmful purchases do; allowed group is excluded; weekly denominator includes unknown verdicts but numerator does not; missing amounts make the report partial; fewer than two populated weeks is unavailable; advice requires two pre-slice purchases; under 21 days is pending; zero later purchases is “less often” without causality language; a 20% cadence change is unchanged while greater than 20% changes direction; F42-only verdict edits do not change purchase facts.
+- [x] **Step 2: Run `go test ./advice -run 'TestF43' -count=1` from `services/analytics-go`;** observe failure on missing F43 behavior, not a setup error.
+- [x] **Step 3: Implement decimal-based `BuildF43Report`** by porting the approved legacy boundaries from `services/advice.py`; preserve UTC event instants and apply the input timezone only for seven-day window assignment.
+- [x] **Step 4: Run the focused Go tests;** all F43 golden assertions pass, with explicit partial/unavailable reasons.
+- [x] **Step 5: Add authenticated internal-handler tests** for missing/wrong token, malformed/unknown/trailing fields, oversized request, invalid bounds, and valid report; register the route in `analytics-api`.
+- [x] **Step 6: Run `go test ./...` and `go vet ./...` from `services/analytics-go`;** both pass.
+- [x] **Step 7: Add OpenAPI schema and fixture parity checks** in `contracts/openapi/finance-intelligence-v1.yaml` for F43 request, report and reason enums; run `python -m pytest tools/contracts/test_contracts.py -q` from repository root.
+- [x] **Step 8: Commit** as `feat(F43.1): add advice analytics calculation` after focused and regression gates pass.
 
 ### Task 2: Member-scoped snapshot and durable recompute/query API in Core
 
@@ -104,7 +104,7 @@
 - [x] **Step 4: Wire worker into existing `analytics-api` lifecycle** behind opt-in `ADVICE_ANALYTICS_WORKER_ENABLED`; enabled mode requires Core URL/token and validates poll configuration; process cancellation stops active requests.
 - [x] **Step 5: Run focused worker tests;** Core lease policy owns retries and duplicate/stale writes are handled by Core.
 - [x] **Step 6: Run `go test ./...` and `go vet ./...`;** all Go packages pass and vet reports no issues.
-- [ ] **Step 7: Commit** as `feat(F43.3): process durable advice jobs` after focused and regression gates pass.
+- [x] **Step 7: Commit** as `feat(F43.3): process durable advice jobs` after focused and regression gates pass.
 
 ### Task 4: Web report, state polling, contracts and optional Telegram reuse
 
@@ -120,11 +120,11 @@
 - Add typed `AdviceAnalyticsReport` and `AdviceAnalyticsJob` to Web API client with `getAdviceAnalytics(tenantId)` and `requestAdviceAnalytics(tenantId)`.
 - Panel shows current watermark/status, explicit pending/processing/failed/stale states, completeness and localized unavailable reasons, the theoretical 30-day ceiling, weekly trend, and cadence observations with non-causal copy.
 
-- [ ] **Step 1: Write component tests first** for loading/pending polling, complete result, partial result, unavailable metrics, failed retry, stale result not shown as current, explicit refresh, bilingual wording, and no “saved money”/causality claim.
-- [ ] **Step 2: Run `pnpm --dir apps/web test -- AdviceAnalyticsPanel`;** observe missing panel/client behavior.
-- [ ] **Step 3: Implement API client and panel**; poll only while job is pending/processing, stop on terminal state, refresh current status after explicit enqueue, and invalidate outdated display when watermark changes.
-- [ ] **Step 4: Run focused Vitest tests;** every state is actionable and no old-watermark report appears as fresh.
-- [ ] **Step 5: Add or finalize public OpenAPI schemas and analytics fixture parity**; test that public routes are member-authenticated and internal Go/worker routes are service-authenticated.
-- [ ] **Step 6: Inspect the existing Telegram report API.** If it can render this same stored Core DTO without another computation, add a focused rendering test and reuse it; otherwise document the verified route limitation in `.agent/PROGRESS.md` and keep Web as the F43 client.
-- [ ] **Step 7: Run full `pnpm --dir apps/web test`, `pnpm --dir apps/web build`, Python contract tests, `:services:core:check` with PostgreSQL, `go test ./...`, `go vet ./...`, and `git diff --check`;** all pass.
-- [ ] **Step 8: Commit** as `feat(F43.4): expose advice analytics report` after all applicable gates pass; update parity and `.agent/PROGRESS.md` with evidence, skips, remote CI status and next global-plan goal.
+- [x] **Step 1: Write component tests first** for loading/pending polling, complete result, partial result, unavailable metrics, failed retry, stale result not shown as current, explicit refresh, bilingual wording, and no “saved money”/causality claim.
+- [x] **Step 2: Run `pnpm --dir apps/web test -- AdviceAnalyticsPanel`;** observe missing panel/client behavior.
+- [x] **Step 3: Implement API client and panel**; poll only while job is pending/processing, stop on terminal state, refresh current status after explicit enqueue, and invalidate outdated display when watermark changes.
+- [x] **Step 4: Run focused Vitest tests;** every state is actionable and no old-watermark report appears as fresh.
+- [x] **Step 5: Add or finalize public OpenAPI schemas and analytics fixture parity**; test that public routes are member-authenticated and internal Go/worker routes are service-authenticated.
+- [x] **Step 6: Inspect the existing Telegram report API.** If it can render this same stored Core DTO without another computation, add a focused rendering test and reuse it; otherwise document the verified route limitation in `.agent/PROGRESS.md` and keep Web as the F43 client.
+- [x] **Step 7: Run full `pnpm --dir apps/web test`, `pnpm --dir apps/web build`, Python contract tests, `:services:core:check` with PostgreSQL, `go test ./...`, `go vet ./...`, and `git diff --check`;** all pass.
+- [x] **Step 8: Commit** as `feat(F43.4): expose advice analytics report` after all applicable gates pass; update parity and `.agent/PROGRESS.md` with evidence, skips, remote CI status and next global-plan goal.
