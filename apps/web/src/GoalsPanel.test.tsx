@@ -18,7 +18,8 @@ const overview = { unit: 'count', active: null, inputWatermark: '17',
     countTarget: 2, monthlySpend: null, monthlyLimit: null, estimatedReduction: null, purchaseCount: 4, evidenceCount: 4 }],
   groups: [{ key: 'cat:сладкое', productKey: null, name: 'Сладкое', unit: 'count', monthlyRate: '3.00',
     countTarget: 1, monthlySpend: null, monthlyLimit: null, estimatedReduction: null, purchaseCount: 3, evidenceCount: 5 }],
-  skipped: [{ productKey: 'juice', name: 'Сок', monthlySpend: null, reasonCode: 'missing_amounts' }] };
+  skipped: [{ productKey: 'juice', name: 'Сок', monthlySpend: null, reasonCode: 'missing_amounts' }],
+  activeProgress: null, history: [] };
 
 function mount(canWrite = true, language: 'ru' | 'en' = 'ru') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -92,5 +93,54 @@ describe('GoalsPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Данные изменились');
     fireEvent.click(screen.getByRole('button', { name: 'Обновить предложения' }));
     await waitFor(() => expect(api.getGoals).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows confirmed-purchase progress and completed outcomes while keeping candidates available', async () => {
+    vi.mocked(api.getGoals).mockResolvedValue({ ...overview, active: goal,
+      activeProgress: { algorithmVersion: 'goal-progress-f45.v1', inputWatermark: '21', unit: 'count',
+        bought: 1, spent: '40.00', amountsUnknown: false, over: false, met: true, finished: false,
+        daysLeft: 18, windowStart: goal.acceptedAt, windowEnd: goal.endsAt },
+      history: [{ id: 'e1e1e1e1-e1e1-41e1-81e1-e1e1e1e1e1e1', goalId: 'c80fc08b-8f86-4956-bdca-1e2646f3f514',
+        key: 'coffee', name: 'Кофе', scope: 'product', unit: 'count', countTarget: 2, monthlyLimit: null,
+        bought: 2, spent: '500.00', met: true, acceptedAt: '2026-09-01T10:00:00Z',
+        completedAt: '2026-10-01T10:00:00Z', origin: 'completed' }],
+    } as never);
+    mount(false);
+    expect(await screen.findByText(/Подтверждённые покупки: 1 из 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Потрачено за цель: 40/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'История целей' })).toBeInTheDocument();
+    expect(screen.getByText('Кофе')).toBeInTheDocument();
+    expect(screen.getByText('Выполнена')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Поставить цель: Чипсы' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Отменить цель/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps unknown sum progress and outcome indeterminate instead of showing zero', async () => {
+    vi.mocked(api.getGoals).mockResolvedValue({ ...overview,
+      active: { ...goal, unit: 'sum', countTarget: 0, monthlyLimit: '300.00' },
+      activeProgress: { algorithmVersion: 'goal-progress-f45.v1', inputWatermark: '22', unit: 'sum',
+        bought: 1, spent: null, amountsUnknown: true, over: null, met: null, finished: false,
+        daysLeft: 18, windowStart: goal.acceptedAt, windowEnd: goal.endsAt },
+      history: [{ id: 'e2e2e2e2-e2e2-42e2-82e2-e2e2e2e2e2e2', goalId: null, key: 'tea', name: 'Чай',
+        scope: 'product', unit: 'sum', countTarget: 0, monthlyLimit: '250.00', bought: 1, spent: null,
+        met: null, acceptedAt: '2026-08-01T10:00:00Z', completedAt: '2026-08-31T10:00:00Z', origin: 'legacy' }],
+    } as never);
+    mount();
+    expect(await screen.findByText(/Суммы чеков неизвестны/)).toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Итог по деньгам неизвестен').length).toBeGreaterThan(0);
+  });
+
+  it('shows the next candidate after completion alongside the retained outcome', async () => {
+    vi.mocked(api.getGoals).mockResolvedValue({ ...overview, active: null,
+      history: [{ id: 'e3e3e3e3-e3e3-43e3-83e3-e3e3e3e3e3e3', goalId: 'c80fc08b-8f86-4956-bdca-1e2646f3f514',
+        key: 'chips', name: 'Чипсы', scope: 'product', unit: 'count', countTarget: 2, monthlyLimit: null,
+        bought: 1, spent: null, met: false, acceptedAt: '2026-09-01T10:00:00Z',
+        completedAt: '2026-10-01T10:00:00Z', origin: 'completed' }],
+    } as never);
+    mount();
+    expect(await screen.findByRole('heading', { name: 'История целей' })).toBeInTheDocument();
+    expect(screen.getByText('Не выполнена')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Поставить цель: Чипсы' })).toBeInTheDocument();
   });
 });

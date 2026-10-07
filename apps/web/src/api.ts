@@ -129,7 +129,7 @@ export type AdviceAnalyticsJob = {
 export type GoalCandidate = {
   key: string; productKey: string | null; name: string; unit: 'count' | 'sum'; monthlyRate: string;
   countTarget: number; monthlySpend: string | null; monthlyLimit: string | null;
-  estimatedReduction: string | null; purchaseCount: number; evidenceCount: number;
+  estimatedReduction: string | null; purchaseCount: number; evidenceCount: number; memberProductKeys?: string[];
 };
 export type GoalSkippedCandidate = {
   productKey: string; name: string; monthlySpend: string | null;
@@ -141,9 +141,21 @@ export type MemberGoal = {
   evidenceCount: number; inputWatermark: string; acceptedAt: string; endsAt: string;
   status: 'active' | 'cancelled' | 'completed'; version: number;
 };
+export type GoalProgress = {
+  algorithmVersion: 'goal-progress-f45.v1'; inputWatermark: string; unit: 'count' | 'sum'; bought: number;
+  spent: string | null; amountsUnknown: boolean; over: boolean | null; met: boolean | null;
+  finished: boolean; daysLeft: number; windowStart: string; windowEnd: string;
+};
+export type GoalOutcome = {
+  id: string; goalId: string | null; key: string; name: string; scope: 'product' | 'group';
+  unit: 'count' | 'sum'; countTarget: number; monthlyLimit: string | null; bought: number;
+  spent: string | null; met: boolean | null; acceptedAt: string; completedAt: string;
+  origin: 'completed' | 'legacy';
+};
 export type GoalOverview = {
   unit: 'count' | 'sum'; active: MemberGoal | null; inputWatermark: string;
   candidates: GoalCandidate[]; groups: GoalCandidate[]; skipped: GoalSkippedCandidate[];
+  activeProgress: GoalProgress | null; history: GoalOutcome[];
 };
 export type CreateTransaction = Pick<Transaction, 'type' | 'amount' | 'currency' | 'categoryCode' | 'description' | 'source' | 'occurredAt'>
   & { subcategoryCode?: string | null; ownerUserId?: string | null };

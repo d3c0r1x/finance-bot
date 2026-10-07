@@ -62,6 +62,7 @@ describe('receipt duplicate review', () => {
   it('requires a user decision for a candidate and confirms an independent receipt once', async () => {
     const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['goals', tenantId], { inputWatermark: '1' });
     render(<MemoryRouter><QueryClientProvider client={client}>
       <ReceiptsPanel tenantId={tenantId} language="ru" canWrite />
     </QueryClientProvider></MemoryRouter>);
@@ -80,6 +81,7 @@ describe('receipt duplicate review', () => {
     await user.click(confirm);
 
     expect(await screen.findByText(/posted-expense-id/)).toBeInTheDocument();
+    expect(client.getQueryState(['goals', tenantId])?.isInvalidated).toBe(true);
     const requests = vi.mocked(fetch).mock.calls;
     const createRequest = requests.find(([url, init]) => String(url) === `/bff/tenants/${tenantId}/receipts` && init?.method === 'POST');
     expect(new Headers(createRequest?.[1]?.headers).get('Idempotency-Key')).toBeTruthy();

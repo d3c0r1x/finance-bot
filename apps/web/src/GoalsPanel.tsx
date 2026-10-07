@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type GoalCandidate, type MemberGoal } from './api';
+import { api, type GoalCandidate, type GoalOutcome, type GoalProgress, type MemberGoal } from './api';
 
 type Language = 'ru' | 'en';
 
@@ -16,6 +16,12 @@ const copy = {
     cancelled: 'Цель отменена', noMoney: 'Сумма неизвестна', missingAmounts: 'Не хватает сумм в чеках',
     minimumSavings: 'Пока нет полезного денежного лимита', stale: 'Данные изменились. Обновите предложения и выберите цель заново.',
     writeError: 'Не удалось сохранить изменение.', refresh: 'Обновить предложения', group: 'Категория', product: 'Товар',
+    progressTitle: 'Ход цели', progressCount: 'Подтверждённые покупки: {bought} из {target}',
+    progressSpent: 'Потрачено за цель: {spent} из {limit}', unknownProgress: 'Суммы чеков неизвестны — итог по деньгам не вычисляю.',
+    progressCountSpent: 'Потрачено за цель: {spent}',
+    progressOver: 'Лимит уже превышен.', progressOnTrack: 'Пока укладываетесь в цель.',
+    historyTitle: 'История целей', completed: 'Выполнена', notCompleted: 'Не выполнена',
+    unknownOutcome: 'Итог по деньгам неизвестен',
   },
   en: {
     title: 'Monthly goal', unit: 'Goal measure', count: 'Purchases', sum: 'Spend', saveUnit: 'Save measure',
@@ -28,6 +34,12 @@ const copy = {
     cancelled: 'Goal cancelled', noMoney: 'Amount unknown', missingAmounts: 'Receipt amounts are missing',
     minimumSavings: 'No useful spending limit yet', stale: 'Data changed. Refresh suggestions and choose again.',
     writeError: 'Could not save this change.', refresh: 'Refresh suggestions', group: 'Category', product: 'Product',
+    progressTitle: 'Goal progress', progressCount: 'Confirmed purchases: {bought} of {target}',
+    progressSpent: 'Spent toward goal: {spent} of {limit}', unknownProgress: 'Some receipt amounts are unknown; monetary outcome is not calculated.',
+    progressCountSpent: 'Spent toward goal: {spent}',
+    progressOver: 'The limit has been exceeded.', progressOnTrack: 'You are within the goal so far.',
+    historyTitle: 'Goal history', completed: 'Met', notCompleted: 'Not met',
+    unknownOutcome: 'Monetary outcome is unknown',
   },
 } as const;
 
@@ -65,6 +77,20 @@ function purchaseNoun(count: number, language: Language): string {
   if (tail === 1 && lastTwo !== 11) return 'покупка';
   if (tail >= 2 && tail <= 4 && (lastTwo < 12 || lastTwo > 14)) return 'покупки';
   return 'покупок';
+}
+
+function progressText(goal: MemberGoal, progress: GoalProgress, language: Language): string {
+  if (progress.unit === 'count') return interpolate(copy[language].progressCount, {
+    bought: progress.bought, target: goal.countTarget,
+  });
+  return interpolate(copy[language].progressSpent, {
+    spent: money(progress.spent, language), limit: money(goal.monthlyLimit, language),
+  });
+}
+
+function outcomeText(outcome: GoalOutcome, language: Language): string {
+  if (outcome.met === null) return copy[language].unknownOutcome;
+  return outcome.met ? copy[language].completed : copy[language].notCompleted;
 }
 
 export function GoalsPanel({ tenantId, language, canWrite = true }: {
@@ -132,6 +158,24 @@ export function GoalsPanel({ tenantId, language, canWrite = true }: {
       {canWrite && <button className="button button-quiet" disabled={pending}
         onClick={() => { if (window.confirm(t.cancelConfirm)) cancel.mutate(overview.active!.id); }}>{t.cancel}</button>}
     </article>}
+    {overview.active && overview.activeProgress && <aside className="goal-progress-note" aria-label={t.progressTitle}>
+      <h3>{t.progressTitle}</h3>
+      <p>{progressText(overview.active, overview.activeProgress, language)}</p>
+      {overview.activeProgress.unit === 'count' && overview.activeProgress.spent !== null
+        && <p>{interpolate(t.progressCountSpent, { spent: money(overview.activeProgress.spent, language) })}</p>}
+      {overview.activeProgress.amountsUnknown && <p className="goal-progress-unknown">{t.unknownProgress}</p>}
+      {overview.activeProgress.met !== null && <p>{overview.activeProgress.over ? t.progressOver : t.progressOnTrack}</p>}
+    </aside>}
+    {overview.history.length > 0 && <section className="goal-history" aria-label={t.historyTitle}>
+      <h3>{t.historyTitle}</h3>
+      <ul>{overview.history.map((outcome) => <li key={outcome.id}>
+        <div><strong>{outcome.name}</strong><small>{date(outcome.completedAt, language)}</small></div>
+        <div><span>{outcomeText(outcome, language)}</span>
+          <small>{outcome.unit === 'count' ? `${outcome.bought} / ${outcome.countTarget}`
+            : outcome.spent === null ? t.unknownOutcome : `${money(outcome.spent, language)} / ${money(outcome.monthlyLimit, language)}`}</small>
+        </div>
+      </li>)}</ul>
+    </section>}
     {candidates.length + groups.length === 0 && <p className="empty-state">{t.noCandidates}</p>}
     {candidates.length > 0 && <GoalCandidates title={t.candidates} candidates={candidates}
       language={language} canWrite={canWrite} hasActive={Boolean(overview.active)} pending={pending}

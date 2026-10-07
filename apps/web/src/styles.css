@@ -112,6 +112,18 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 .goal-active-card { display: flex; align-items: start; justify-content: space-between; gap: 16px; padding: 17px; border: 1px solid #cce6ba; border-radius: 13px; background: #f6fced; }
 .goal-active-card h3 { margin: 8px 0; color: #22344d; font-size: 17px; }
 .goal-active-card p { margin: 5px 0; color: #5f6d7e; font-size: 12px; }
+.goal-progress-note { padding: 14px 16px; border: 1px solid #c8d9f1; border-radius: 12px; background: #f4f8ff; }
+.goal-progress-note h3, .goal-history h3 { margin: 0 0 8px; color: #26364c; font-size: 15px; }
+.goal-progress-note p { margin: 4px 0; color: #4d5f78; font-size: 13px; }
+.goal-progress-note .goal-progress-unknown { color: #8a6b2e; }
+.goal-history { display: grid; gap: 10px; }
+.goal-history ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.goal-history li { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid #e1e6ee; border-radius: 11px; background: #fff; }
+.goal-history li > div { display: grid; gap: 4px; }
+.goal-history li > div:last-child { text-align: right; }
+.goal-history strong { color: #293a52; font-size: 13px; }
+.goal-history span { color: #446b31; font-size: 12px; font-weight: 700; }
+.goal-history small { color: #748196; font-size: 11px; }
 .goal-badge { display: inline-flex; padding: 4px 8px; border-radius: 999px; color: #2d6846; background: #e4f3d9; font-size: 11px; font-weight: 700; }
 .goal-unavailable { padding: 14px 16px; border: 1px solid #f0dfb5; border-radius: 12px; background: #fffaf0; }
 .goal-unavailable ul { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
@@ -295,6 +307,6 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 @media (max-width: 900px) { .app-shell { grid-template-columns: 205px minmax(0, 1fr); } .transactions-layout { grid-template-columns: 1fr; } .transaction-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .transaction-form .panel-heading, .transaction-form button, .transaction-form .form-error { grid-column: 1 / -1; } }
 @media (max-width: 900px) { .budget-row { grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr); } }
 @media (max-width: 640px) { .app-shell { display: block; } .sidebar { min-height: auto; padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 10px; } .sidebar nav { grid-column: 1 / -1; display: flex; margin: 0; } .sidebar-footer { grid-column: 1 / -1; margin: 0; padding-top: 9px; } .main-content { padding: 27px 16px; } .page-header { align-items: start; flex-direction: column; } .transactions-layout { gap: 14px; } .transaction-form { grid-template-columns: 1fr; } .transaction-form .panel-heading, .transaction-form button, .transaction-form .form-error { grid-column: auto; } .history-panel { padding: 17px 14px; } .filters { display: flex; align-items: stretch; flex-direction: column; } .filters select { width: 100%; } .summary-grid { grid-template-columns: 1fr; } .transaction-row { grid-template-columns: 34px minmax(0, 1fr); } .receipt-items .transaction-row, .receipt-candidates .transaction-row { grid-template-columns: minmax(0, 1fr); } .receipt-items .transaction-row > form, .receipt-add-item { grid-template-columns: 1fr; } .receipt-add-item .button { grid-column: auto; } .transaction-amount, .transaction-actions { grid-column: 2; } .budget-panel, .debt-panel { padding: 17px 14px; } .budget-row, .debt-create-form, .debt-actions { grid-template-columns: 1fr; } .debt-create-form h3, .debt-create-form button { grid-column: auto; } .debt-title { flex-direction: column; } .debt-actions form { grid-template-columns: 1fr; } }
-@media (max-width: 640px) { .goals-panel { padding: 17px 14px; } .goals-heading, .goal-active-card { align-items: stretch; flex-direction: column; } .goal-unit-control { align-items: end; flex-wrap: wrap; } .goal-unit-control label { flex: 1; } .goal-candidate-grid { grid-template-columns: 1fr; } .goal-unavailable li { align-items: start; flex-direction: column; gap: 4px; } }
+@media (max-width: 640px) { .goals-panel { padding: 17px 14px; } .goals-heading, .goal-active-card { align-items: stretch; flex-direction: column; } .goal-unit-control { align-items: end; flex-wrap: wrap; } .goal-unit-control label { flex: 1; } .goal-candidate-grid { grid-template-columns: 1fr; } .goal-unavailable li { align-items: start; flex-direction: column; gap: 4px; } .goal-history li { align-items: start; flex-direction: column; } .goal-history li > div:last-child { text-align: left; } }
 @media (max-width: 700px) { .import-upload form { grid-template-columns: 1fr; } .import-upload, .import-preview { padding: 17px 14px; } .import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .import-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; } .import-row-selection { grid-column: 1 / -1; } .import-period { grid-template-columns: auto 1fr; } }
 @media (max-width: 700px) { .inflation-summary, .inflation-comparisons { grid-template-columns: 1fr; } .inflation-product, .recurring-item { padding: 13px; } }

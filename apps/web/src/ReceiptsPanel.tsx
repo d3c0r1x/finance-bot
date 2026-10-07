@@ -221,6 +221,7 @@ export function ReceiptsPanel({ tenantId, language, canWrite }: {
     onSuccess: async (value) => {
       setReceipt(value);
       await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['goals', tenantId] }),
         queryClient.invalidateQueries({ queryKey: ['transactions', tenantId] }),
         queryClient.invalidateQueries({ queryKey: ['summary', tenantId] }),
         queryClient.invalidateQueries({ queryKey: ['budgets', tenantId] }),
