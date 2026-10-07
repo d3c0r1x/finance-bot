@@ -29,4 +29,3 @@
 - [x] Refresh goal progress cache after a receipt is confirmed.
 - [x] Run focused/all Web tests, production build, relevant Core/contract regression and `git diff --check`.
 - [x] Commit F45.3 as `85c30d1` and record evidence. F45 remains open only for legacy-history ingestion through J.
-- [ ] Commit F45.3 and mark F45 complete only when all slices pass.

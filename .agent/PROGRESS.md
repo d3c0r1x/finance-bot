@@ -1366,3 +1366,5 @@ Updated: 2026-10-07 02:48, Europe/Moscow.
 - GREEN: Web tests 75/75; TypeScript/Vite production build; Core `:services:core:check` with isolated PostgreSQL; Go tests/vet; contracts/migrations 68 passed, 2 optional skips; `git diff --check`.
 - Commit `85c30d1` (`feat(F45.3): show goal progress and history`). F45.3 presentation slice is complete. Overall F45 remains open for the legacy-history ingestion path assigned to global J; this is not hidden by the completed UI work.
 - Next: push verified F45.2/F45.3 commits and move to the J migration ingestion acceptance; after that close F45, then continue F46 and remaining V1 MVP/deployment gates.
+
+- Remote check: commits fcde2d/85c30d1/39a2b8 are pushed; gh run list --commit e39a2b8 returned no runs, so GitHub CI did not start. The migration mapping now explicitly requires idempotent import of every dvice:goal_history row into goal_outcomes(origin='legacy').

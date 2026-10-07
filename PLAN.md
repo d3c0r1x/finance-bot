@@ -903,7 +903,7 @@ Kafka consumer rollout поддерживает старую/новую schema �
 | `advice:confirmed:{id}` | Confirmed bans; конфликт allowed/confirmed разрешается тем же precedence, что v1 |
 | `advice:recalc:{id}` | Recalculation summary/history record, без повторного выполнения |
 | `advice:goal:{id}` | Active/closed goal record, started_at, fixed unit/target, announcement state |
-| `advice:goal_history:{id}` | Goal outcomes; перенести все сохранённые записи и ограничения legacy history |
+| `advice:goal_history:{id}` | `goal_outcomes` с `origin='legacy'`; перенести все сохранённые записи, сохранить deterministic `legacy_key`, идемпотентно принять все записи до применения лимита в 24 новых исхода |
 | `advice:goal_unit:{id}` | Default unit preference; не менять unit текущей цели |
 | `advice:goal_category:{id}` | Ключ объявлен в коде; обрабатывать только если реально присутствует, не считать отдельную заполненную сущность доказанной |
 | `bank_merchants:{id}` | Merchant mappings с legacy source и без приписывания AI/user provenance, если оно неизвестно |
@@ -931,7 +931,7 @@ Kafka consumer rollout поддерживает старую/новую schema �
 2. Снять manifest: source SHA/version, schema, checksum базы, counts/min/max dates/sums, список файлов/hashes, settings keys, конфигурационные defaults без секретов.
 3. Запустить extractor read-only. Выгрузить staging bundle с raw и normalized полями, deterministic migration IDs, validation/quarantine report.
 4. Проверить orphan receipt_items, неизвестных users/debts, дубли ID, invalid money/dates, malformed settings, missing files. Ничего не исправлять молча.
-5. Загрузить в пустой staging tenant через выделенный J migration API с audit и отключёнными рассылками/billing effects. Backfill отправляет projection events, но не notifications.
+5. Загрузить в пустой staging tenant через выделенный J migration API с audit и отключёнными рассылками/billing effects. Включить все записи `advice:goal_history:{id}` в `goal_outcomes(origin='legacy')` с deterministic keys; повтор manifest не создаёт дубликаты. Backfill отправляет projection events, но не notifications.
 6. Повторить загрузку того же manifest: новых business records должно быть 0. Затем restart посередине: итог идентичен непрерванной загрузке.
 7. Построить G/CH projections и reconciliation. Человек получает понятный отчёт changed/unchanged/quarantined.
 
