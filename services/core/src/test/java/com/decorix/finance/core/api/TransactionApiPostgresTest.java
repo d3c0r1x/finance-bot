@@ -3394,6 +3394,145 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void notificationDeliveryClaimAttachesOnlyOldestCompletedOutcomeToWeeklyIntent() throws Exception {
+        cleanupNotificationTestFixtures();
+        UUID ownerId = prepareNotificationMember();
+        UUID oldest = insertGoalOutcome(ownerId, "completed", "Чипсы", 2, 1,
+                Instant.now().minusSeconds(3600));
+        UUID newer = insertGoalOutcome(ownerId, "completed", "Газировка", 4, 4,
+                Instant.now().minusSeconds(1800));
+        UUID legacy = insertGoalOutcome(ownerId, "legacy", "Старый совет", 1, 1,
+                Instant.now().minusSeconds(7200));
+        UUID weeklyIntent = insertNotificationIntent(ownerId, "weekly", LocalDate.now(ZoneOffset.UTC).minusDays(7));
+
+        String weekly = claimNotifications(1);
+        org.junit.jupiter.api.Assertions.assertEquals(oldest.toString(),
+                com.jayway.jsonpath.JsonPath.read(weekly, "$.items[0].goalOutcome.id"));
+        org.junit.jupiter.api.Assertions.assertEquals("Чипсы",
+                com.jayway.jsonpath.JsonPath.read(weekly, "$.items[0].goalOutcome.name"));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(weeklyIntent, jdbc.queryForObject(
+                    "SELECT announcement_intent_id FROM goal_outcomes WHERE id = ?", UUID.class, oldest));
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE id = ? AND announcement_intent_id IS NULL",
+                    Integer.class, newer));
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE id = ? AND announcement_intent_id IS NULL",
+                    Integer.class, legacy));
+        });
+
+        UUID dailyIntent = insertNotificationIntent(ownerId, "daily", LocalDate.now(ZoneOffset.UTC));
+        String daily = claimNotifications(1);
+        org.junit.jupiter.api.Assertions.assertEquals(dailyIntent.toString(),
+                com.jayway.jsonpath.JsonPath.read(daily, "$.items[0].intentId"));
+        org.junit.jupiter.api.Assertions.assertNull(
+                com.jayway.jsonpath.JsonPath.read(daily, "$.items[0].goalOutcome"));
+        cleanupNotificationTestFixtures();
+    }
+
+    @Test
+    void concurrentWeeklyClaimsAttachDistinctGoalOutcomes() throws Exception {
+        cleanupNotificationTestFixtures();
+        UUID ownerId = prepareNotificationMember();
+        UUID firstOutcome = insertGoalOutcome(ownerId, "completed", "Кофе", 3, 1,
+                Instant.now().minusSeconds(3600));
+        UUID secondOutcome = insertGoalOutcome(ownerId, "completed", "Сладкое", 5, 2,
+                Instant.now().minusSeconds(1800));
+        insertNotificationIntent(ownerId, "weekly", LocalDate.now(ZoneOffset.UTC).minusDays(14));
+        insertNotificationIntent(ownerId, "weekly", LocalDate.now(ZoneOffset.UTC).minusDays(7));
+
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var firstClaim = java.util.concurrent.CompletableFuture.supplyAsync(() -> claimNotifications(1), pool);
+            var secondClaim = java.util.concurrent.CompletableFuture.supplyAsync(() -> claimNotifications(1), pool);
+            String first = firstClaim.join();
+            String second = secondClaim.join();
+            String firstIntent = com.jayway.jsonpath.JsonPath.read(first, "$.items[0].intentId");
+            String secondIntent = com.jayway.jsonpath.JsonPath.read(second, "$.items[0].intentId");
+            String firstAttached = com.jayway.jsonpath.JsonPath.read(first, "$.items[0].goalOutcome.id");
+            String secondAttached = com.jayway.jsonpath.JsonPath.read(second, "$.items[0].goalOutcome.id");
+            org.junit.jupiter.api.Assertions.assertNotEquals(firstIntent, secondIntent);
+            org.junit.jupiter.api.Assertions.assertNotEquals(firstAttached, secondAttached);
+            org.junit.jupiter.api.Assertions.assertEquals(java.util.Set.of(firstOutcome.toString(), secondOutcome.toString()),
+                    java.util.Set.of(firstAttached, secondAttached));
+            transactions.executeWithoutResult(status -> {
+                jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+                jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+                org.junit.jupiter.api.Assertions.assertEquals(2, jdbc.queryForObject(
+                        "SELECT count(DISTINCT announcement_intent_id) FROM goal_outcomes "
+                                + "WHERE id IN (?, ?) AND announcement_intent_id IS NOT NULL",
+                        Integer.class, firstOutcome, secondOutcome));
+            });
+        } finally {
+            pool.shutdownNow();
+            cleanupNotificationTestFixtures();
+        }
+    }
+
+    private UUID prepareNotificationMember() {
+        String notificationSubject = "keycloak|f46-notification-" + UUID.randomUUID();
+        UUID newMemberId = addTenantMember(notificationSubject, "F46 notification test", "owner");
+        return transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.update("INSERT INTO external_identities (user_id, provider, subject) VALUES (?, 'telegram', ?)",
+                    newMemberId, Long.toString(java.util.concurrent.ThreadLocalRandom.current()
+                            .nextLong(900_000_000L, 990_000_000L)));
+            jdbc.update("INSERT INTO notification_preferences (tenant_id, user_id, daily_enabled, weekly_enabled, "
+                    + "next_daily_at, next_weekly_at) VALUES (?, ?, false, false, NULL, NULL) "
+                    + "ON CONFLICT (tenant_id, user_id) DO UPDATE SET daily_enabled = false, weekly_enabled = false, "
+                    + "next_daily_at = NULL, next_weekly_at = NULL", tenantId, newMemberId);
+            return newMemberId;
+        });
+    }
+
+    private UUID insertGoalOutcome(UUID ownerId, String origin, String name, int target, int bought, Instant completedAt) {
+        UUID id = UUID.randomUUID();
+        UUID goalId = "completed".equals(origin) ? UUID.randomUUID() : null;
+        String goal = "{\"name\":\"" + name + "\",\"testFixture\":true,\"unit\":\"count\",\"countTarget\":" + target
+                + ",\"monthlyLimit\":null}";
+        String progress = "{\"bought\":" + bought + ",\"spent\":null,\"met\":" + (bought >= target) + "}";
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.update("INSERT INTO goal_outcomes (id, tenant_id, owner_user_id, goal_id, legacy_key, origin, "
+                            + "goal_snapshot, progress_snapshot, accepted_at, completed_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb), ?, ?)",
+                    id, tenantId, ownerId, goalId, "legacy".equals(origin) ? "f46-" + id : null, origin,
+                    goal, progress, java.sql.Timestamp.from(completedAt.minusSeconds(30L * 86400)),
+                    java.sql.Timestamp.from(completedAt));
+        });
+        return id;
+    }
+
+    private UUID insertNotificationIntent(UUID ownerId, String kind, LocalDate scheduledDate) {
+        UUID id = UUID.randomUUID();
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.update("INSERT INTO notification_intents (id, tenant_id, user_id, digest_kind, scheduled_local_date, "
+                            + "scheduled_at, timezone, language, report_from_date, report_to_date, available_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, 'UTC', 'ru', ?, ?, now() - interval '1 minute')",
+                    id, tenantId, ownerId, kind, scheduledDate,
+                    java.sql.Timestamp.from(Instant.now().minusSeconds(120)),
+                    scheduledDate.minusDays("weekly".equals(kind) ? 6 : 0), scheduledDate);
+        });
+        return id;
+    }
+
+    private String claimNotifications(int limit) {
+        try {
+            return mvc.perform(post("/internal/v1/telegram/notifications/claim")
+                            .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                            .contentType("application/json").content("{\"limit\":" + limit + "}"))
+                    .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Notification claim failed", exception);
+        }
+    }
+
+    @Test
     void notificationDeliveryClaimIsDurableUniqueAndUsesCoreReport() throws Exception {
         cleanupNotificationTestFixtures();
         java.time.OffsetDateTime dueAt = java.time.OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1)
@@ -3512,6 +3651,9 @@ class TransactionApiPostgresTest {
     private void cleanupNotificationTestFixtures() {
         transactions.executeWithoutResult(status -> {
             jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("DELETE FROM goal_outcomes WHERE tenant_id = ? AND goal_snapshot->>'testFixture' = 'true'",
+                    tenantId);
             List<UUID> users = jdbc.query("SELECT user_id FROM external_identities WHERE provider = 'telegram' "
                             + "AND subject ~ '^[1-9][0-9]{8,9}$'", (rs, row) -> rs.getObject("user_id", UUID.class));
             for (UUID user : users) {

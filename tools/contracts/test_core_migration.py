@@ -55,6 +55,19 @@ def test_goal_progress_and_outcomes_migration_preserves_group_terms_and_tenant_i
     assert "alter table goal_outcomes force row level security" in normalized
 
 
+def test_goal_outcome_delivery_migration_links_one_pending_outcome_to_one_intent():
+    migration = next((path for path in MIGRATIONS if path.name.startswith("V41__goal_outcome_delivery_link")), None)
+    assert migration is not None, "weekly outcome delivery needs an additive V41 migration"
+    normalized = re.sub(r"--[^\n]*", "", migration.read_text(encoding="utf-8").lower())
+    assert "add column announcement_intent_id uuid" in normalized
+    assert "references notification_intents (id) on delete set null" in normalized
+    assert "goal_outcomes_announcement_intent_idx" in normalized
+    assert "where announcement_intent_id is not null" in normalized
+    assert "goal_outcomes_pending_delivery_idx" in normalized
+    assert "origin = 'completed'" in normalized
+    assert "announced_at is null" in normalized
+
+
 def test_receipt_migration_is_tenant_scoped_and_keeps_reader_evidence():
     sql = "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS).lower()
     normalized = re.sub(r"--[^\n]*", "", sql)

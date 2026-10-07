@@ -1376,4 +1376,11 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 - Wrote and self-reviewed `docs/superpowers/plans/2026-10-07-f46-goal-outcome-delivery.md`. Plan covers PostgreSQL association/claim, acknowledgement lifecycle, Telegram validation/rendering, OpenAPI, RED/GREEN commands, and final regression.
 - Ruling: begin inline implementation without another plan-review prompt — user approved F46 design and said “Продолжай”; user-owned `CODEX_AUTONOMOUS.md` says not to ask before moving to the next goal, and user already prescribed strict TDD. Cost if wrong: task decomposition may need a later correction.
 - No F46 product code changed yet. Existing user-owned untracked files remain untouched. Branch `feat/saas-rewrite`; current HEAD before plan commit `e236920`.
-- Next: commit plan/progress, then write Task 1 Core/PostgreSQL claim tests and observe RED.
+- Next: write Task 1 PostgreSQL claim tests, run against isolated DB, and record observed RED.
+
+## E4.82 F46.1 weekly claim association — 2026-10-07
+
+- Test-first RED: two PostgreSQL acceptance tests failed because `goalOutcome` was absent. Migration test failed because V41 was absent.
+- Added V41 link with one-outcome-per-intent unique index and pending-completed lookup index. Weekly claims attach oldest unannounced completed outcome transactionally; retries return same attached snapshot; daily claims remain null.
+- GREEN: focused Core PostgreSQL tests 2/2 pass against isolated `finance_test_codex_20261004`; migration checks 16 passed, 2 optional skips; `git diff --check` pending final newline cleanup.
+- Task 1 commit pending. Next: finalize Task 1 progress/plan, commit, then write Task 2 delivery acknowledgement lifecycle tests and observe RED.

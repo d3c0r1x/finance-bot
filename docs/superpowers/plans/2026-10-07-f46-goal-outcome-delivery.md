@@ -47,25 +47,25 @@
 - Extend `ClaimRow` with nullable `GoalOutcomeMessage goalOutcome` after Core leases each notification intent.
 - Add nullable `goal_outcomes.announcement_intent_id` FK to `notification_intents`, with `ON DELETE SET NULL`; partial unique index prevents two outcomes from attaching to one intent; add an index for oldest unannounced completed outcomes.
 
-- [ ] **Step 1: Write PostgreSQL claim test** `notificationDeliveryClaimAttachesOnlyOldestCompletedOutcomeToWeeklyIntent`
+- [x] **Step 1: Write PostgreSQL claim test** `notificationDeliveryClaimAttachesOnlyOldestCompletedOutcomeToWeeklyIntent`
   - Insert two unannounced completed outcomes, one cancelled goal without outcome, and one legacy outcome for the test member.
   - Claim one due weekly intent and assert response has the oldest completed outcome snapshot.
   - Assert database links that outcome to the intent; other completed and legacy rows remain unannounced and unlinked.
   - Claim a daily intent and assert `goalOutcome` is null.
-- [ ] **Step 1b: Write concurrent-claim test** `concurrentWeeklyClaimsAttachDistinctGoalOutcomes`
+- [x] **Step 1b: Write concurrent-claim test** `concurrentWeeklyClaimsAttachDistinctGoalOutcomes`
   - Create two due weekly intents and two pending completed outcomes for one member.
   - Issue two concurrent claims with limit `1`; assert distinct intent IDs and distinct outcome IDs.
   - Assert neither outcome is associated with more than one intent.
-- [ ] **Step 2: Run the focused test and observe RED**
+- [x] **Step 2: Run the focused test and observe RED**
   - Run both focused PostgreSQL claim tests with `.\gradlew.bat :services:core:test --tests '*TransactionApiPostgresTest.notificationDeliveryClaim*' --no-daemon`.
   - Use the isolated PostgreSQL test database from `.agent/PROGRESS.md`.
   - Expected: fail because V41 and the weekly claim payload/link do not exist.
-- [ ] **Step 3: Implement V41 and claim association**
+- [x] **Step 3: Implement V41 and claim association**
   - Select oldest eligible row by `(completed_at, id)` with `FOR UPDATE SKIP LOCKED`.
   - Associate it with the newly leased weekly intent in the claim transaction.
   - On retry, return the row already associated with the same intent; do not attach a second row.
   - Return null for daily claims and when no completed outcome is pending.
-- [ ] **Step 4: Run focused Core test and migration checks**
+- [x] **Step 4: Run focused Core test and migration checks**
   - Run the focused Gradle test; expected PASS.
   - Run: `.venv\Scripts\python.exe -m pytest tools/contracts/test_core_migration.py -q -p no:cacheprovider`; expected PASS.
 - [ ] **Step 5: Commit Task 1**
