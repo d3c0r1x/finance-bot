@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 08:44, Europe/Moscow.
+Updated: 2026-10-07 08:49, Europe/Moscow.
 
 ## Global plan
 
@@ -75,21 +75,23 @@ Updated: 2026-10-07 08:44, Europe/Moscow.
 | F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | 5adeccf |
 | F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | 2a6cf21 |
 | F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE — local gates and all four GitHub workflows GREEN after contract-test correction | F54 | 5df8b06, 0edc20b |
-| F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | IMPLEMENTING — focused tests 11/11; synthetic receipt regression passes | F55 | pending |
+| F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | COMPLETE — 11 focused tests, synthetic receipt regression, CI GREEN | F55 | ab4a38d |
+| F57 | Russian formatting, Telegram escaping, fonts, text fallback | NOT_STARTED | F56 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F56 — preserve receipt inventory CLI behavior under `tools/evaluation`, verify synthetic and private-sample handling, and keep private receipt data out of CI artifacts.
-- Status: IMPLEMENTING — observed RED; module CLI, compatibility shim, JSON-only output and CI privacy guard implemented; focused tests GREEN.
-- Acceptance: `python -m tools.evaluation.receipt_inventory` and root `python receipt_inventory.py` work; preserve `--vision`, `--strict`, `--json`, `--limit`, `--debug`, and photo arguments; deterministic read-only collection; JSON output parses without human text; strict hard defects exit 1; CI checks private paths are untracked and runs synthetic-only JSON smoke without artifact upload.
-- Evidence: plan `docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md`; global requirement `PLAN.md` F56. RED was 4 failed/4 passed (missing module, mixed JSON, empty JSON prose, absent CI guard/smoke). Implemented deterministic discovery unchanged, strict JSON stdout (debug to stderr), root wrapper, docs, and workflow tracked-path guard/empty JSON smoke.
+- ID and outcome: F57 — Russian formatting, Telegram escaping, fonts, and text fallback across presentation surfaces.
+- Status: ANALYSIS — F56 complete; next goal is scoped from `PLAN.md` F57.
+- Acceptance: follow `PLAN.md` F57 and identify shared presentation boundaries, real RU/EN format cases, platform/font coverage, and safe fallback before tests.
+- Evidence: F56 feature commit `ab4a38d` is pushed. GitHub run `37577879007` passed all workflow steps, including private-path guard, legacy suites, and empty JSON module smoke.
 - Ownership: `receipt_inventory.py`, `docs/EVALUATION.md`, and `.github/workflows/tests.yml` are tracked starting points. User-local data `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` remain untracked and out of scope.
 - Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `020bf119d3940ec0c446d6e135222fe0c11edae0`; F55 product and final progress commits pushed.
-- GREEN: `pytest tools/evaluation/tests/test_receipt_inventory.py -q -p no:cacheprovider` — 11 passed; synthetic-only legacy `receipt_test.py` with `samples.load_samples=lambda:{}` — passed; `git diff --check` passed. The first synthetic runner attempt failed only because the Windows console could not encode an emoji; rerun with `PYTHONIOENCODING=utf-8` passed. Workflow CI smoke not run locally because root defaults scan owner `data/receipts`.
+- GREEN: `pytest tools/evaluation/tests/test_receipt_inventory.py -q -p no:cacheprovider` — 11 passed; synthetic-only legacy `receipt_test.py` with `samples.load_samples=lambda:{}` — passed; `git diff --check` passed. The first synthetic runner attempt failed only because the Windows console could not encode an emoji; rerun with `PYTHONIOENCODING=utf-8` passed. GitHub run `37577879007` passed all steps in 4m22s.
 - Privacy note: one accidental local no-argument CLI smoke did scan a photo under ignored `data/receipts`; it changed or copied no files. No receipt manifest was opened or committed. Do not run default local inventory again; use synthetic monkeypatched paths. This is not evidence about owner receipt quality.
-- Next: final diff/path review, commit and push F56, then verify remote CI.
-- Updated at: 2026-10-07 08:44 Europe/Moscow.
+- F56 commit/push: `ab4a38d` (`feat(F56): add receipt evaluation module and privacy gate`); final progress update pending.
+- Next: inspect F57 presentation code and build its acceptance plan before tests.
+- Updated at: 2026-10-07 08:49 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -1540,3 +1542,9 @@ Updated: 2026-10-07 08:44, Europe/Moscow.
 - Updated evaluation docs and Actions: tracked-private-path guard, empty JSON module smoke, no artifact upload.
 - `git diff --check` passed. Remote workflow and commit pending.
 - During an earlier default CLI smoke, one ignored local receipt photo was accidentally scanned; no files were modified/copied. Future local invocations use synthetic fixtures only.
+
+## E4.99 F56 CI acceptance — 2026-10-07 08:49 MSK
+
+- Pushed `ab4a38d8095c6ed38077bcdeff3c119734155975` to `feat/saas-rewrite`.
+- GitHub Actions run `37577879007` is GREEN (4m22s): privacy guard, dependency setup, smoke, handlers, receipt tests, and new empty-inventory JSON CLI step all passed.
+- F56 complete. Next plan item: F57 Russian formatting, Telegram escaping, font portability, and text fallback.
