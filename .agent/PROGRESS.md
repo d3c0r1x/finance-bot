@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 06:02, Europe/Moscow.
+Updated: 2026-10-07 07:22, Europe/Moscow.
 
 ## Global plan
 
@@ -58,7 +58,7 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 | F41.3b1 | Actor-scoped Telegram list and decision routes | COMPLETE — local and four GitHub workflows GREEN | F41.2b | 7089a63 |
 | F41.3b2 | Telegram command, renderer and callbacks | COMPLETE — local and four GitHub workflows GREEN | F41.3b1 | 41ace8f |
 | F41.3c | Android list and human controls | COMMITTED — 50/50 instrumentation and APK launch; GitHub run not found | F41.2b | ccfcf6a |
-| F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | IN PROGRESS — Core, Web, Go and Telegram preview/apply work locally; accessible run history and bounded batch semantics remain | F41 | pending |
+| F42 | Recalculate saved receipt verdicts only by explicit request; retain audit and report | COMPLETE locally — F42.1–F42.6; owner-scoped history and bounded pages/inputs | F41 | 8b741c0 |
 | F42.1 | Deterministic preview policy for eligible receipt lines | COMPLETE — local Core regression passed | F42 | 6f80afc |
 | F42.2 | Persist preview, apply safely, audit and report changes through Core API | COMMITTED — local PostgreSQL/Core checks pass; contract pytest unavailable, GitHub run not found | F42.1 | d41888c |
 | F42.3 | Web preview and explicit apply flow for receipt verdict recalculation | COMMITTED — Web 57/57 and production build pass; GitHub run not found | F42.2 | 81267de |
@@ -71,19 +71,19 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
 | F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
-| F52 | Excel-compatible CSV export, filters, safe text, scoped download | CODE COMPLETE — final local regression passed; SeaweedFS runtime integration NOT_RUN because Docker is unavailable | F51 | pending polling-test stabilization commit; dd0b35f (Task 4); 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
+| F52 | Excel-compatible CSV export, filters, safe text, scoped download | CODE COMPLETE — final local regression passed; SeaweedFS runtime integration NOT_RUN because Docker is unavailable | F51 | 0f50266 (polling-test stabilization); dd0b35f (Task 4); 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F52 — implement the approved Excel-compatible CSV export, exact filters, safe text, and authorized download flow.
-- Status: CODE COMPLETE — Tasks 1, 2a, 2b, 3a, 3b, and 4 are committed/pushed (`66de1a8`, `62370cd`, `e8ec4af`, `7e2088d`, `016a6a0`, `dd0b35f`). Final local gates pass. SeaweedFS runtime round-trip remains NOT_RUN because Docker is unavailable; this is a deployment proof, not code acceptance.
+- Status: CODE COMPLETE — Tasks 1, 2a, 2b, 3a, 3b, and 4 are committed/pushed (`66de1a8`, `62370cd`, `e8ec4af`, `7e2088d`, `016a6a0`, `dd0b35f`, `0f50266`). Final local gates pass. SeaweedFS runtime round-trip remains NOT_RUN because Docker is unavailable; this is a deployment proof, not code acceptance.
 - Acceptance: UTF-8 BOM, semicolon delimiter, Russian legacy column names/order, reproducible filter semantics, text formula-injection protection while numeric cells remain numeric, scoped export job and expiring download; no Telegram entry point.
 - Evidence: F52 Task 1 `66de1a8`, Task 2a `62370cd`, Task 2b `e8ec4af`, Task 3a `7e2088d`, Task 3b `016a6a0`, and Task 4 `dd0b35f` pushed. GitHub returned no workflows for these SHAs. Tasks 2a/2b, 3a, and 3b observed RED then gates passed. Final Core `:services:core:check --rerun-tasks` passed against isolated PostgreSQL; Go `test ./... -count=1` and `go vet ./...` passed; contracts/migrations 76 passed, 2 optional DB skips; Web 81 passed and production build passed; `git diff --check` passed. SeaweedFS private round-trip/anonymous-read integration is present but NOT_RUN because Docker and an S3 endpoint are unavailable. Ready exports receive a <=5 minute signed URL capped by job expiry; signatures never enter audit data. GitHub returned no workflow runs for F52 SHAs.
 - Runtime: no production S3 endpoint is configured; live object delivery is not verified. No real legacy SQLite database exists; migration rehearsal remains under E8.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `dd0b35f` before polling-test stabilization.
-- Next: commit polling-test timeout fix and progress evidence; then continue to next incomplete V1 goal.
-- Updated at: 2026-10-07 07:21 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `0f50266` before final progress commit.
+- Next: start F53 panel parity after rechecking its legacy inventory and current Web routes.
+- Updated at: 2026-10-07 07:22 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -130,9 +130,17 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 - Added typed create/status API, timezone-local 30-day defaults, 366-day client bound, role-aware scope selector, 1-second status polling, RU/EN job states, empty result messaging, and download only for ready jobs with URL. Added `/exports` navigation and responsive layout.
 - GREEN: focused export suite 6/6; full Web suite 81 passed; `pnpm --dir apps/web build` passed. Final Core forced check, contracts 76 passed/2 optional skips, and Go tests/vet passed.
 - Final regression first exposed the polling test's default one-second query timeout racing the one-second refetch interval under parallel load. Increased only the test wait to four seconds; focused and full Web suites then passed. Product polling stays at one second.
-- Task 4 commit/push: `dd0b35f` (`feat(F52.4): add web CSV export flow`). GitHub returned no workflow run.
+- Task 4 commit/push: `dd0b35f` (`feat(F52.4): add web CSV export flow`). Test timeout stabilization commit/push: `0f50266`. GitHub returned no workflow runs for either SHA.
 - SeaweedFS integration is NOT_RUN locally because Docker and endpoint are unavailable. Code acceptance is complete; record live storage runtime separately.
-- Next: commit polling-test stabilization and finalize F52 progress evidence, then continue next incomplete V1 goal.
+- F52 code acceptance complete. Production S3 runtime proof remains NOT_RUN. Next: continue next incomplete V1 goal.
+
+## E4.91 F52 final regression and code acceptance — 2026-10-07 07:22 Europe/Moscow
+
+- Full parallel regression initially produced one Web failure: the polling assertion used Testing Library's default one-second wait while the product refetch interval is one second. Raised only assertion waits to four seconds; focused export tests passed 6/6 and full Web passed 81/81 afterward.
+- Final gates: Core `:services:core:check --rerun-tasks` passed against isolated PostgreSQL; Go `test ./... -count=1` and `go vet ./...` passed; contracts/migrations 76 passed, 2 optional DB tests skipped; Web 81 passed; `pnpm --dir apps/web build` passed; `git diff --check` passed.
+- Polling-test fix committed/pushed as `0f50266` (`test(F52.4): stabilize export status polling`). `gh run list --commit 0f50266` returned no workflows.
+- F52 code acceptance complete. SeaweedFS private-object round-trip is NOT_RUN because Docker and an S3 endpoint are unavailable; record as a separate deployment proof.
+- Next: F53 panel parity, starting with legacy inventory versus current Web routes/components.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 
