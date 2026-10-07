@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/d3c0r1x/finance-bot/services/analytics-go/advice"
+	"github.com/d3c0r1x/finance-bot/services/analytics-go/exports"
 	"github.com/d3c0r1x/finance-bot/services/analytics-go/prices"
 	"github.com/d3c0r1x/finance-bot/services/analytics-go/recurring"
 )
@@ -27,6 +28,10 @@ func run() error {
 	worker, err := configuredF43Worker(os.Getenv("ADVICE_ANALYTICS_WORKER_ENABLED"),
 		os.Getenv("ANALYTICS_CORE_URL"), os.Getenv("FINANCE_ANALYTICS_SERVICE_TOKEN"),
 		os.Getenv("ADVICE_ANALYTICS_WORKER_POLL_INTERVAL"))
+	if err != nil {
+		return err
+	}
+	exportWorker, err := configuredExportWorker(os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -131,6 +136,13 @@ func run() error {
 			}
 		}()
 	}
+	if exportWorker != nil {
+		go func() {
+			if err := exportWorker.Run(ctx); err != nil && ctx.Err() == nil {
+				workerErrors <- err
+			}
+		}()
+	}
 	select {
 	case err := <-serverErrors:
 		stop()
@@ -170,6 +182,62 @@ func configuredF43Worker(enabledValue, coreURL, serviceToken, pollValue string) 
 		return nil, err
 	}
 	return advice.NewF43Worker(core, pollInterval)
+}
+
+func configuredExportWorker(getenv func(string) string) (*exports.Worker, error) {
+	enabledValue := strings.TrimSpace(getenv("CSV_EXPORT_WORKER_ENABLED"))
+	enabled, err := strconv.ParseBool(enabledValue)
+	if enabledValue == "" {
+		enabled = false
+	} else if err != nil {
+		return nil, errors.New("CSV_EXPORT_WORKER_ENABLED must be true or false")
+	}
+	if !enabled {
+		return nil, nil
+	}
+	pollInterval := time.Second
+	if value := strings.TrimSpace(getenv("CSV_EXPORT_WORKER_POLL_INTERVAL")); value != "" {
+		pollInterval, err = time.ParseDuration(value)
+		if err != nil || pollInterval <= 0 {
+			return nil, errors.New("CSV_EXPORT_WORKER_POLL_INTERVAL must be a positive duration")
+		}
+	}
+	pageSize := 500
+	if value := strings.TrimSpace(getenv("CSV_EXPORT_WORKER_PAGE_SIZE")); value != "" {
+		pageSize, err = strconv.Atoi(value)
+		if err != nil || pageSize < 1 || pageSize > 1000 {
+			return nil, errors.New("CSV_EXPORT_WORKER_PAGE_SIZE must be from 1 to 1000")
+		}
+	}
+	pathStyle := true
+	if value := strings.TrimSpace(getenv("FINANCE_EXPORTS_S3_PATH_STYLE")); value != "" {
+		pathStyle, err = strconv.ParseBool(value)
+		if err != nil {
+			return nil, errors.New("FINANCE_EXPORTS_S3_PATH_STYLE must be true or false")
+		}
+	}
+	core, err := exports.NewCoreClient(getenv("ANALYTICS_CORE_URL"), getenv("FINANCE_EXPORTS_SERVICE_TOKEN"), 15*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	storage, err := exports.NewS3ObjectStorage(exports.S3Config{
+		Endpoint: getenv("FINANCE_EXPORTS_S3_ENDPOINT"), Region: envOrValue(getenv("FINANCE_EXPORTS_S3_REGION"), "us-east-1"),
+		Bucket: getenv("FINANCE_EXPORTS_S3_BUCKET"), AccessKey: getenv("FINANCE_EXPORTS_S3_ACCESS_KEY"),
+		SecretKey: getenv("FINANCE_EXPORTS_S3_SECRET_KEY"), PathStyle: pathStyle,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return exports.NewWorker(core, storage, exports.WorkerConfig{
+		PageSize: pageSize, PollInterval: pollInterval, TempDir: strings.TrimSpace(getenv("CSV_EXPORT_WORKER_TEMP_DIR")),
+	})
+}
+
+func envOrValue(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return fallback
 }
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {

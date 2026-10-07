@@ -4,11 +4,17 @@ on:
   push:
     paths:
       - 'services/core/**'
+      - 'services/analytics-go/exports/**'
+      - 'services/analytics-go/go.mod'
+      - 'services/analytics-go/go.sum'
       - 'ops/receipt-storage/**'
       - '.github/workflows/receipt-storage.yml'
   pull_request:
     paths:
       - 'services/core/**'
+      - 'services/analytics-go/exports/**'
+      - 'services/analytics-go/go.mod'
+      - 'services/analytics-go/go.sum'
       - 'ops/receipt-storage/**'
       - '.github/workflows/receipt-storage.yml'
   workflow_dispatch:
@@ -22,6 +28,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/analytics-go/go.mod
       - name: Start authenticated SeaweedFS S3
         run: |
           docker run -d --name finance-receipt-seaweed \
@@ -61,6 +70,13 @@ jobs:
           FINANCE_RECEIPT_IT_CLAMAV_HOST: 127.0.0.1
           FINANCE_RECEIPT_IT_CLAMAV_PORT: '3310'
         run: ./gradlew :services:core:test --tests '*ReceiptStorageIntegrationTest' --no-daemon
+      - name: Verify private Go export storage against SeaweedFS
+        working-directory: services/analytics-go
+        env:
+          FINANCE_EXPORT_IT_S3_ENDPOINT: http://127.0.0.1:8333
+          FINANCE_EXPORT_IT_S3_ACCESS_KEY: finance-receipt-it-access
+          FINANCE_EXPORT_IT_S3_SECRET_KEY: finance-receipt-it-secret-key
+        run: go test ./exports -run '^TestSeaweedS3PrivateExportRoundTrip$' -count=1
       - name: Print integration service logs on failure
         if: failure()
         run: |
