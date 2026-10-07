@@ -71,19 +71,28 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
 | F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
-| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — starting contract and repository audit | F51 | pending |
+| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — Task 1 complete; Task 2a Core request/status implementation and regression | F51 | 66de1a8 (Task 1) |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F52 — implement the approved Excel-compatible CSV export, exact filters, safe text, and authorized download flow.
-- Status: IN PROGRESS — legacy serializer and old panel audited; F52 execution spec/plan created; versioned Go `csv-v1` writer and golden contract are GREEN. Core job/API, export worker/storage, and Web flow remain.
+- Status: IN PROGRESS — Task 1 writer committed; Task 2a implemented locally with RLS-protected job/snapshot migrations, repeatable-read snapshot, Core+BFF routes, audit/outbox, OpenAPI contract, and PostgreSQL tests. Worker APIs, Go worker/storage, and Web flow remain.
 - Acceptance: UTF-8 BOM, semicolon delimiter, Russian legacy column names/order, reproducible filter semantics, text formula-injection protection while numeric cells remain numeric, scoped export job and expiring download; no Telegram entry point.
-- Evidence: F45.4 importer + contracts 87 passed with 2 optional database skips; full Core `:services:core:check` passed; Core migration PostgreSQL acceptance passed; Telegram gateway 101 passed; Go tests/vet passed; Web 75 and production build passed. F52 Task 1 focused and full Go tests/vet passed; final diff check remains. Extractor `compileall` passed. Commits `23db236` and `462d758` pushed; GitHub returned no Actions run for `462d758`.
+- Evidence: F45.4 gates passed and commits `23db236`, `462d758` pushed; no GitHub Actions run for `462d758`. F52 Task 1 `66de1a8` pushed after focused/full Go tests and `go vet`. Task 2a observed RED for missing migration and endpoints; all 4 focused Core/PostgreSQL export tests pass. Full Core `:services:core:check` passes against isolated PostgreSQL. Contract suite: 73 passed, 2 optional PostgreSQL admin/event checks skipped; when attempted with the application DSN, those two require CREATEROLE and a prepared event fixture. OpenAPI + migration focused tests pass. Web: 75 tests + production build pass. Go: full suite + vet pass. `git diff --check` passes.
 - Runtime: no real legacy SQLite database exists; its mapping/rehearsal remains unverified under E8. No production export path exists yet.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `462d758`.
-- Next: finish Task 1 diff check and commit/push the CSV contract/writer; then add RED Core/PostgreSQL tests for export job scope, status, and snapshot authorization.
-- Updated at: 2026-10-07 06:02 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `66de1a8` before Task 2a commit.
+- Next: stage only reviewed F52 Task 2a files, commit and push; then add RED tests for Task 2b worker APIs.
+- Updated at: 2026-10-07 06:24 Europe/Moscow.
+
+## E4.86 F52 Task 2a Core export request/status — 2026-10-07
+
+- Test-first RED: migration test failed because V42 export tables were absent; Core request/status methods returned 404. Added tests before implementation.
+- Task 2a implements `csv-v1` request validation, owner/admin/member scope, requester-timezone inclusive date filters, 366-day and 100,000-row caps, durable job/outbox/audit transaction, immutable transaction snapshot, status access controls, and Core/BFF routes.
+- PostgreSQL tests prove create/update/void after request do not change snapshot; finance transaction count is unchanged; denied scope and cross-tenant/member status return 403/404; rejected oversized range/row set creates no job; successful Web BFF status read is audited.
+- Migrations V42/V43 add tenant RLS and immutable snapshots; V43 allows expiry cleanup to delete rows while blocking updates.
+- Focused Core tests: 4/4 passed on isolated PostgreSQL. Full `:services:core:check` passed. Contracts/OpenAPI/migration: 73 passed, 2 optional PostgreSQL admin/event checks skipped. Go suite/vet, Web 75 tests/build, and `git diff --check` passed. Contract tests attempted with app DSN correctly failed on insufficient `CREATEROLE` and absent public outbox fixture; rerun without the optional DB variable produced the reported skips.
+- Plan refinement: split Core request/status (Task 2a) from worker internal API (Task 2b) so each verified slice can commit independently.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 

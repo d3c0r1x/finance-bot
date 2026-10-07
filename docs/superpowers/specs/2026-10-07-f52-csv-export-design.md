@@ -16,18 +16,18 @@ Replace the legacy desktop export with an authenticated Web export. Preserve its
 ## Scope and access
 
 - Authenticated member can export own transactions. Tenant owner/admin can select one active member or all members. Other members cannot widen scope.
-- Filters use explicit local `fromDate`/`toDate`, optional transaction type, and member scope. Defaults are finite and visible in the request/response; no unbounded browser download.
+- Filters use required local `fromDate`/`toDate` and member scope. All transaction types remain included, matching the old panel. The Web form supplies a finite default period; no unbounded browser download.
 - Export includes only posted transactions visible to the requester at the captured snapshot. Voided rows are excluded. Amounts and row identity come from Core; worker does not become a finance-data writer.
-- `POST /api/v1/tenants/{tenantId}/exports` creates a durable job and `jobs.export.v1` outbox event. `GET /api/v1/tenants/{tenantId}/exports/{exportId}` returns scoped status and, only while ready, a short-lived download URL.
+- `POST /api/v1/tenants/{tenantId}/exports` creates a durable job, immutable row snapshot, and `jobs.export.v1` outbox event in one PostgreSQL transaction. `GET /api/v1/tenants/{tenantId}/exports/{exportId}` returns scoped status and, only while ready, a short-lived download URL.
 - Worker uses a narrow Core service credential and authorized job ID. Object keys are random and tenant-scoped. Core verifies ownership before issuing a signed URL. URL lifetime is bounded; no public bucket or permanent object URL.
 - Job is idempotent by export ID and format version. Retry must not expose partial objects as ready. Expired or failed jobs expose no download URL.
 
 ## Snapshot and resource bounds
 
-- Job records normalized filters, requester, selected member scope, format version, row watermark, and lifecycle timestamps.
-- Worker streams rows in stable keyset order, validates each page against the authorized job, and never loads complete history into RAM.
-- The implementation must demonstrate how its watermark prevents rows created after the request from entering the export. If edits/voids can change rows inside a running export, preserve the request-time state through an immutable snapshot or equivalent verified mechanism; do not call a creation-time filter a stable snapshot without proof.
-- Request and worker enforce a documented maximum date range/row count and terminal failure on excess. Never silently truncate CSV.
+- Job records normalized filters, requester, requester timezone, selected member scope, format version, database snapshot timestamp, row count, and lifecycle timestamps.
+- Core copies matching posted rows into immutable `export_snapshot_rows` in the same transaction that creates the job. Later inserts, edits, and voids cannot change an accepted export.
+- Request accepts at most 366 inclusive local dates and 100,000 rows. If the selected snapshot exceeds either bound, the full request transaction rolls back. Never silently truncate CSV.
+- Worker streams the immutable rows in stable keyset order, validates every page against the authorized job, and never loads complete history into RAM.
 
 ## Side effects and privacy
 

@@ -24,6 +24,7 @@ import com.decorix.finance.core.api.InflationApi.PersonalInflation;
 import com.decorix.finance.core.api.RecurringApi.RecurringProjection;
 import com.decorix.finance.core.api.ReceiptProcessingApi.ReceiptProcessingJob;
 import com.decorix.finance.core.api.AdviceAnalyticsApi.Job;
+import com.decorix.finance.core.api.ExportApi.ExportJob;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -67,6 +68,7 @@ public class WebBffController {
     private final AdviceEvidenceService evidence;
     private final AdviceAnalyticsService adviceAnalytics;
     private final GoalService goals;
+    private final ExportService exports;
 
     public WebBffController(TenantService tenants, TransactionService transactions, MemberProfileService profiles,
                             NotificationPreferencesService notificationPreferences, BudgetService budgets,
@@ -74,7 +76,7 @@ public class WebBffController {
                             ReceiptService receipts, TelegramLinkService telegramLinks,
                             ProductPriceHistoryService productPriceHistory, ReceiptProcessingService receiptProcessing,
                             ReceiptReadingService receiptReadings, AdviceEvidenceService evidence,
-                            AdviceAnalyticsService adviceAnalytics, GoalService goals) {
+                            AdviceAnalyticsService adviceAnalytics, GoalService goals, ExportService exports) {
         this.tenants = tenants;
         this.transactions = transactions;
         this.profiles = profiles;
@@ -91,6 +93,7 @@ public class WebBffController {
         this.evidence = evidence;
         this.adviceAnalytics = adviceAnalytics;
         this.goals = goals;
+        this.exports = exports;
     }
 
     @GetMapping("/csrf")
@@ -138,6 +141,19 @@ public class WebBffController {
     @GetMapping("/tenants/{tenantId}/goals")
     GoalCandidatesApi.Overview getGoals(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
         return goals.get(tenantId, user.getSubject());
+    }
+
+    @PostMapping("/tenants/{tenantId}/exports")
+    ResponseEntity<ExportJob> createExport(@PathVariable UUID tenantId,
+                                            @RequestBody ExportApi.CreateRequest request,
+                                            @AuthenticationPrincipal OidcUser user) {
+        return ResponseEntity.accepted().body(exports.create(tenantId, user.getSubject(), request));
+    }
+
+    @GetMapping("/tenants/{tenantId}/exports/{exportId}")
+    ExportJob getExport(@PathVariable UUID tenantId, @PathVariable UUID exportId,
+                        @AuthenticationPrincipal OidcUser user) {
+        return exports.get(tenantId, user.getSubject(), exportId);
     }
 
     @PostMapping("/tenants/{tenantId}/goals")

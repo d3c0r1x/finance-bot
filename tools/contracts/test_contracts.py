@@ -159,6 +159,20 @@ def test_weekly_notification_claim_contract_carries_nullable_goal_outcome():
             validator.validate(malformed)
 
 
+def test_csv_export_request_and_status_contract_are_exposed_to_api_and_bff():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    for path in ("/api/v1/tenants/{tenantId}/exports", "/bff/tenants/{tenantId}/exports"):
+        assert "post" in spec["paths"][path]
+        assert "202" in spec["paths"][path]["post"]["responses"]
+        assert spec["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"] \
+            .endswith("CreateExport")
+    for path in ("/api/v1/tenants/{tenantId}/exports/{exportId}", "/bff/tenants/{tenantId}/exports/{exportId}"):
+        assert "get" in spec["paths"][path]
+        response = spec["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+        assert response["$ref"].endswith("ExportJob")
+    assert spec["components"]["schemas"]["CreateExport"]["properties"]["formatVersion"]["const"] == "csv-v1"
+    assert spec["components"]["schemas"]["ExportJob"]["properties"]["downloadUrl"]["type"] == ["string", "null"]
+
 def test_legacy_goal_history_import_contract_is_internal_and_repeat_safe():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     path = "/internal/v1/migrations/goal-history"

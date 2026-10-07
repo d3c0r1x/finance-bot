@@ -2921,6 +2921,88 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/BankImportUndoResult' }
         '412': { $ref: '#/components/responses/PreconditionFailed' }
+  /api/v1/tenants/{tenantId}/exports:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createCsvExport
+      summary: Snapshot visible posted transactions and queue a CSV export
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateExport' }
+      responses:
+        '202':
+          description: Export job and immutable transaction snapshot created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportJob' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: Date or row limit exceeded
+  /bff/tenants/{tenantId}/exports:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      operationId: createCsvExportBff
+      summary: Create CSV export from the authenticated Web session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateExport' }
+      responses:
+        '202':
+          description: Export job and immutable transaction snapshot created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportJob' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413':
+          description: Date or row limit exceeded
+  /api/v1/tenants/{tenantId}/exports/{exportId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: exportId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getCsvExport
+      summary: Read export job status within the current tenant
+      responses:
+        '200':
+          description: Current export status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /bff/tenants/{tenantId}/exports/{exportId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: exportId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getCsvExportBff
+      summary: Read export status from the authenticated Web session
+      responses:
+        '200':
+          description: Current export status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/tenants/{tenantId}/transactions:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -6114,6 +6196,36 @@ components:
         modelVersion: { type: string, minLength: 1, maxLength: 128 }
         promptVersion: { type: string, minLength: 1, maxLength: 64 }
         createdAt: { type: string, format: date-time }
+    CreateExport:
+      type: object
+      additionalProperties: false
+      required: [formatVersion, fromDate, toDate]
+      properties:
+        formatVersion: { type: string, const: csv-v1 }
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        memberId:
+          description: Omit for own transactions; use all or an active member UUID only as owner/admin.
+          oneOf:
+            - { type: string, const: all }
+            - { type: string, format: uuid }
+    ExportJob:
+      type: object
+      additionalProperties: false
+      required: [id, status, formatVersion, fromDate, toDate, memberId, allMembers, rowCount, snapshotAt, createdAt, expiresAt, downloadUrl]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, processing, ready, failed, expired] }
+        formatVersion: { type: string, const: csv-v1 }
+        fromDate: { type: string, format: date }
+        toDate: { type: string, format: date }
+        memberId: { type: [string, 'null'], format: uuid }
+        allMembers: { type: boolean }
+        rowCount: { type: integer, minimum: 0, maximum: 100000 }
+        snapshotAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        downloadUrl: { type: [string, 'null'], format: uri }
     Transaction:
       type: object
       additionalProperties: false

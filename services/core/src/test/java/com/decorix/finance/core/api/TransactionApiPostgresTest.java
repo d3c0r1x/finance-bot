@@ -3674,6 +3674,213 @@ class TransactionApiPostgresTest {
         });
     }
 
+    @Test
+    void exportSnapshotsRequestTimeRowsAndCommitsJobWithOutboxAtomically() throws Exception {
+        String memberSubject = "keycloak|export-snapshot-member-" + UUID.randomUUID();
+        UUID memberId = addTenantMember(memberSubject, "Export member", "member");
+        String ownerTransactionId = createExportFixtureTransaction(subject, "export-owner-before",
+                "2026-10-05T10:00:00Z", "export-owner-create-0001");
+        String memberTransactionId = createExportFixtureTransaction(memberSubject, "export-member-before",
+                "2026-10-06T10:00:00Z", "export-member-create-0001");
+        createExportFixtureTransaction(subject, "outside-export-window", "2026-10-04T23:59:00Z",
+                "export-outside-create-0001");
+
+        int transactionCountBefore = jdbc.queryForObject("SELECT count(*) FROM transactions WHERE tenant_id = ?",
+                Integer.class, tenantId);
+        String created = mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-05\","
+                                + "\"toDate\":\"2026-10-06\",\"memberId\":\"all\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("queued"))
+                .andExpect(jsonPath("$.formatVersion").value("csv-v1"))
+                .andExpect(jsonPath("$.rowCount").value(2))
+                .andReturn().getResponse().getContentAsString();
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        org.junit.jupiter.api.Assertions.assertNotNull(
+                com.jayway.jsonpath.JsonPath.<String>read(created, "$.snapshotAt"));
+        org.junit.jupiter.api.Assertions.assertEquals(transactionCountBefore,
+                jdbc.queryForObject("SELECT count(*) FROM transactions WHERE tenant_id = ?", Integer.class, tenantId));
+        org.junit.jupiter.api.Assertions.assertThrows(org.springframework.dao.DataAccessException.class, () ->
+                transactions.executeWithoutResult(status -> {
+                    jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+                    jdbc.update("UPDATE export_snapshot_rows SET description='tampered' WHERE tenant_id=? AND export_id=?",
+                            tenantId, UUID.fromString(exportId));
+                }));
+
+        mvc.perform(patch("/api/v1/tenants/{tenantId}/transactions/{transactionId}", tenantId, ownerTransactionId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .header("Idempotency-Key", "export-after-update-0001").header("If-Match", "\"1\"")
+                        .contentType("application/json")
+                        .content("{\"type\":\"expense\",\"amount\":\"20.00\",\"currency\":\"RUB\","
+                                + "\"categoryCode\":\"food\",\"description\":\"owner-after\","
+                                + "\"source\":\"manual\",\"occurredAt\":\"2026-10-05T10:00:00Z\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/v1/tenants/{tenantId}/transactions/{transactionId}/void", tenantId,
+                        memberTransactionId)
+                        .with(jwt().jwt(token -> token.subject(memberSubject)))
+                        .header("Idempotency-Key", "export-after-void-0001").header("If-Match", "\"1\""))
+                .andExpect(status().isOk());
+        createExportFixtureTransaction(subject, "created-after-export", "2026-10-05T11:00:00Z",
+                "export-after-create-0001");
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(2, jdbc.queryForObject(
+                    "SELECT count(*) FROM export_snapshot_rows WHERE tenant_id=? AND export_id=?",
+                    Integer.class, tenantId, UUID.fromString(exportId)));
+            org.junit.jupiter.api.Assertions.assertEquals(List.of("export-owner-before", "export-member-before"),
+                    jdbc.query("SELECT description FROM export_snapshot_rows WHERE tenant_id=? AND export_id=? "
+                                    + "ORDER BY row_number", (rs, row) -> rs.getString(1), tenantId,
+                            UUID.fromString(exportId)));
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM export_jobs WHERE tenant_id=? AND id=? AND requester_user_id=? "
+                            + "AND row_count=2 AND snapshot_at IS NOT NULL", Integer.class,
+                    tenantId, UUID.fromString(exportId), userIdFor(subject)));
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM outbox_events WHERE tenant_id=? AND aggregate_type='export' "
+                            + "AND aggregate_id=? AND event_type='export.requested'", Integer.class,
+                    tenantId, UUID.fromString(exportId)));
+            org.junit.jupiter.api.Assertions.assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM notification_intents WHERE tenant_id=?", Integer.class, tenantId));
+        });
+    }
+
+    @Test
+    void exportScopeStatusAndRangeAreBoundToActiveMemberRole() throws Exception {
+        String memberSubject = "keycloak|export-scope-member-" + UUID.randomUUID();
+        UUID memberId = addTenantMember(memberSubject, "Export member", "member");
+        createExportFixtureTransaction(subject, "scope-owner-only", "2026-10-01T12:00:00Z", "scope-owner-create-001");
+        createExportFixtureTransaction(memberSubject, "scope-member-only", "2026-10-01T13:00:00Z", "scope-member-create-001");
+        String ownerAuthSubject = subject;
+        var ownerAuth = jwt().jwt(token -> token.subject(ownerAuthSubject));
+        var memberAuth = jwt().jwt(token -> token.subject(memberSubject));
+        String ownerJob = mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId).with(ownerAuth)
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
+                                + "\"toDate\":\"2026-10-02\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.rowCount").value(1))
+                .andReturn().getResponse().getContentAsString();
+        String ownerExportId = com.jayway.jsonpath.JsonPath.read(ownerJob, "$.id");
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId).with(ownerAuth)
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
+                                + "\"toDate\":\"2026-10-02\",\"memberId\":\"" + memberId + "\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.rowCount").value(1))
+                .andExpect(jsonPath("$.memberId").value(memberId.toString()));
+
+        String memberJob = mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId).with(memberAuth)
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
+                                + "\"toDate\":\"2026-10-02\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.rowCount").value(1))
+                .andReturn().getResponse().getContentAsString();
+        String memberExportId = com.jayway.jsonpath.JsonPath.read(memberJob, "$.id");
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, memberExportId)
+                        .with(memberAuth))
+                .andExpect(status().isOk());
+
+        String allScope = "{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
+                + "\"toDate\":\"2026-10-02\",\"memberId\":\"all\"}";
+        mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId).with(memberAuth)
+                        .contentType("application/json").content(allScope))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId).with(memberAuth)
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
+                                + "\"toDate\":\"2026-10-02\",\"memberId\":\"" + userIdFor(subject) + "\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, ownerExportId)
+                        .with(memberAuth))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", UUID.randomUUID(), ownerExportId)
+                        .with(ownerAuth))
+                .andExpect(status().isNotFound());
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId).with(ownerAuth)
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2024-10-01\","
+                                + "\"toDate\":\"2026-10-02\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId).with(ownerAuth)
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-02\","
+                                + "\"toDate\":\"2026-10-01\"}"))
+                .andExpect(status().isBadRequest());
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(3, jdbc.queryForObject(
+                    "SELECT count(*) FROM export_jobs WHERE tenant_id=?", Integer.class, tenantId));
+        });
+        org.junit.jupiter.api.Assertions.assertEquals(memberId,
+                userIdFor(memberSubject), "member manifest identity must remain explicit");
+    }
+
+    @Test
+    void exportRejectsMoreThanOneHundredThousandRowsWithoutCreatingJob() throws Exception {
+        UUID ownerId = userIdFor(subject);
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("INSERT INTO transactions (tenant_id, owner_subject, owner_user_id, type, amount, "
+                            + "category_code, occurred_at) SELECT ?, ?, ?, 'expense', 1.00, 'food', "
+                            + "TIMESTAMPTZ '2026-10-01 12:00:00+00' FROM generate_series(1, 100001)",
+                    tenantId, subject, ownerId);
+        });
+
+        mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId)
+                        .with(jwt().jwt(token -> token.subject(subject)))
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
+                                + "\"toDate\":\"2026-10-01\"}"))
+                .andExpect(status().isPayloadTooLarge());
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM export_jobs WHERE tenant_id=?", Integer.class, tenantId));
+        });
+    }
+
+    @Test
+    void webBffCreatesAndReturnsScopedExportJob() throws Exception {
+        var browser = oidcLogin().idToken(token -> token.subject(subject));
+        String created = mvc.perform(post("/bff/tenants/{tenantId}/exports", tenantId).with(browser).with(csrf())
+                        .contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
+                                + "\"toDate\":\"2026-10-02\"}"))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("queued"))
+                .andReturn().getResponse().getContentAsString();
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        mvc.perform(get("/bff/tenants/{tenantId}/exports/{exportId}", tenantId, exportId).with(browser))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(exportId))
+                .andExpect(jsonPath("$.rowCount").value(0));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM audit_log WHERE tenant_id=? AND entity_id=? AND action='export.status_viewed'",
+                    Integer.class, tenantId, UUID.fromString(exportId)));
+        });
+    }
+
+    private String createExportFixtureTransaction(String transactionSubject, String description,
+                                                  String occurredAt, String idempotencyKey) throws Exception {
+        String response = mvc.perform(post("/api/v1/tenants/{tenantId}/transactions", tenantId)
+                        .with(jwt().jwt(token -> token.subject(transactionSubject)))
+                        .header("Idempotency-Key", idempotencyKey)
+                        .contentType("application/json")
+                        .content("{\"type\":\"expense\",\"amount\":\"10.00\",\"currency\":\"RUB\","
+                                + "\"categoryCode\":\"food\",\"description\":\"" + description + "\","
+                                + "\"source\":\"manual\",\"occurredAt\":\"" + occurredAt + "\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        return com.jayway.jsonpath.JsonPath.read(response, "$.id");
+    }
+
     private java.util.Map<String, Object> legacyGoalHistoryEntry(int index) {
         var entry = new java.util.LinkedHashMap<String, Object>();
         entry.put("legacyKey", "goal-history:" + String.format("%064d", index + 1) + ":" + index);

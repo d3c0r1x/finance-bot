@@ -441,3 +441,32 @@ def test_persisted_core_events_match_public_json_schema():
     assert events, "the Java API integration test should have emitted a transaction event"
     for (event,) in events:
         jsonschema.validate(event, schemas[event["aggregate_type"]])
+
+
+def test_csv_export_snapshot_migration_is_tenant_isolated_and_immutable():
+    migration = Path("services/core/src/main/resources/db/migration/V42__csv_exports.sql")
+    assert migration.exists(), "F52 requires durable export jobs and immutable request-time rows"
+    sql = migration.read_text(encoding="utf-8").lower()
+    cleanup_migration = Path("services/core/src/main/resources/db/migration/V43__allow_export_snapshot_cleanup.sql")
+    assert cleanup_migration.exists(), "expired snapshots must be removable after immutable processing"
+    assert "before update on export_snapshot_rows" in cleanup_migration.read_text(encoding="utf-8").lower()
+    for table in ("export_jobs", "export_snapshot_rows"):
+        assert f"create table {table}" in sql
+        assert f"alter table {table} enable row level security" in sql
+        assert f"alter table {table} force row level security" in sql
+        assert f"create policy {table}_tenant_isolation" in sql
+        assert "current_setting('app.tenant_id'" in sql
+    for required in (
+        "format_version varchar",
+        "requester_user_id uuid",
+        "requester_timezone varchar",
+        "snapshot_at timestamptz",
+        "row_count integer",
+        "from_date date",
+        "to_date date",
+        "transaction_id uuid",
+        "row_number bigint",
+        "foreign key (tenant_id, export_id)",
+        "check (format_version = 'csv-v1')",
+    ):
+        assert required in sql
