@@ -48,6 +48,7 @@ def test_core_client_claims_durable_digests_and_acknowledges_delivery():
             "intentId": "0199b81a-4a9c-7000-8000-000000000001", "telegramUserId": 42,
             "digestKind": "daily", "scheduledLocalDate": "2026-10-05", "language": "ru",
             "attemptNumber": 1, "leaseToken": "0199b81a-4a9c-7000-8000-000000000002", "report": report,
+            "goalOutcome": None,
         }]})
 
     async def delivery(request):
@@ -68,6 +69,7 @@ def test_core_client_claims_durable_digests_and_acknowledges_delivery():
     items, result = asyncio.run(exercise())
     assert items[0]["telegramUserId"] == 42
     assert items[0]["report"] == report
+    assert items[0]["goalOutcome"] is None
     assert result == "delivered"
     assert seen == [
         ("/internal/v1/telegram/notifications/claim", "notification-service-secret", {"limit": 10}),
@@ -76,6 +78,54 @@ def test_core_client_claims_durable_digests_and_acknowledges_delivery():
                                         "outcome": "delivered", "errorCode": None,
                                         "providerMessageId": "7788"}),
     ]
+
+
+def test_core_client_accepts_valid_weekly_goal_outcome_and_rejects_malformed_or_daily_payloads():
+    report = {
+        "fromDate": "2026-10-05", "toDate": "2026-10-11",
+    }
+    outcome = {
+        "id": "0199b81a-4a9c-7000-8000-000000000003", "name": "Groceries", "unit": "sum",
+        "bought": 2, "countTarget": 0, "spent": None, "monthlyLimit": "5000.00",
+        "met": None, "completedAt": "2026-10-05T12:00:00Z",
+    }
+    item = {
+        "intentId": "0199b81a-4a9c-7000-8000-000000000001", "telegramUserId": 42,
+        "digestKind": "weekly", "scheduledLocalDate": "2026-10-11", "language": "en",
+        "attemptNumber": 1, "leaseToken": "0199b81a-4a9c-7000-8000-000000000002",
+        "report": report, "goalOutcome": outcome,
+    }
+
+    async def exercise():
+        current = {"item": item}
+
+        async def claim(_request):
+            return web.json_response({"items": [current["item"]]})
+
+        app = web.Application()
+        app.router.add_post("/internal/v1/telegram/notifications/claim", claim)
+        async with TestServer(app) as server:
+            client = TelegramCoreClient(str(server.make_url("")), "service-secret")
+            valid = await client.claim_notification_deliveries(1)
+            malformed = []
+            for field, value in (("id", "not-a-uuid"), ("unit", "volume"), ("bought", True),
+                                 ("spent", "0"), ("met", "false"), ("completedAt", "2026-10-05")):
+                bad = {**outcome, field: value}
+                current["item"] = {**item, "goalOutcome": bad}
+                with pytest.raises(TelegramCoreError):
+                    await client.claim_notification_deliveries(1)
+                malformed.append(field)
+            current["item"] = {**item, "digestKind": "daily"}
+            with pytest.raises(TelegramCoreError):
+                await client.claim_notification_deliveries(1)
+            current["item"] = {key: value for key, value in item.items() if key != "goalOutcome"}
+            with pytest.raises(TelegramCoreError):
+                await client.claim_notification_deliveries(1)
+            return valid, malformed
+
+    valid, malformed = asyncio.run(exercise())
+    assert valid[0]["goalOutcome"] == outcome
+    assert malformed == ["id", "unit", "bought", "spent", "met", "completedAt"]
 
 
 def test_core_client_lists_tenants_and_issues_then_resolves_scoped_actor_context():

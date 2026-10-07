@@ -1390,4 +1390,11 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 - Test-first RED: delivered outcome did not mark announcement, terminal failures retained association, and exhausted lease hid outcome from next intent. Retry retention already passed.
 - Core now marks delivered outcome once and clears link; preserves link on retry; releases it on no_data, permanent/exhausted failures. Expired exhausted leases release linked outcomes in the claim transaction.
 - GREEN: six focused Core notification PostgreSQL tests passed, covering claim and acknowledgement lifecycle.
-- Task 2 commit pending. Next: write Python Core client, digest renderer, and worker tests before implementation.
+- Task 2 commit/push: `747e792` (`feat(F46.2): mark goal outcome delivery`). Task 3 RED covered renderer signature, client payload validation, and empty-report worker behavior. GREEN: full Telegram gateway suite 101 passed. Next: commit Task 3, then add OpenAPI contract tests first.
+
+## E4.84 F46.3 weekly digest rendering — 2026-10-07
+
+- Test-first RED: renderer lacked outcome argument; client accepted malformed/daily payloads; worker suppressed outcome-only digest.
+- Core client validates UUID, unit, counts, money, nullable Boolean, completion timestamp, and weekly-only rule. Digest renders RU/EN count and sum outcomes; unknown amounts stay explicit. Worker sends outcome-only digest and does not record local success if Core acknowledgement is lost.
+- GREEN: focused three-file suite 53 passed; full Telegram gateway suite 101 passed.
+- Task 3 commit pending. Next: write OpenAPI assertions for nullable weekly-only outcome, then observe RED.

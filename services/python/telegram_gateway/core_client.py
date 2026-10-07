@@ -924,7 +924,7 @@ class TelegramCoreClient:
                     or item["digestKind"] not in {"daily", "weekly"} or item["language"] not in {"ru", "en"} \
                     or type(item.get("telegramUserId")) is not int or item["telegramUserId"] <= 0 \
                     or type(item.get("attemptNumber")) is not int or not 1 <= item["attemptNumber"] <= 8 \
-                    or not isinstance(item.get("report"), dict):
+                    or not isinstance(item.get("report"), dict) or "goalOutcome" not in item:
                 raise TelegramCoreError("unavailable")
             try:
                 uuid.UUID(item["intentId"])
@@ -938,7 +938,36 @@ class TelegramCoreClient:
             if not isinstance(report.get("fromDate"), str) or not isinstance(report.get("toDate"), str) \
                     or report["toDate"] != item["scheduledLocalDate"]:
                 raise TelegramCoreError("unavailable")
-            items.append({key: item[key] for key in (*fields, "telegramUserId", "attemptNumber", "report")})
+            goal_outcome = item["goalOutcome"]
+            if goal_outcome is not None:
+                required = {"id", "name", "unit", "bought", "countTarget", "spent", "monthlyLimit",
+                            "met", "completedAt"}
+                if item["digestKind"] != "weekly" or not isinstance(goal_outcome, dict) \
+                        or not required.issubset(goal_outcome) \
+                        or not isinstance(goal_outcome.get("name"), str) \
+                        or not goal_outcome["name"].strip() or len(goal_outcome["name"]) > 200 \
+                        or goal_outcome.get("unit") not in {"count", "sum"} \
+                        or type(goal_outcome.get("bought")) is not int or goal_outcome["bought"] < 0 \
+                        or type(goal_outcome.get("countTarget")) is not int or goal_outcome["countTarget"] < 0 \
+                        or goal_outcome["unit"] == "count" and goal_outcome["countTarget"] < 1 \
+                        or goal_outcome["unit"] == "sum" and goal_outcome["countTarget"] != 0 \
+                        or goal_outcome.get("spent") is not None and (
+                            not isinstance(goal_outcome["spent"], str)
+                            or not _PRODUCT_TOTAL.fullmatch(goal_outcome["spent"])) \
+                        or goal_outcome.get("monthlyLimit") is not None and (
+                            not isinstance(goal_outcome["monthlyLimit"], str)
+                            or not _PRODUCT_TOTAL.fullmatch(goal_outcome["monthlyLimit"])) \
+                        or goal_outcome.get("met") is not None and type(goal_outcome["met"]) is not bool:
+                    raise TelegramCoreError("unavailable")
+                try:
+                    uuid.UUID(goal_outcome["id"])
+                    completed_at = datetime.fromisoformat(goal_outcome["completedAt"].replace("Z", "+00:00"))
+                except (ValueError, TypeError, AttributeError) as error:
+                    raise TelegramCoreError("unavailable") from error
+                if completed_at.tzinfo is None:
+                    raise TelegramCoreError("unavailable")
+            items.append({key: item[key] for key in (*fields, "telegramUserId", "attemptNumber", "report")}
+                         | {"goalOutcome": goal_outcome})
         return items
 
     async def acknowledge_notification_delivery(self, intent_id: str, lease_token: str, outcome: str,

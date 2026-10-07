@@ -115,25 +115,25 @@
 - `TelegramCoreClient.claim_notification_deliveries()` accepts `goalOutcome: null | GoalOutcomeMessage`; reject it for `daily` claims and reject malformed fields/money.
 - Worker passes the validated outcome to `render_digest`; it reports `no_data` only when both financial report and outcome produce no text.
 
-- [ ] **Step 1: Write renderer tests**
+- [x] **Step 1: Write renderer tests**
   - Add RU and EN tests for count outcomes and sum outcomes.
   - Add unknown sum test that renders an explicit unknown label and contains no zero amount.
   - Add an empty-report plus outcome test; expect outcome text. Keep existing empty-report/no-outcome suppression test unchanged.
   - Add daily-with-outcome rejection test.
-- [ ] **Step 2: Run renderer tests and observe RED**
+- [x] **Step 2: Run renderer tests and observe RED**
   - Run from repository root: `.venv\Scripts\python.exe -m pytest services/python/telegram_gateway/tests/test_digest.py -q -p no:cacheprovider`
   - Expected: current renderer has no `goal_outcome` argument.
-- [ ] **Step 3: Write Core client and worker tests**
+- [x] **Step 3: Write Core client and worker tests**
   - Validate a well-formed weekly `goalOutcome`, null outcome, and malformed UUID/unit/money/Boolean payloads.
   - Verify an empty report with an outcome sends one Telegram message and acknowledges `delivered`.
   - Verify a lost acknowledgement leaves the same claim payload available for retry; worker does not mark success locally.
-- [ ] **Step 4: Run gateway tests and observe RED**
+- [x] **Step 4: Run gateway tests and observe RED**
   - Run from repository root: `.venv\Scripts\python.exe -m pytest services/python/telegram_gateway/tests/test_core_client.py services/python/telegram_gateway/tests/test_digest_worker.py -q -p no:cacheprovider`
   - Expected: claim validation rejects new payload and worker omits outcome text.
-- [ ] **Step 5: Implement validation, rendering, and worker integration**
+- [x] **Step 5: Implement validation, rendering, and worker integration**
   - Keep the outcome snapshot bounded and render RU/EN without changing ordinary daily digest text.
   - Include an outcome heading when the Core report has no transactions.
-- [ ] **Step 6: Run gateway tests**
+- [x] **Step 6: Run gateway tests**
   - Expected: all focused tests PASS; existing gateway tests remain PASS.
 - [ ] **Step 7: Commit Task 3**
   - Commit client, renderer, worker, and tests as `feat(F46.3): render outcomes in weekly digest`.

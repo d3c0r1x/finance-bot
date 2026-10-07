@@ -28,7 +28,7 @@ async def deliver_notification_claims(core: TelegramCoreClient, bot,
         lease_token = claim["leaseToken"]
         report = claim["report"]
         try:
-            text = render_digest(report, claim["digestKind"], claim["language"])
+            text = render_digest(report, claim["digestKind"], claim["language"], claim.get("goalOutcome"))
         except (TypeError, ValueError):
             outcome, error_code, provider_message_id = "permanent_failure", "invalid_report", None
         else:
