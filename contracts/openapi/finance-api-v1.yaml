@@ -2976,10 +2976,11 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getCsvExport
-      summary: Read export job status within the current tenant
+      summary: Read authorized export status and short-lived download URL
+      description: Core returns a signed download URL only to an authorized caller for a ready, unexpired export. The URL expires within five minutes and never later than the export job.
       responses:
         '200':
-          description: Current export status
+          description: Current authorized export status and, when eligible, temporary download access.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExportJob' }
@@ -2994,10 +2995,11 @@ paths:
         schema: { type: string, format: uuid }
     get:
       operationId: getCsvExportBff
-      summary: Read export status from the authenticated Web session
+      summary: Read authorized export status and short-lived download URL from the Web session
+      description: Core returns a signed download URL only to an authorized caller for a ready, unexpired export. The URL expires within five minutes and never later than the export job.
       responses:
         '200':
-          description: Current export status
+          description: Current authorized export status and, when eligible, temporary download access.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ExportJob' }
@@ -6319,7 +6321,10 @@ components:
         snapshotAt: { type: string, format: date-time }
         createdAt: { type: string, format: date-time }
         expiresAt: { type: string, format: date-time }
-        downloadUrl: { type: [string, 'null'], format: uri }
+        downloadUrl:
+          type: [string, 'null']
+          format: uri
+          description: Core-signed private object URL, valid for at most 5 minutes and never beyond job expiry. Null while queued, processing, failed, or expired.
     ExportWorkerClaim:
       type: object
       additionalProperties: false

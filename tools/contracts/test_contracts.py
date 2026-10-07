@@ -191,6 +191,18 @@ def test_csv_export_worker_contract_is_service_authenticated_and_lease_fenced():
         assert "409" in operation["responses"]
     assert spec["components"]["securitySchemes"]["financeExportServiceToken"]["name"] == "X-Export-Service-Token"
 
+
+def test_csv_export_download_contract_is_authorized_and_short_lived():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    for path in ("/api/v1/tenants/{tenantId}/exports/{exportId}",
+                 "/bff/tenants/{tenantId}/exports/{exportId}"):
+        assert "authorized" in spec["paths"][path]["get"]["summary"].lower()
+    download = spec["components"]["schemas"]["ExportJob"]["properties"]["downloadUrl"]
+    assert download["type"] == ["string", "null"]
+    assert "signed" in download["description"].lower()
+    assert "5 minutes" in download["description"].lower()
+    assert "expired" in download["description"].lower()
+
 def test_legacy_goal_history_import_contract_is_internal_and_repeat_safe():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     path = "/internal/v1/migrations/goal-history"

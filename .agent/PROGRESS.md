@@ -71,19 +71,19 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
 | F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
-| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — Tasks 1/2a/2b and Go worker/storage slice complete; signed download and Web remain | F51 | pending Task 3a commit; e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
+| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — Tasks 1/2a/2b/3a complete; Core signed download and Web UI verified locally; Task 5 regression remains | F51 | pending Task 3b/4 commits; 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F52 — implement the approved Excel-compatible CSV export, exact filters, safe text, and authorized download flow.
-- Status: IN PROGRESS — Tasks 1, 2a, and 2b are committed/pushed (`66de1a8`, `62370cd`, `e8ec4af`). Task 3a Go worker/private S3 storage is implemented and locally green; Core signed downloads and Web flow remain.
+- Status: IN PROGRESS — Tasks 1, 2a, 2b, and 3a are committed/pushed (`66de1a8`, `62370cd`, `e8ec4af`, `7e2088d`). Task 3b Core signed downloads and Task 4 Web flow are locally verified; commits and Task 5 regression remain.
 - Acceptance: UTF-8 BOM, semicolon delimiter, Russian legacy column names/order, reproducible filter semantics, text formula-injection protection while numeric cells remain numeric, scoped export job and expiring download; no Telegram entry point.
-- Evidence: F45.4 gates passed and commits `23db236`, `462d758` pushed; no GitHub Actions run for `462d758`. F52 Task 1 `66de1a8`, Task 2a `62370cd`, Task 2b `e8ec4af` pushed; GitHub returned no workflows for those SHAs. Task 2a/2b observed RED then all focused Core/PostgreSQL tests passed. Core check, contracts (75 passed, 2 optional DB skips), Web (75 + production build), Go suite/vet, and diff checks passed for prior slices. Task 3a observed RED for missing worker/client/storage; worker tests now cover keyset order, row and byte caps, cancellation, retry classification, upload failure cleanup, and no ready transition before upload. Core client HTTP tests cover service auth, claims/pages, lease completion/failure, no-work, and sanitized errors. MinIO S3 adapter tests verify signed path-style PUT/DELETE; a SeaweedFS private round-trip and anonymous-read integration gate is added to CI but has not run locally.
+- Evidence: F52 Task 1 `66de1a8`, Task 2a `62370cd`, Task 2b `e8ec4af`, Task 3a `7e2088d` pushed. GitHub returned no workflows for these SHAs. Tasks 2a/2b and 3a observed RED then gates passed. Task 3a Go suite/vet passed; SeaweedFS private round-trip and anonymous-read test exists in CI but has not run locally. Task 3b Core signed download tests and forced full `:services:core:check` passed against isolated PostgreSQL. Contract suite: 76 passed, 2 optional DB skips (local cache permission warning). Task 4 Web suite: 80 passed; TypeScript/Vite production build passed. No download URL enters audit data; ready exports receive a <=5 minute URL capped by job expiry. GitHub CI has no run for the existing F52 SHAs.
 - Runtime: no real legacy SQLite database exists; its mapping/rehearsal remains unverified under E8. No production export path exists yet.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `e8ec4af` before Task 3a commit.
-- Next: finalize Task 3a review and commit; then add RED tests for Core-authorized short-lived signed download URLs.
-- Updated at: 2026-10-07 07:00 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7e2088d` before Task 3b commit.
+- Next: commit verified Task 3b Core signed URL slice; then commit Task 4 Web flow and run final F52 regression, including SeaweedFS if available.
+- Updated at: 2026-10-07 07:15 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -114,7 +114,16 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 - Added strict service-token Core HTTP client; MinIO S3-compatible adapter uses path-style configuration and bounded 5 MiB multipart parts with 2 threads. Worker is opt-in and validates Core, token, S3, poll, page, and temp-directory configuration.
 - Added S3 adapter HTTP tests and an optional SeaweedFS test for authenticated round-trip plus anonymous-read denial. Receipt-storage CI now runs this Go integration test; it has not run on this workstation.
 - GREEN: Go `test ./... -count=1`, `go vet ./...`, and `git diff --check` passed. Current Go module uses `minio-go/v7 v7.3.0`.
-- Commit/push and GitHub integration workflow result are pending. Core-generated signed URL and Web download remain incomplete; F52 stays in progress.
+- Commit/push: `7e2088d` (`feat(F52.3a): stream exports to private S3`) pushed. GitHub returned no workflow run. Core signed URL and Web remain separate slices.
+
+## E4.89 F52.3b Core-authorized signed downloads — 2026-10-07 07:15 Europe/Moscow
+
+- Test-first RED: new Core route tests could not compile because `ExportDownloadSigner` was absent; contract tests failed because download URL lifetime and authorization were undocumented.
+- Core signs only after tenant/requester authorization for a ready job with an object key. URL lifetime is at most five minutes and at most the remaining job lifetime; jobs with under one second remaining receive no URL. Audit stores only ready status, never URL/signature.
+- S3 signer validates endpoint origin, bounded export object-key pattern, credentials, and lifetime. Added presigned GET content type/disposition. No extra AWS artifact is needed; presigner comes from the existing SDK S3 dependency.
+- GREEN: forced full Core `:services:core:check --rerun-tasks` passed against isolated PostgreSQL (4 tasks executed); contracts/migrations 76 passed, 2 optional DB skips; full Web 80 passed and production build passed; Go test/vet passed; `git diff --check` passed before Web test-only additions.
+- Task 3b code and OpenAPI changes are verified. Commit/push pending. GitHub CI has not been observed for Task 3a.
+- Next: finish and commit the RU/EN Web export flow, then run final regression and optional SeaweedFS export integration.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 

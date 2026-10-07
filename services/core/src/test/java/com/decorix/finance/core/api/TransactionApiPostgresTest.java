@@ -12,8 +12,11 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.argThat;
 
@@ -145,6 +148,7 @@ class TransactionApiPostgresTest {
     @MockitoBean private AdviceRecalculationImpactClient recalculationImpactClient;
     @MockitoBean private GoalCandidatesClient goalCandidatesClient;
     @MockitoBean private GoalProgressClient goalProgressClient;
+    @MockitoBean private ExportDownloadSigner exportDownloadSigner;
 
     private UUID tenantId;
     private String subject;
@@ -3939,6 +3943,95 @@ class TransactionApiPostgresTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ready"))
                 .andExpect(jsonPath("$.downloadUrl").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void exportDownloadUrlIsSignedOnlyForAuthorizedReadyAndUnexpiredJob() throws Exception {
+        String created = createExportJob(subject, "2026-10-01", "2026-10-02");
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        String objectKey = "tenants/" + tenantId + "/exports/" + exportId + "/" + UUID.randomUUID() + ".csv";
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE export_jobs SET status='ready', object_key=?, object_checksum_sha256=?, "
+                            + "object_byte_count=3, completed_lease_token=?, expires_at=now()+interval '1 hour' "
+                            + "WHERE tenant_id=? AND id=?", objectKey, "a".repeat(64), UUID.randomUUID(), tenantId,
+                    UUID.fromString(exportId));
+        });
+        String signedUrl = "https://s3.example/private.csv?X-Amz-Signature=secret-signature";
+        java.util.concurrent.atomic.AtomicReference<java.time.Duration> signedLifetime = new java.util.concurrent.atomic.AtomicReference<>();
+        when(exportDownloadSigner.sign(eq(objectKey), any(java.time.Duration.class))).thenAnswer(invocation -> {
+            signedLifetime.set(invocation.getArgument(1));
+            return signedUrl;
+        });
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, exportId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ready"))
+                .andExpect(jsonPath("$.downloadUrl").value(signedUrl));
+        verify(exportDownloadSigner).sign(objectKey, java.time.Duration.ofMinutes(5));
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE export_jobs SET expires_at=now()+interval '90 seconds' WHERE tenant_id=? AND id=?",
+                    tenantId, UUID.fromString(exportId));
+        });
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, exportId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.downloadUrl").value(signedUrl));
+        org.junit.jupiter.api.Assertions.assertTrue(signedLifetime.get().compareTo(java.time.Duration.ZERO) > 0);
+        org.junit.jupiter.api.Assertions.assertTrue(signedLifetime.get().compareTo(java.time.Duration.ofSeconds(90)) <= 0,
+                "signed URL must expire with export job");
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE export_jobs SET expires_at=now()+interval '500 milliseconds' WHERE tenant_id=? AND id=?",
+                    tenantId, UUID.fromString(exportId));
+        });
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, exportId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.downloadUrl").value(org.hamcrest.Matchers.nullValue()));
+        verify(exportDownloadSigner, times(2)).sign(eq(objectKey), any(java.time.Duration.class));
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE export_jobs SET expires_at=now()-interval '1 second' WHERE tenant_id=? AND id=?",
+                    tenantId, UUID.fromString(exportId));
+        });
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, exportId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.downloadUrl").value(org.hamcrest.Matchers.nullValue()));
+        verify(exportDownloadSigner, times(2)).sign(eq(objectKey), any(java.time.Duration.class));
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            String audit = jdbc.queryForObject("SELECT coalesce(string_agg(after_state::text, ''), '') FROM audit_log "
+                            + "WHERE tenant_id=? AND entity_id=?", String.class, tenantId, UUID.fromString(exportId));
+            org.junit.jupiter.api.Assertions.assertFalse(audit.contains("X-Amz-Signature"),
+                    "signed URL must not be persisted in audit state");
+        });
+    }
+
+    @Test
+    void exportDownloadDoesNotSignForAnotherMember() throws Exception {
+        String memberSubject = "keycloak|export-download-member-" + UUID.randomUUID();
+        addTenantMember(memberSubject, "Export download member", "member");
+        String created = createExportJob(subject, "2026-10-01", "2026-10-02");
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        String objectKey = "tenants/" + tenantId + "/exports/" + exportId + "/" + UUID.randomUUID() + ".csv";
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE export_jobs SET status='ready', object_key=?, object_checksum_sha256=?, "
+                            + "object_byte_count=3, completed_lease_token=? WHERE tenant_id=? AND id=?",
+                    objectKey, "a".repeat(64), UUID.randomUUID(), tenantId, UUID.fromString(exportId));
+        });
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, exportId)
+                        .with(jwt().jwt(token -> token.subject(memberSubject))))
+                .andExpect(status().isNotFound());
+        verifyNoInteractions(exportDownloadSigner);
     }
 
     @Test

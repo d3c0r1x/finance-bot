@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -24,9 +25,12 @@ public class ExportService {
 
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final ObjectProvider<ExportDownloadSigner> downloadSigners;
 
-    public ExportService(JdbcTemplate jdbc, PlatformTransactionManager transactionManager) {
+    public ExportService(JdbcTemplate jdbc, PlatformTransactionManager transactionManager,
+                         ObjectProvider<ExportDownloadSigner> downloadSigners) {
         this.jdbc = jdbc;
+        this.downloadSigners = downloadSigners;
         this.transaction = new TransactionTemplate(transactionManager);
         this.transaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
     }
@@ -96,6 +100,11 @@ public class ExportService {
             jdbc.update("INSERT INTO audit_log (tenant_id, actor_subject, action, entity_type, entity_id, after_state, trace_id) "
                             + "VALUES (?, ?, 'export.status_viewed', 'export', ?, CAST(? AS jsonb), ?)", tenantId,
                     subject, exportId, "{\"status\":\"" + job.status() + "\"}", UUID.randomUUID().toString());
+            if (job.downloadUrl() != null) {
+                jdbc.update("INSERT INTO audit_log (tenant_id, actor_subject, action, entity_type, entity_id, after_state, trace_id) "
+                                + "VALUES (?, ?, 'export.download_url_issued', 'export', ?, CAST(? AS jsonb), ?)", tenantId,
+                        subject, exportId, "{\"status\":\"ready\"}", UUID.randomUUID().toString());
+            }
             return job;
         });
     }
@@ -103,14 +112,32 @@ public class ExportService {
     private ExportJob getWithinTransaction(UUID tenantId, UUID requesterId, String role, UUID exportId) {
         boolean manager = "owner".equals(role) || "admin".equals(role);
         List<ExportJob> jobs = jdbc.query("SELECT id,status,format_version,from_date,to_date,scope_member_id,"
-                        + "include_all_members,row_count,snapshot_at,created_at,expires_at FROM export_jobs "
+                        + "include_all_members,row_count,snapshot_at,created_at,expires_at,object_key FROM export_jobs "
                         + "WHERE tenant_id=? AND id=? AND (? OR requester_user_id=?)",
-                (rs, row) -> new ExportJob(rs.getObject("id", UUID.class), rs.getString("status"),
-                        rs.getString("format_version"), rs.getObject("from_date", LocalDate.class),
-                        rs.getObject("to_date", LocalDate.class), rs.getObject("scope_member_id", UUID.class),
-                        rs.getBoolean("include_all_members"), rs.getInt("row_count"),
-                        rs.getTimestamp("snapshot_at").toInstant(), rs.getTimestamp("created_at").toInstant(),
-                        rs.getTimestamp("expires_at").toInstant(), null), tenantId, exportId, manager, requesterId);
+                (rs, row) -> {
+                    Instant expiresAt = rs.getTimestamp("expires_at").toInstant();
+                    String status = rs.getString("status");
+                    String objectKey = rs.getString("object_key");
+                    String downloadUrl = null;
+                    Instant now = Instant.now();
+                    if ("ready".equals(status) && expiresAt.isAfter(now) && objectKey != null) {
+                        ExportDownloadSigner signer = downloadSigners.getIfAvailable();
+                        if (signer != null) {
+                            var remaining = java.time.Duration.between(now, expiresAt);
+                            if (remaining.compareTo(java.time.Duration.ofSeconds(1)) >= 0) {
+                                var lifetime = remaining.compareTo(java.time.Duration.ofMinutes(5)) < 0
+                                        ? remaining : java.time.Duration.ofMinutes(5);
+                                downloadUrl = signer.sign(objectKey, lifetime);
+                            }
+                        }
+                    }
+                    return new ExportJob(rs.getObject("id", UUID.class), status,
+                            rs.getString("format_version"), rs.getObject("from_date", LocalDate.class),
+                            rs.getObject("to_date", LocalDate.class), rs.getObject("scope_member_id", UUID.class),
+                            rs.getBoolean("include_all_members"), rs.getInt("row_count"),
+                            rs.getTimestamp("snapshot_at").toInstant(), rs.getTimestamp("created_at").toInstant(),
+                            expiresAt, downloadUrl);
+                }, tenantId, exportId, manager, requesterId);
         if (jobs.isEmpty()) throw notFound();
         return jobs.get(0);
     }
