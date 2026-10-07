@@ -470,3 +470,24 @@ def test_csv_export_snapshot_migration_is_tenant_isolated_and_immutable():
         "check (format_version = 'csv-v1')",
     ):
         assert required in sql
+
+
+def test_csv_export_worker_migration_adds_service_policy_and_fenced_leases():
+    migration = Path("services/core/src/main/resources/db/migration/V44__csv_export_worker_leases.sql")
+    assert migration.exists(), "worker claim and completion require durable fenced leases"
+    sql = migration.read_text(encoding="utf-8").lower()
+    for required in (
+        "add column attempt_count smallint",
+        "add column lease_token uuid",
+        "add column lease_expires_at timestamptz",
+        "add column completed_lease_token uuid",
+        "add column next_attempt_at timestamptz",
+        "export_jobs_worker_service",
+        "export_snapshot_rows_worker_service",
+        "current_setting('app.export_service', true) = 'true'",
+        "export_jobs_worker_claim_idx",
+    ):
+        assert required in sql
+    metadata_migration = Path("services/core/src/main/resources/db/migration/V45__csv_export_job_update_timestamp.sql")
+    assert metadata_migration.exists()
+    assert "add column updated_at timestamptz not null default now()" in metadata_migration.read_text(encoding="utf-8").lower()

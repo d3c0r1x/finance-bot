@@ -93,6 +93,7 @@ class TransactionApiPostgresTest {
     private static final String AI_SERVICE_TOKEN = "integration-ai-service-token";
     private static final String TELEGRAM_SERVICE_TOKEN = "integration-telegram-service-token";
     private static final String MIGRATION_SERVICE_TOKEN = "integration-migration-service-token";
+    private static final String EXPORT_SERVICE_TOKEN = "integration-export-service-token";
     private static final AtomicInteger AI_CALLS = new AtomicInteger();
     private static final AtomicReference<String> LAST_AI_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> AI_DRAFT_RESPONSE = new AtomicReference<>("""
@@ -185,6 +186,7 @@ class TransactionApiPostgresTest {
         properties.add("finance.analytics.price-history.url",
                 () -> "http://127.0.0.1:" + AI_SERVER.getAddress().getPort());
         properties.add("finance.analytics.price-history.service-token", () -> ANALYTICS_SERVICE_TOKEN);
+        properties.add("finance.exports.service-token", () -> EXPORT_SERVICE_TOKEN);
         properties.add("finance.telegram.service-token", () -> TELEGRAM_SERVICE_TOKEN);
         properties.add("finance.migration.service-token", () -> MIGRATION_SERVICE_TOKEN);
         properties.add("finance.imports.parser.url", () -> "http://127.0.0.1:" + AI_SERVER.getAddress().getPort());
@@ -3866,6 +3868,142 @@ class TransactionApiPostgresTest {
                     "SELECT count(*) FROM audit_log WHERE tenant_id=? AND entity_id=? AND action='export.status_viewed'",
                     Integer.class, tenantId, UUID.fromString(exportId)));
         });
+    }
+
+    @Test
+    void exportWorkerClaimRequiresCredentialAndLeasesEachJobOnce() throws Exception {
+        String created = createExportJob(subject, "2026-10-01", "2026-10-02");
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        mvc.perform(post("/internal/v1/exports/claim"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/internal/v1/exports/claim").header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(exportId))
+                .andExpect(jsonPath("$.leaseToken").isString())
+                .andExpect(jsonPath("$.attemptCount").value(1));
+        mvc.perform(post("/internal/v1/exports/claim").header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void exportWorkerReadsOnlyOrderedPagesWithCurrentLease() throws Exception {
+        createExportFixtureTransaction(subject, "worker-page-first", "2026-10-01T10:00:00Z", "worker-page-create-001");
+        createExportFixtureTransaction(subject, "worker-page-second", "2026-10-01T11:00:00Z", "worker-page-create-002");
+        String created = createExportJob(subject, "2026-10-01", "2026-10-02");
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        String claim = mvc.perform(post("/internal/v1/exports/claim")
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String lease = com.jayway.jsonpath.JsonPath.read(claim, "$.leaseToken");
+
+        mvc.perform(get("/internal/v1/exports/{exportId}/rows", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN)
+                        .param("leaseToken", UUID.randomUUID().toString()).param("afterRowNumber", "0").param("limit", "1"))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/internal/v1/exports/{exportId}/rows", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN)
+                        .param("leaseToken", lease).param("afterRowNumber", "0").param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rows.length()").value(1))
+                .andExpect(jsonPath("$.rows[0].description").value("worker-page-first"))
+                .andExpect(jsonPath("$.nextAfterRowNumber").value(1));
+        mvc.perform(get("/internal/v1/exports/{exportId}/rows", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN)
+                        .param("leaseToken", lease).param("afterRowNumber", "1").param("limit", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rows[0].description").value("worker-page-second"))
+                .andExpect(jsonPath("$.nextAfterRowNumber").value(2));
+    }
+
+    @Test
+    void exportWorkerCompleteIsIdempotentAndMakesJobReadyOnlyAfterStorage() throws Exception {
+        String created = createExportJob(subject, "2026-10-01", "2026-10-02");
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        String claim = mvc.perform(post("/internal/v1/exports/claim")
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String lease = com.jayway.jsonpath.JsonPath.read(claim, "$.leaseToken");
+        String result = "{\"leaseToken\":\"" + lease + "\",\"objectKey\":\"tenants/" + tenantId
+                + "/exports/" + exportId + "/" + UUID.randomUUID() + ".csv\",\"byteCount\":3,"
+                + "\"sha256\":\"" + "a".repeat(64) + "\"}";
+        mvc.perform(post("/internal/v1/exports/{exportId}/complete", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN)
+                        .contentType("application/json").content(result))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/internal/v1/exports/{exportId}/complete", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN)
+                        .contentType("application/json").content(result))
+                .andExpect(status().isNoContent());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, exportId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("ready"))
+                .andExpect(jsonPath("$.downloadUrl").value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void exportWorkerRetryAndExpiredLeaseFenceStaleAttempts() throws Exception {
+        String created = createExportJob(subject, "2026-10-01", "2026-10-02");
+        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
+        String first = mvc.perform(post("/internal/v1/exports/claim")
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String firstLease = com.jayway.jsonpath.JsonPath.read(first, "$.leaseToken");
+        mvc.perform(post("/internal/v1/exports/{exportId}/fail", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN).contentType("application/json")
+                        .content("{\"leaseToken\":\"" + firstLease + "\",\"errorCode\":\"storage_unavailable\","
+                                + "\"retryable\":true}"))
+                .andExpect(status().isNoContent());
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("UPDATE export_jobs SET next_attempt_at=now() WHERE tenant_id=? AND id=?", tenantId,
+                    UUID.fromString(exportId));
+        });
+        String retry = mvc.perform(post("/internal/v1/exports/claim")
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.attemptCount").value(2))
+                .andReturn().getResponse().getContentAsString();
+        String retryLease = com.jayway.jsonpath.JsonPath.read(retry, "$.leaseToken");
+        org.junit.jupiter.api.Assertions.assertNotEquals(firstLease, retryLease);
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.export_service', 'true', true)", String.class);
+            jdbc.update("UPDATE export_jobs SET lease_expires_at=now()-interval '1 second' WHERE id=?", UUID.fromString(exportId));
+        });
+        String reclaimed = mvc.perform(post("/internal/v1/exports/claim")
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.attemptCount").value(3))
+                .andReturn().getResponse().getContentAsString();
+        String activeLease = com.jayway.jsonpath.JsonPath.read(reclaimed, "$.leaseToken");
+        org.junit.jupiter.api.Assertions.assertNotEquals(retryLease, activeLease);
+        mvc.perform(post("/internal/v1/exports/{exportId}/complete", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN).contentType("application/json")
+                        .content("{\"leaseToken\":\"" + retryLease + "\",\"objectKey\":\"tenants/" + tenantId
+                                + "/exports/" + exportId + "/" + UUID.randomUUID() + ".csv\",\"byteCount\":3,"
+                                + "\"sha256\":\"" + "b".repeat(64) + "\"}"))
+                .andExpect(status().isConflict());
+        mvc.perform(post("/internal/v1/exports/{exportId}/fail", exportId)
+                        .header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN).contentType("application/json")
+                        .content("{\"leaseToken\":\"" + activeLease + "\",\"errorCode\":\"storage_corrupt\","
+                                + "\"retryable\":false}"))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/internal/v1/exports/claim").header("X-Export-Service-Token", EXPORT_SERVICE_TOKEN))
+                .andExpect(status().isNoContent());
+        mvc.perform(get("/api/v1/tenants/{tenantId}/exports/{exportId}", tenantId, exportId)
+                        .with(jwt().jwt(token -> token.subject(subject))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("failed"));
+    }
+
+    private String createExportJob(String exportSubject, String fromDate, String toDate) throws Exception {
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.export_service', 'true', true)", String.class);
+            jdbc.update("UPDATE export_jobs SET status='expired', lease_token=NULL, lease_expires_at=NULL "
+                    + "WHERE status IN ('queued','processing')");
+        });
+        return mvc.perform(post("/api/v1/tenants/{tenantId}/exports", tenantId)
+                        .with(jwt().jwt(token -> token.subject(exportSubject))).contentType("application/json")
+                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"" + fromDate
+                                + "\",\"toDate\":\"" + toDate + "\"}"))
+                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
     }
 
     private String createExportFixtureTransaction(String transactionSubject, String description,

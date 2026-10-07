@@ -173,6 +173,24 @@ def test_csv_export_request_and_status_contract_are_exposed_to_api_and_bff():
     assert spec["components"]["schemas"]["CreateExport"]["properties"]["formatVersion"]["const"] == "csv-v1"
     assert spec["components"]["schemas"]["ExportJob"]["properties"]["downloadUrl"]["type"] == ["string", "null"]
 
+
+def test_csv_export_worker_contract_is_service_authenticated_and_lease_fenced():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    paths = spec["paths"]
+    claim = paths["/internal/v1/exports/claim"]["post"]
+    assert claim["security"] == []
+    assert any(parameter["name"] == "X-Export-Service-Token" for parameter in claim["parameters"])
+    assert {"200", "204", "401"}.issubset(claim["responses"])
+    rows = paths["/internal/v1/exports/{exportId}/rows"]["get"]
+    assert rows["security"] == []
+    assert {parameter["name"] for parameter in rows["parameters"]} >= {"leaseToken", "afterRowNumber", "limit"}
+    assert rows["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("ExportSnapshotPage")
+    for action in ("complete", "fail"):
+        operation = paths[f"/internal/v1/exports/{{exportId}}/{action}"]["post"]
+        assert operation["security"] == []
+        assert "409" in operation["responses"]
+    assert spec["components"]["securitySchemes"]["financeExportServiceToken"]["name"] == "X-Export-Service-Token"
+
 def test_legacy_goal_history_import_contract_is_internal_and_repeat_safe():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     path = "/internal/v1/migrations/goal-history"

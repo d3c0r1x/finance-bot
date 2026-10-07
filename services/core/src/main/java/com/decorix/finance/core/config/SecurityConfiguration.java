@@ -19,7 +19,7 @@ public class SecurityConfiguration {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
                         .ignoringRequestMatchers("/api/**", "/internal/v1/telegram/**", "/internal/v1/analytics/**",
-                                "/internal/v1/migrations/**")
+                                "/internal/v1/migrations/**", "/internal/v1/exports/**")
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .authorizeHttpRequests(authorize -> authorize
@@ -28,6 +28,7 @@ public class SecurityConfiguration {
                         .requestMatchers("/internal/v1/telegram/**").permitAll()
                         .requestMatchers("/internal/v1/analytics/**").permitAll()
                         .requestMatchers("/internal/v1/migrations/**").permitAll()
+                        .requestMatchers("/internal/v1/exports/**").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .oauth2Login(Customizer.withDefaults())

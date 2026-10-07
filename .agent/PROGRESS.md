@@ -71,19 +71,19 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
 | F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
-| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — Task 1 complete; Task 2a Core request/status implementation and regression | F51 | 66de1a8 (Task 1) |
+| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — Tasks 1/2a complete; Task 2b worker API regression | F51 | 62370cd (Task 2a); 66de1a8 (Task 1) |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F52 — implement the approved Excel-compatible CSV export, exact filters, safe text, and authorized download flow.
-- Status: IN PROGRESS — Task 1 writer committed; Task 2a implemented locally with RLS-protected job/snapshot migrations, repeatable-read snapshot, Core+BFF routes, audit/outbox, OpenAPI contract, and PostgreSQL tests. Worker APIs, Go worker/storage, and Web flow remain.
+- Status: IN PROGRESS — Task 1 and Task 2a committed/pushed (`66de1a8`, `62370cd`). Task 2b worker APIs implemented locally; full regression and commit remain. Go worker/storage and Web flow remain.
 - Acceptance: UTF-8 BOM, semicolon delimiter, Russian legacy column names/order, reproducible filter semantics, text formula-injection protection while numeric cells remain numeric, scoped export job and expiring download; no Telegram entry point.
-- Evidence: F45.4 gates passed and commits `23db236`, `462d758` pushed; no GitHub Actions run for `462d758`. F52 Task 1 `66de1a8` pushed after focused/full Go tests and `go vet`. Task 2a observed RED for missing migration and endpoints; all 4 focused Core/PostgreSQL export tests pass. Full Core `:services:core:check` passes against isolated PostgreSQL. Contract suite: 73 passed, 2 optional PostgreSQL admin/event checks skipped; when attempted with the application DSN, those two require CREATEROLE and a prepared event fixture. OpenAPI + migration focused tests pass. Web: 75 tests + production build pass. Go: full suite + vet pass. `git diff --check` passes.
+- Evidence: F45.4 gates passed and commits `23db236`, `462d758` pushed; no GitHub Actions run for `462d758`. F52 Task 1 `66de1a8` pushed after focused/full Go tests and `go vet`. Task 2a `62370cd` pushed; `gh run list --commit 62370cd` returned no runs. Task 2a observed RED for missing migration and endpoints; all 4 focused Core/PostgreSQL export tests pass. Full Core `:services:core:check` passes against isolated PostgreSQL. Contract suite: 73 passed, 2 optional PostgreSQL admin/event checks skipped; when attempted with the application DSN, those two require CREATEROLE and a prepared event fixture. Web: 75 tests + production build pass. Go: full suite + vet pass. `git diff --check` passes. Task 2b worker API tests now pass 4/4 against PostgreSQL; focused OpenAPI/migration tests pass.
 - Runtime: no real legacy SQLite database exists; its mapping/rehearsal remains unverified under E8. No production export path exists yet.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `66de1a8` before Task 2a commit.
-- Next: stage only reviewed F52 Task 2a files, commit and push; then add RED tests for Task 2b worker APIs.
-- Updated at: 2026-10-07 06:24 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `62370cd`.
+- Next: stage only reviewed Task 2b files, commit and push; then add RED Go worker/storage tests.
+- Updated at: 2026-10-07 06:37 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -93,6 +93,18 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 - Migrations V42/V43 add tenant RLS and immutable snapshots; V43 allows expiry cleanup to delete rows while blocking updates.
 - Focused Core tests: 4/4 passed on isolated PostgreSQL. Full `:services:core:check` passed. Contracts/OpenAPI/migration: 73 passed, 2 optional PostgreSQL admin/event checks skipped. Go suite/vet, Web 75 tests/build, and `git diff --check` passed. Contract tests attempted with app DSN correctly failed on insufficient `CREATEROLE` and absent public outbox fixture; rerun without the optional DB variable produced the reported skips.
 - Plan refinement: split Core request/status (Task 2a) from worker internal API (Task 2b) so each verified slice can commit independently.
+- Task 2a commit/push: `62370cd` (`feat(F52.2a): add scoped export snapshots`). `gh run list --commit 62370cd` returned no workflow runs.
+
+## E4.87 F52 Task 2b worker API — 2026-10-07
+
+- Test-first RED: four PostgreSQL API cases failed on absent worker routes; migration contract failed because lease fields/service RLS were absent.
+- Task 2b adds service-token protected claim, keyset page, complete, and fail routes. Claim uses `SKIP LOCKED`, renewable two-minute leases, a five-attempt cap, persisted backoff, terminal expiry/failure, and stale-token fencing. Complete validates tenant/export object key, byte count, SHA-256, and duplicate acknowledgement.
+- V44 adds lease state, attempts, object metadata, queue index, and service-only RLS. V45 adds status update timestamp. OpenAPI documents each worker route. Core security permits only through to the token-checking controller.
+- Focused Core/PostgreSQL worker tests pass 4/4: credential denial, exclusive claim, lease-scoped pages, idempotent completion, retry/backoff, expired-lease reclaim, stale-attempt rejection, and terminal no-reclaim. Focused OpenAPI/migration tests pass 3/3.
+- First implementation check exposed missing `updated_at`; V45 fixes it without changing an applied migration. A later test exposed pending rows from earlier database tests; queue fixture now expires pre-existing pending work before asserting global queue order.
+- Full `:services:core:check` passed against isolated PostgreSQL. Full contract suite passed 75 tests with 2 optional DB tests skipped because this local DB role lacks `CREATEROLE` and its event fixture; focused worker OpenAPI/migration contracts passed. `git diff --check` passed. Diff review found only the intended F52 worker slice. No Go worker, object storage, or download URL is complete.
+- Task 2a commit/push: `62370cd` (`feat(F52.2a): add scoped export snapshots`). `gh run list --commit 62370cd` returned no workflow runs.
+- Task 2b is the next goal. No worker endpoints or worker-side object storage are claimed complete.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 
