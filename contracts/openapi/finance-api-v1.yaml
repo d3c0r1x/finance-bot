@@ -1199,6 +1199,52 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { description: Telegram identity is temporarily rate-limited }
         '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/notifications/claim:
+    post:
+      operationId: claimTelegramNotificationDeliveries
+      security:
+        - telegramServiceToken: []
+      description: Claims durable notification intents. At most the oldest pending completed goal outcome is attached to a weekly claim. Daily claims have a null goalOutcome; legacy outcomes are never sent. Retries return the outcome already attached to the same intent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationDeliveryClaimRequest' }
+      responses:
+        '200':
+          description: Claimed notification intents and their canonical Core reports
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationDeliveryClaimResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { description: Telegram service credential is not configured }
+  /internal/v1/telegram/notifications/{intentId}/delivery:
+    parameters:
+      - name: intentId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      operationId: acknowledgeTelegramNotificationDelivery
+      security:
+        - telegramServiceToken: []
+      description: A delivered acknowledgement marks an attached goal outcome announced. If Telegram accepts the message but Core does not record the acknowledgement, a later retry can send a duplicate; external exactly-once delivery is not guaranteed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationDeliveryAcknowledgement' }
+      responses:
+        '200':
+          description: Delivery state recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationDeliveryAcknowledgementResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { description: Telegram service credential is not configured }
   /internal/v1/telegram/tenants:
     post:
       operationId: listTelegramActorTenants
@@ -4418,6 +4464,85 @@ components:
         quietHoursStart: { type: [string, 'null'], pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
         quietHoursEnd: { type: [string, 'null'], pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$' }
         version: { type: integer, minimum: 0 }
+    GoalOutcomeMessage:
+      type: object
+      additionalProperties: false
+      required: [id, name, unit, bought, countTarget, spent, monthlyLimit, met, completedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        unit: { type: string, enum: [count, sum] }
+        bought: { type: integer, minimum: 0 }
+        countTarget: { type: integer, minimum: 0 }
+        spent: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,29})\.[0-9]{2}$' }
+        monthlyLimit: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,29})\.[0-9]{2}$' }
+        met: { type: [boolean, 'null'] }
+        completedAt: { type: string, format: date-time }
+      allOf:
+        - if:
+            properties: { unit: { const: count } }
+            required: [unit]
+          then:
+            properties: { countTarget: { minimum: 1 } }
+        - if:
+            properties: { unit: { const: sum } }
+            required: [unit]
+          then:
+            properties: { countTarget: { const: 0 } }
+    NotificationDeliveryClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [limit]
+      properties:
+        limit: { type: integer, minimum: 1, maximum: 20 }
+    NotificationDeliveryClaim:
+      type: object
+      additionalProperties: false
+      required: [intentId, telegramUserId, digestKind, scheduledLocalDate, language, attemptNumber,
+                 leaseToken, report, goalOutcome]
+      properties:
+        intentId: { type: string, format: uuid }
+        telegramUserId: { type: integer, minimum: 1 }
+        digestKind: { type: string, enum: [daily, weekly] }
+        scheduledLocalDate: { type: string, format: date }
+        language: { type: string, enum: [ru, en] }
+        attemptNumber: { type: integer, minimum: 1, maximum: 8 }
+        leaseToken: { type: string, format: uuid }
+        report: { $ref: '#/components/schemas/FinanceReport' }
+        goalOutcome:
+          anyOf:
+            - $ref: '#/components/schemas/GoalOutcomeMessage'
+            - type: 'null'
+      allOf:
+        - if:
+            properties: { digestKind: { const: daily } }
+            required: [digestKind]
+          then:
+            properties: { goalOutcome: { type: 'null' } }
+    NotificationDeliveryClaimResponse:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 20
+          items: { $ref: '#/components/schemas/NotificationDeliveryClaim' }
+    NotificationDeliveryAcknowledgement:
+      type: object
+      additionalProperties: false
+      required: [leaseToken, outcome]
+      properties:
+        leaseToken: { type: string, format: uuid }
+        outcome: { type: string, enum: [delivered, no_data, retryable_failure, permanent_failure] }
+        errorCode: { type: [string, 'null'], pattern: '^[a-z0-9_.-]{1,64}$' }
+        providerMessageId: { type: [string, 'null'], maxLength: 128 }
+    NotificationDeliveryAcknowledgementResponse:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state: { type: string, enum: [pending, delivered, skipped_no_data, failed] }
     MemberProfile:
       type: object
       additionalProperties: false

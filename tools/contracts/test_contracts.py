@@ -68,6 +68,7 @@ def test_openapi_document_and_operation_contracts_are_valid():
         ("/bff/tenants/{tenantId}/transaction-drafts/{draftId}", "delete"),
         ("/bff/tenants/{tenantId}/transaction-drafts/{draftId}/confirm", "post"),
     )
+
     assert all("403" in spec["paths"][path][method]["responses"] for path, method in transaction_write_paths)
     assert "get" in spec["paths"]["/api/v1/tenants/{tenantId}/budgets"]
     assert "put" in spec["paths"]["/api/v1/tenants/{tenantId}/budgets/{budgetKey}"]
@@ -112,6 +113,50 @@ def test_openapi_document_and_operation_contracts_are_valid():
     assert all(money.fullmatch(value) for value in ["0.01", "0.1", "12", "12.50"])
     assert not any(money.fullmatch(value) for value in ["0", "0.00", "-1", "12.345"])
 
+
+def test_weekly_notification_claim_contract_carries_nullable_goal_outcome():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    schemas = spec["components"]["schemas"]
+    claim = schemas["NotificationDeliveryClaim"]
+    outcome = schemas["GoalOutcomeMessage"]
+    outcome_field = claim["properties"]["goalOutcome"]
+    assert outcome_field["anyOf"][1]["type"] == "null"
+    assert claim["properties"]["digestKind"]["enum"] == ["daily", "weekly"]
+    assert claim["allOf"], "daily claim must explicitly forbid a non-null goal outcome"
+    assert "/internal/v1/telegram/notifications/claim" in spec["paths"]
+    assert "/internal/v1/telegram/notifications/{intentId}/delivery" in spec["paths"]
+
+    assert outcome["required"] == ["id", "name", "unit", "bought", "countTarget", "spent",
+                                    "monthlyLimit", "met", "completedAt"]
+    assert outcome["properties"]["unit"]["enum"] == ["count", "sum"]
+    assert "null" in outcome["properties"]["spent"]["type"]
+    assert "null" in outcome["properties"]["monthlyLimit"]["type"]
+    assert "null" in outcome["properties"]["met"]["type"]
+
+    expanded = {**claim, "properties": {
+        **claim["properties"], "goalOutcome": {"anyOf": [outcome, {"type": "null"}]},
+        "report": {"type": "object"},
+    }}
+    validator = Draft202012Validator(expanded, format_checker=FormatChecker())
+    valid = {
+        "intentId": "0199b81a-4a9c-7000-8000-000000000001", "telegramUserId": 42,
+        "digestKind": "weekly", "scheduledLocalDate": "2026-10-11", "language": "en",
+        "attemptNumber": 1, "leaseToken": "0199b81a-4a9c-7000-8000-000000000002", "report": {},
+        "goalOutcome": {
+            "id": "0199b81a-4a9c-7000-8000-000000000003", "name": "Groceries", "unit": "sum",
+            "bought": 2, "countTarget": 0, "spent": None, "monthlyLimit": "5000.00",
+            "met": None, "completedAt": "2026-10-05T12:00:00Z",
+        },
+    }
+    validator.validate(valid)
+    validator.validate({**valid, "digestKind": "daily", "goalOutcome": None})
+    with pytest.raises(ValidationError):
+        validator.validate({**valid, "digestKind": "daily"})
+    for field, value in (("unit", "volume"), ("bought", -1), ("spent", "0"),
+                         ("monthlyLimit", "1.2"), ("met", "true")):
+        malformed = {**valid, "goalOutcome": {**valid["goalOutcome"], field: value}}
+        with pytest.raises(ValidationError):
+            validator.validate(malformed)
 
 def test_transaction_response_contract_accepts_core_budget_threshold_alerts():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))

@@ -135,7 +135,7 @@
   - Include an outcome heading when the Core report has no transactions.
 - [x] **Step 6: Run gateway tests**
   - Expected: all focused tests PASS; existing gateway tests remain PASS.
-- [ ] **Step 7: Commit Task 3**
+- [x] **Step 7: Commit Task 3**
   - Commit client, renderer, worker, and tests as `feat(F46.3): render outcomes in weekly digest`.
 
 ### Task 4: Contract, regression, and F46 completion
@@ -146,26 +146,26 @@
 - Modify: `.agent/PROGRESS.md`
 - Modify: `docs/superpowers/plans/2026-10-07-f46-goal-outcome-delivery.md`
 
-- [ ] **Step 1: Add contract assertions first**
+- [x] **Step 1: Add contract assertions first**
   - Require nullable `goalOutcome` on `NotificationDeliveryClaim`.
   - Validate required goal fields, enum units, nullable exact money, nullable `met`, and forbid a non-null goal outcome on daily claims.
-- [ ] **Step 2: Run contract tests and observe RED**
+- [x] **Step 2: Run contract tests and observe RED**
   - Run: `.venv\Scripts\python.exe -m pytest tools/contracts/test_contracts.py -q -p no:cacheprovider`
   - Expected: missing `goalOutcome` schema/constraints fail.
-- [ ] **Step 3: Update OpenAPI schema**
+- [x] **Step 3: Update OpenAPI schema**
   - Document the claim field, weekly-only rule, successful acknowledgement marker, and duplicate risk after lost acknowledgement.
-- [ ] **Step 4: Run all regression gates**
+- [x] **Step 4: Run all regression gates**
   - Core: `:services:core:check` with isolated PostgreSQL.
   - Telegram gateway: full pytest suite.
   - Contracts/migrations: `test_contracts.py` and `test_core_migration.py`.
   - Go: `go test ./... -count=1` and `go vet ./...`.
   - Web: full test suite and production build.
   - `git diff --check`.
-- [ ] **Step 5: Review diff and commit contract/progress**
+- [x] **Step 5: Review diff and commit contract/progress**
   - Stage only F46 files; preserve unrelated untracked user data.
   - Commit as `feat(F46): deliver goal outcome in weekly digest`.
   - Record actual test counts, commit SHA, and remote CI status in `.agent/PROGRESS.md`.
-- [ ] **Step 6: Mark F46 complete only after all gates pass**
+- [x] **Step 6: Mark F46 complete only after all gates pass**
   - Confirm retry/terminal state semantics, localized rendering, contract, and external-delivery limitation match the approved spec.
 
 ## Execution Method

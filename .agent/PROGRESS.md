@@ -70,7 +70,7 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 | F44.2 | Member-scoped preference, accepted goal, Core API/BFF | COMPLETE — `88f868b`; combined payload cap correction `e4d0d61`; isolated PostgreSQL, Core and contract gates pass | F44.1 | e4d0d61 |
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
 | F45 | Goal progress, purchase note, completion, history, next candidate | IN PROGRESS — F45.1–F45.3 committed; legacy history import through J remains | F44 | afcde2d, 85c30d1 |
-| F46 | Deliver a completed goal outcome in the weekly Telegram digest | WAITING_PLAN_APPROVAL — approved design `e236920`; implementation plan drafted | F45 lifecycle | pending |
+| F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — Core claim/ack lifecycle, Telegram rendering, and OpenAPI contract verified | F45 lifecycle | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
@@ -1382,7 +1382,7 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 
 - Test-first RED: two PostgreSQL acceptance tests failed because `goalOutcome` was absent. Migration test failed because V41 was absent.
 - Added V41 link with one-outcome-per-intent unique index and pending-completed lookup index. Weekly claims attach oldest unannounced completed outcome transactionally; retries return same attached snapshot; daily claims remain null.
-- GREEN: focused Core PostgreSQL tests 2/2 pass against isolated `finance_test_codex_20261004`; migration checks 16 passed, 2 optional skips; `git diff --check` pending final newline cleanup.
+- GREEN: focused Core PostgreSQL tests 2/2 pass against isolated `finance_test_codex_20261004`; migration checks 16 passed, 2 optional skips; `git diff --check` passed.
 - Task 1 commit/push: `21576a1` (`feat(F46.1): attach outcomes to weekly claims`). Task 2 PostgreSQL lifecycle tests observed RED, then passed 4/4 focused methods after transactional delivered/retry/terminal/expired-lease transitions. Next: commit Task 2, then add Telegram validation/rendering tests and observe RED.
 
 ## E4.83 F46.2 delivery acknowledgement lifecycle — 2026-10-07
@@ -1390,11 +1390,17 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 - Test-first RED: delivered outcome did not mark announcement, terminal failures retained association, and exhausted lease hid outcome from next intent. Retry retention already passed.
 - Core now marks delivered outcome once and clears link; preserves link on retry; releases it on no_data, permanent/exhausted failures. Expired exhausted leases release linked outcomes in the claim transaction.
 - GREEN: six focused Core notification PostgreSQL tests passed, covering claim and acknowledgement lifecycle.
-- Task 2 commit/push: `747e792` (`feat(F46.2): mark goal outcome delivery`). Task 3 RED covered renderer signature, client payload validation, and empty-report worker behavior. GREEN: full Telegram gateway suite 101 passed. Next: commit Task 3, then add OpenAPI contract tests first.
+- Task 2 commit/push: `747e792` (`feat(F46.2): mark goal outcome delivery`). Task 3 RED covered renderer signature, client payload validation, and empty-report worker behavior. GREEN: full Telegram gateway suite 101 passed. Task 3 commit/push: `f7ef0cd` (`feat(F46.3): render outcomes in weekly digest`).
 
 ## E4.84 F46.3 weekly digest rendering — 2026-10-07
 
 - Test-first RED: renderer lacked outcome argument; client accepted malformed/daily payloads; worker suppressed outcome-only digest.
 - Core client validates UUID, unit, counts, money, nullable Boolean, completion timestamp, and weekly-only rule. Digest renders RU/EN count and sum outcomes; unknown amounts stay explicit. Worker sends outcome-only digest and does not record local success if Core acknowledgement is lost.
 - GREEN: focused three-file suite 53 passed; full Telegram gateway suite 101 passed.
-- Task 3 commit pending. Next: write OpenAPI assertions for nullable weekly-only outcome, then observe RED.
+- Task 3 commit/push: `f7ef0cd` (`feat(F46.3): render outcomes in weekly digest`). Task 4 OpenAPI test observed RED on missing schema, then passed. Final GREEN: Core check; gateway 101; contracts/migrations 70 passed, 2 optional skips; Go tests/vet; Web 75 tests/build; diff check. F46 complete pending final delivery commit.
+
+## E4.85 F46 contract and full regression — 2026-10-07
+
+- OpenAPI RED: `NotificationDeliveryClaim` did not exist. Added claim, outcome, acknowledgement schemas and internal routes with weekly-only eligibility, delivered marker semantics, and lost-ack duplicate risk.
+- Full GREEN: Core `:services:core:check`; Telegram gateway 101 passed; contracts/migrations 70 passed, 2 optional skips; Go `test ./... -count=1` and `go vet ./...`; Web 75 passed and production build; `git diff --check`.
+- Task 4 commit pending. F46 acceptance met; final commit and remote status remain.
