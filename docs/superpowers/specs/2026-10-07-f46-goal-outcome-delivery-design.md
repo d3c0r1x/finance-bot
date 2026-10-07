@@ -20,7 +20,7 @@ Tell the member once when a newly completed goal's outcome is included in a week
 - Retryable and expired leases keep the outcome associated with the same weekly intent, so retries contain the same outcome.
 - A permanent terminal failure releases the association. The outcome stays unannounced and may be attached to a later weekly intent.
 - If Telegram accepted the message but the acknowledgement is lost or times out, Core cannot know that delivery happened. Lease recovery may send a duplicate. The system provides durable retry and eventual acknowledgement, not exactly-once external delivery.
-- If weekly notifications are disabled or the member has no Telegram identity, no weekly claim is available and the outcome remains visible in Web and unannounced until delivery becomes possible.
+- If weekly notifications are disabled, Core creates no future weekly intent; an intent already queued follows existing delivery rules. Without a Telegram identity, claims wait until the member links Telegram. Outcomes remain visible in Web and unannounced until successful delivery.
 
 ## Storage and bounds
 

@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 02:48, Europe/Moscow.
+Updated: 2026-10-07 05:01, Europe/Moscow.
 
 ## Global plan
 
@@ -69,19 +69,20 @@ Updated: 2026-10-07 02:48, Europe/Moscow.
 | F44.1 | Deterministic Go product/group candidates and internal service API | COMPLETE — `959c750`; nullable-amount correction `d8591d3`; Go/contract gates pass | F44 | d8591d3 |
 | F44.2 | Member-scoped preference, accepted goal, Core API/BFF | COMPLETE — `88f868b`; combined payload cap correction `e4d0d61`; isolated PostgreSQL, Core and contract gates pass | F44.1 | e4d0d61 |
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
-| F45 | Goal progress, purchase note, completion, history, next candidate | IN PROGRESS — lifecycle contract and acceptance tests are next; no F45 code claimed | F44 | pending |
+| F45 | Goal progress, purchase note, completion, history, next candidate | IN PROGRESS — F45.1–F45.3 committed; legacy history import through J remains | F44 | afcde2d, 85c30d1 |
+| F46 | Deliver a completed goal outcome in the weekly Telegram digest | WAITING_PLAN_APPROVAL — approved design `e236920`; implementation plan drafted | F45 lifecycle | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F45.2 — Core member-scoped progress, accepted group membership snapshot, durable completion/history.
-- Status: ANALYSIS — F45.1 Go progress endpoint is GREEN and pushed as `37f84ba`; now add isolated PostgreSQL/API acceptance tests and observe RED before Core changes.
-- Acceptance: progress uses only confirmed member-owned receipt facts in the immutable 30-day window; purchase updates are visible after refresh; closing an expired goal is idempotent; cancellation never creates a completed outcome; archive is retained independently of active goal; legacy history retention is accounted for; candidates remain visible after close/cancel.
-- Changed files: F44 correction and F45.1 Go calculator/API, OpenAPI contract, tests, `.agent/specs/F45-goal-lifecycle.md`, and `docs/superpowers/plans/2026-10-07-f45-goal-lifecycle.md` in `37f84ba`.
-- User choices: maintain F01–F60 scope; personal MVP first; V2 deferred; preserve 30-day goal promise and one active goal per member.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `37f84ba`; unrelated user-owned untracked files remain untouched.
-- Runtime: public HTTPS, persistent server and installed Android MVP remain unverified; no deployment or network configuration was changed.
-- Updated at: 2026-10-07 02:48 Europe/Moscow.
+- ID and outcome: F46 — attach one pending completed goal outcome to a weekly Telegram digest, mark announced only after confirmed delivery.
+- Status: WAITING_PLAN_APPROVAL — design was approved by user; implementation plan is saved at `docs/superpowers/plans/2026-10-07-f46-goal-outcome-delivery.md`; no F46 code changed.
+- Acceptance: only oldest unannounced `origin='completed'` outcome attaches to one weekly intent; retry keeps the association; delivery success sets `announced_at`; terminal failure releases outcome; empty financial report still sends outcome; localized RU/EN message; lost acknowledgement may duplicate externally.
+- Changed files: design `docs/superpowers/specs/2026-10-07-f46-goal-outcome-delivery-design.md` committed as `e236920`; execution plan is uncommitted for user review. Existing user-owned untracked files remain untouched.
+- User choice: add result inside weekly digest, not a separate immediate message.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `e236920`.
+- Runtime: no matching local server listener; Docker command unavailable; repository has no Wrangler/Cloudflare deployment config. Public HTTPS and persistent server remain unverified.
+- Updated at: 2026-10-07 05:01 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -1368,3 +1369,11 @@ Updated: 2026-10-07 02:48, Europe/Moscow.
 - Next: push verified F45.2/F45.3 commits and move to the J migration ingestion acceptance; after that close F45, then continue F46 and remaining V1 MVP/deployment gates.
 
 - Remote check: commits fcde2d/85c30d1/39a2b8 are pushed; gh run list --commit e39a2b8 returned no runs, so GitHub CI did not start. The migration mapping now explicitly requires idempotent import of every dvice:goal_history row into goal_outcomes(origin='legacy').
+
+## E4.81 F46 approved delivery design and execution plan — 2026-10-07 05:01 MSK
+
+- User approved the F46 design: send outcome inside weekly Telegram digest, mark only after successful Telegram acknowledgement. Design is `docs/superpowers/specs/2026-10-07-f46-goal-outcome-delivery-design.md` (`e236920`). Clarified existing queued weekly-intent behavior; disabled schedules create no future intents.
+- Wrote and self-reviewed `docs/superpowers/plans/2026-10-07-f46-goal-outcome-delivery.md`. Plan covers PostgreSQL association/claim, acknowledgement lifecycle, Telegram validation/rendering, OpenAPI, RED/GREEN commands, and final regression.
+- Ruling: begin inline implementation without another plan-review prompt — user approved F46 design and said “Продолжай”; user-owned `CODEX_AUTONOMOUS.md` says not to ask before moving to the next goal, and user already prescribed strict TDD. Cost if wrong: task decomposition may need a later correction.
+- No F46 product code changed yet. Existing user-owned untracked files remain untouched. Branch `feat/saas-rewrite`; current HEAD before plan commit `e236920`.
+- Next: commit plan/progress, then write Task 1 Core/PostgreSQL claim tests and observe RED.
