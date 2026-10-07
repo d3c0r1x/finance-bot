@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 07:22, Europe/Moscow.
+Updated: 2026-10-07 07:34, Europe/Moscow.
 
 ## Global plan
 
@@ -72,18 +72,18 @@ Updated: 2026-10-07 07:22, Europe/Moscow.
 | F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
 | F52 | Excel-compatible CSV export, filters, safe text, scoped download | CODE COMPLETE — final local regression passed; SeaweedFS runtime integration NOT_RUN because Docker is unavailable | F51 | 0f50266 (polling-test stabilization); dd0b35f (Task 4); 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
+| F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F52 — implement the approved Excel-compatible CSV export, exact filters, safe text, and authorized download flow.
-- Status: CODE COMPLETE — Tasks 1, 2a, 2b, 3a, 3b, and 4 are committed/pushed (`66de1a8`, `62370cd`, `e8ec4af`, `7e2088d`, `016a6a0`, `dd0b35f`, `0f50266`). Final local gates pass. SeaweedFS runtime round-trip remains NOT_RUN because Docker is unavailable; this is a deployment proof, not code acceptance.
-- Acceptance: UTF-8 BOM, semicolon delimiter, Russian legacy column names/order, reproducible filter semantics, text formula-injection protection while numeric cells remain numeric, scoped export job and expiring download; no Telegram entry point.
-- Evidence: F52 Task 1 `66de1a8`, Task 2a `62370cd`, Task 2b `e8ec4af`, Task 3a `7e2088d`, Task 3b `016a6a0`, and Task 4 `dd0b35f` pushed. GitHub returned no workflows for these SHAs. Tasks 2a/2b, 3a, and 3b observed RED then gates passed. Final Core `:services:core:check --rerun-tasks` passed against isolated PostgreSQL; Go `test ./... -count=1` and `go vet ./...` passed; contracts/migrations 76 passed, 2 optional DB skips; Web 81 passed and production build passed; `git diff --check` passed. SeaweedFS private round-trip/anonymous-read integration is present but NOT_RUN because Docker and an S3 endpoint are unavailable. Ready exports receive a <=5 minute signed URL capped by job expiry; signatures never enter audit data. GitHub returned no workflow runs for F52 SHAs.
-- Runtime: no production S3 endpoint is configured; live object delivery is not verified. No real legacy SQLite database exists; migration rehearsal remains under E8.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `0f50266` before final progress commit.
-- Next: start F53 panel parity after rechecking its legacy inventory and current Web routes.
-- Updated at: 2026-10-07 07:22 Europe/Moscow.
+- ID and outcome: F53 — finish Web equivalents for the legacy desktop panel and restore shared navigation/refresh flows.
+- Status: GREEN — implementation, full Web regression, production build, and diff check passed.
+- Acceptance: eight tab equivalents, authorized member list and selected-member transaction transition, self profile link, shared refresh button/F5, active route state, RU/EN labels; Core enforces scope.
+- Evidence: Legacy inventory: `panel_ui/window.py`, `users.py`, and `transactions.py`. Focused tests first failed for missing `MembersPanel`, route, and refresh control; after implementation focused tests passed. Full Web regression: 13 files / 87 tests passed; `pnpm --dir apps/web build` passed TypeScript and Vite production build; `git diff --check` passed. Members API remains authoritative for scope; only self profile editing is linked. Plan: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, pending F53 commit.
+- Next: commit/push F53, then inspect F54 acceptance and write its tests before implementation.
+- Updated at: 2026-10-07 07:34 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -1473,3 +1473,10 @@ Updated: 2026-10-07 07:22, Europe/Moscow.
 - OpenAPI RED: `NotificationDeliveryClaim` did not exist. Added claim, outcome, acknowledgement schemas and internal routes with weekly-only eligibility, delivered marker semantics, and lost-ack duplicate risk.
 - Full GREEN: Core `:services:core:check`; Telegram gateway 101 passed; contracts/migrations 70 passed, 2 optional skips; Go `test ./... -count=1` and `go vet ./...`; Web 75 passed and production build; `git diff --check`.
 - Final commit/push: `9455567` (`feat(F46): deliver goal outcome in weekly digest`). `gh run list --commit 9455567` returned no runs; remote CI did not start. F46 complete.
+
+## E4.92 F53 Web panel parity — 2026-10-07
+
+- Test-first RED: new member panel tests failed because the component was missing; App tests failed because member navigation, active route, and shared refresh controls were absent.
+- Added the authorized members page, localized role labels, own-profile link, manager-filtered transaction link, and scope-safe member transaction query. Restored a global refresh action and F5 query invalidation, route-aware navigation, and responsive member cards.
+- A full regression caught duplicate accessible names between the global refresh and existing error retry buttons; clarified the global action label. Final GREEN: Web 13 files / 87 tests, TypeScript/Vite production build, `git diff --check`.
+- F53 plan: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`. Commit/push pending.

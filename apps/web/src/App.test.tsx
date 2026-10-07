@@ -1077,4 +1077,58 @@ describe('web onboarding and transaction flow', () => {
     expect(screen.queryByRole('button', { name: 'Повторить Coffee' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Отменить Coffee' })).not.toBeInTheDocument();
   });
+
+  it('opens selected member transactions and marks current route active', async () => {
+    const transactionUrls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/bff/session') return json({ authenticated: true, displayName: 'Alex' });
+      if (url === '/bff/me/tenants') return json([tenant]);
+      if (url.endsWith('/summary')) return json(dashboardSummary());
+      if (url.endsWith('/profile/me') || url.endsWith('/notification-preferences') || url.endsWith('/budgets')) return json({});
+      if (url.endsWith('/debts')) return json({ items: [] });
+      if (url.endsWith('/members')) return json([
+        { userId: tenant.userId, displayName: 'Alex', role: 'owner' },
+        { userId: 'member-user-id', displayName: 'Taylor', role: 'member' },
+      ]);
+      if (url.includes('/transactions')) { transactionUrls.push(url); return json({ items: [], nextCursor: null }); }
+      throw new Error(`Unexpected request ${url}`);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/family']}><QueryClientProvider client={client}><App /></QueryClientProvider></MemoryRouter>);
+
+    for (const label of ['Пространство', 'Операции', 'Чеки', 'Бюджеты', 'Пользователи', 'Товары', 'Отчёты', 'Экспорт CSV']) {
+      expect(await screen.findByRole('link', { name: label })).toBeInTheDocument();
+    }
+    await user.click(await screen.findByRole('link', { name: 'Показать операции: Taylor' }));
+    await waitFor(() => expect(transactionUrls.at(-1)).toContain('memberId=member-user-id'));
+    expect(screen.getByRole('link', { name: 'Операции' })).toHaveClass('active');
+  });
+
+  it('refreshes queries by button and F5 without browser reload', async () => {
+    let summaryCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/bff/session') return json({ authenticated: true, displayName: 'Alex' });
+      if (url === '/bff/me/tenants') return json([tenant]);
+      if (url.endsWith('/summary')) { summaryCalls += 1; return json(dashboardSummary()); }
+      if (url.endsWith('/profile/me') || url.endsWith('/notification-preferences') || url.endsWith('/budgets')) return json({});
+      if (url.endsWith('/debts')) return json({ items: [] });
+      if (url.includes('/transactions')) return json({ items: [], nextCursor: null });
+      throw new Error(`Unexpected request ${url}`);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/dashboard']}><QueryClientProvider client={client}><App /></QueryClientProvider></MemoryRouter>);
+
+    const refresh = await screen.findByRole('button', { name: 'Обновить данные' });
+    await waitFor(() => expect(summaryCalls).toBe(1));
+    await user.click(refresh);
+    await waitFor(() => expect(summaryCalls).toBe(2));
+    const event = new KeyboardEvent('keydown', { key: 'F5', bubbles: true, cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    await waitFor(() => expect(summaryCalls).toBe(3));
+  });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type BudgetAlert, type BudgetOverview, type BudgetProposal, type CreateTransaction, type UpdateTransaction, type DashboardSummary as Summary,
   type FinanceReport, type MemberProfile, type NotificationPreferences, type TelegramLinkCode, type TenantMember,
@@ -14,12 +14,13 @@ import { ImportsPanel } from './ImportsPanel';
 import { AdviceAnalyticsPanel } from './AdviceAnalyticsPanel';
 import { GoalsPanel } from './GoalsPanel';
 import { ExportsPanel } from './ExportsPanel';
+import { MembersPanel } from './MembersPanel';
 import './styles.css';
 
 const copy = {
   ru: {
     brand: 'Finance', login: 'Войти', loginTitle: 'Финансы без шума', loginText: 'Один понятный обзор личных и семейных денег.',
-    workspace: 'Пространство', operations: 'Операции', receipts: 'Чеки', products: 'Товары', shopping: 'Покупки', inflation: 'Динамика цен', recurring: 'Регулярные', imports: 'Выписки', logout: 'Выйти', onboarding: 'Создать пространство',
+    workspace: 'Пространство', operations: 'Операции', receipts: 'Чеки', products: 'Товары', shopping: 'Покупки', inflation: 'Динамика цен', recurring: 'Регулярные', imports: 'Выписки', family: 'Пользователи', refreshData: 'Обновить данные', logout: 'Выйти', onboarding: 'Создать пространство',
     repeatSetup: 'Пройти настройку заново',
     onboardingText: 'Начните с личного пространства. Семью можно добавить позже.', name: 'Название пространства',
     timezone: 'Часовой пояс', create: 'Продолжить', startSetup: 'Начать настройку', next: 'Далее', back: 'Назад',
@@ -88,7 +89,7 @@ const copy = {
   },
   en: {
     brand: 'Finance', login: 'Sign in', loginTitle: 'Money, clearly', loginText: 'One clear view of your personal and family finances.',
-    workspace: 'Workspace', operations: 'Transactions', receipts: 'Receipts', products: 'Products', shopping: 'Shopping', inflation: 'Price trend', recurring: 'Recurring', imports: 'Statements', logout: 'Sign out', onboarding: 'Create a workspace',
+    workspace: 'Workspace', operations: 'Transactions', receipts: 'Receipts', products: 'Products', shopping: 'Shopping', inflation: 'Price trend', recurring: 'Recurring', imports: 'Statements', family: 'Members', refreshData: 'Refresh', logout: 'Sign out', onboarding: 'Create a workspace',
     repeatSetup: 'Run setup again',
     onboardingText: 'Start with a personal workspace. Add family later.', name: 'Workspace name',
     timezone: 'Time zone', create: 'Continue', startSetup: 'Start setup', next: 'Next', back: 'Back',
@@ -216,6 +217,7 @@ export function App() {
   const [language, setLanguage] = useState<Language>('ru');
   const t = copy[language];
   const queryClient = useQueryClient();
+  const location = useLocation();
   const navigate = useNavigate();
   const [tenantId, setTenantId] = useState('');
   const [search, setSearch] = useState('');
@@ -248,6 +250,25 @@ export function App() {
   const [telegramLinkCode, setTelegramLinkCode] = useState<TelegramLinkCode | null>(null);
   const [repeatSetup, setRepeatSetup] = useState(false);
 
+  useEffect(() => {
+    if (location.pathname !== '/transactions') return;
+    const memberId = new URLSearchParams(location.search).get('memberId');
+    if (memberId) {
+      setMemberFilter(memberId);
+      setShowMemberFilter(true);
+    }
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    const refreshOnF5 = (event: KeyboardEvent) => {
+      if (event.key !== 'F5') return;
+      event.preventDefault();
+      void queryClient.invalidateQueries();
+    };
+    window.addEventListener('keydown', refreshOnF5);
+    return () => window.removeEventListener('keydown', refreshOnF5);
+  }, [queryClient]);
+
   const offerIncomeBudget = async (targetTenantId: string, income: number) => {
     setShowBudgetSetup(true);
     setBudgetSetupPending(true);
@@ -269,6 +290,7 @@ export function App() {
   const activeTenant = tenants.data?.find((item) => item.tenantId === tenantId) ?? tenants.data?.[0];
   const canWriteTransactions = activeTenant?.role !== 'viewer';
   const canManageMembers = activeTenant?.role === 'owner' || activeTenant?.role === 'admin';
+  const navClass = (path: string) => location.pathname === path ? 'nav-link active' : 'nav-link';
   useEffect(() => {
     if (!dateTouched && activeTenant) setOccurredOn(todayInput(activeTenant.timezone));
   }, [activeTenant?.tenantId, activeTenant?.timezone, dateTouched]);
@@ -487,20 +509,21 @@ export function App() {
     <aside className="sidebar">
       <Brand t={t} language={language} setLanguage={setLanguage} />
       <nav aria-label={t.workspace}>
-        <Link className="nav-link active" to="/dashboard">{t.workspace}</Link>
-        <Link className="nav-link" to="/transactions">{t.operations}</Link>
-        <Link className="nav-link" to="/receipts">{t.receipts}</Link>
-        <Link className="nav-link" to="/products">{t.products}</Link>
-        <Link className="nav-link" to="/shopping">{t.shopping}</Link>
-        <Link className="nav-link" to="/inflation">{t.inflation}</Link>
-        <Link className="nav-link" to="/recurring">{t.recurring}</Link>
-        <Link className="nav-link" to="/imports">{t.imports}</Link>
-        <Link className="nav-link" to="/budgets">{t.budgets}</Link>
-        <Link className="nav-link" to="/debts">{t.debts}</Link>
-        <Link className="nav-link" to="/reports">{t.reports}</Link>
-        <Link className="nav-link" to="/goals">{t.goals}</Link>
-        <Link className="nav-link" to="/exports">{t.exports}</Link>
-        <Link className="nav-link" to="/profile">{t.profile}</Link>
+        <Link className={navClass('/dashboard')} to="/dashboard">{t.workspace}</Link>
+        <Link className={navClass('/transactions')} to="/transactions">{t.operations}</Link>
+        <Link className={navClass('/receipts')} to="/receipts">{t.receipts}</Link>
+        <Link className={navClass('/products')} to="/products">{t.products}</Link>
+        <Link className={navClass('/shopping')} to="/shopping">{t.shopping}</Link>
+        <Link className={navClass('/inflation')} to="/inflation">{t.inflation}</Link>
+        <Link className={navClass('/recurring')} to="/recurring">{t.recurring}</Link>
+        <Link className={navClass('/imports')} to="/imports">{t.imports}</Link>
+        <Link className={navClass('/budgets')} to="/budgets">{t.budgets}</Link>
+        <Link className={navClass('/debts')} to="/debts">{t.debts}</Link>
+        <Link className={navClass('/reports')} to="/reports">{t.reports}</Link>
+        <Link className={navClass('/goals')} to="/goals">{t.goals}</Link>
+        <Link className={navClass('/exports')} to="/exports">{t.exports}</Link>
+        <Link className={navClass('/family')} to="/family">{t.family}</Link>
+        <Link className={navClass('/profile')} to="/profile">{t.profile}</Link>
       </nav>
       <div className="sidebar-footer">
         <span className="user-avatar" aria-hidden="true">{session.data.displayName.slice(0, 1) || 'F'}</span>
@@ -514,11 +537,14 @@ export function App() {
         <header className="page-header">
           <div><span className="eyebrow">{t.workspace}</span><h1>{activeTenant.displayName}</h1>
             <p>{t.transactionText}</p></div>
-          {tenants.data && tenants.data.length > 1 && <label className="tenant-select">{t.workspace}
-            <select value={activeTenant.tenantId} onChange={(event) => setTenantId(event.target.value)}>
-              {tenants.data.map((tenant) => <option key={tenant.tenantId} value={tenant.tenantId}>{tenant.displayName}</option>)}
-            </select>
-          </label>}
+          <div className="page-header-actions">
+            {tenants.data && tenants.data.length > 1 && <label className="tenant-select">{t.workspace}
+              <select value={activeTenant.tenantId} onChange={(event) => setTenantId(event.target.value)}>
+                {tenants.data.map((tenant) => <option key={tenant.tenantId} value={tenant.tenantId}>{tenant.displayName}</option>)}
+              </select>
+            </label>}
+            <button className="button button-quiet" onClick={() => void queryClient.invalidateQueries()}>{t.refreshData}</button>
+          </div>
         </header>
         <Routes>
           <Route path="/profile" element={repeatSetup
@@ -566,6 +592,8 @@ export function App() {
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
           <Route path="/goals" element={<GoalsPanel tenantId={activeTenant.tenantId}
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
+          <Route path="/family" element={<MembersPanel tenantId={activeTenant.tenantId}
+            role={activeTenant.role} currentUserId={activeTenant.userId} language={language} />} />
           <Route path="/exports" element={<ExportsPanel tenantId={activeTenant.tenantId}
             role={activeTenant.role} language={language} timezone={activeTenant.timezone} />} />
           <Route path="/receipts" element={<ReceiptsPanel tenantId={activeTenant.tenantId}
