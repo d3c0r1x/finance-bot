@@ -1358,3 +1358,11 @@ Updated: 2026-10-07 02:48, Europe/Moscow.
 - GREEN: full `:services:core:check` against isolated PostgreSQL; Go `test ./... -count=1` and `go vet ./...`; contracts/migration tests 68 passed, 2 optional skips; `git diff --check`.
 - Commit `afcde2d` (`feat(F45.2): persist goal progress outcomes`). The new table/read path preserves all legacy-origin rows, but the global J migration importer is not implemented; this remains an open F45 acceptance item and is recorded in the execution plan.
 - Next: commit the Web F45.3 slice, then implement the missing J migration ingestion before marking F45 complete.
+
+## E4.80 F45.3 Web progress and history — 2026-10-07
+
+- Web now shows active count/spend progress, clearly marks unknown sums, displays completed outcomes, and exposes next candidates after closure. Viewer controls remain read-only. Confirming a receipt invalidates the goal query so progress refreshes from the new confirmed facts.
+- TDD: receipt confirmation/cache test first failed because `goals` was not invalidated; added the invalidation and the test passed. Added component coverage for unknown sums and outcomes, then verified candidates return alongside completed history.
+- GREEN: Web tests 75/75; TypeScript/Vite production build; Core `:services:core:check` with isolated PostgreSQL; Go tests/vet; contracts/migrations 68 passed, 2 optional skips; `git diff --check`.
+- Commit `85c30d1` (`feat(F45.3): show goal progress and history`). F45.3 presentation slice is complete. Overall F45 remains open for the legacy-history ingestion path assigned to global J; this is not hidden by the completed UI work.
+- Next: push verified F45.2/F45.3 commits and move to the J migration ingestion acceptance; after that close F45, then continue F46 and remaining V1 MVP/deployment gates.
