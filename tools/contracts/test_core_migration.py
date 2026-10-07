@@ -437,10 +437,15 @@ def test_persisted_core_events_match_public_json_schema():
     with psycopg.connect(dsn) as conn:
         if conn.execute("SELECT to_regclass('public.outbox_events')").fetchone()[0] is None:
             pytest.skip("Java core integration tests have not installed the public schema")
-        events = conn.execute("SELECT payload FROM public.outbox_events ORDER BY created_at DESC").fetchall()
-    assert events, "the Java API integration test should have emitted a transaction event"
-    for (event,) in events:
-        jsonschema.validate(event, schemas[event["aggregate_type"]])
+        events = conn.execute(
+            "SELECT aggregate_type, payload FROM public.outbox_events "
+            "WHERE aggregate_type = ANY(%s) ORDER BY created_at DESC",
+            (list(schemas),),
+        ).fetchall()
+    assert any(aggregate_type == "transaction" for aggregate_type, _event in events), \
+        "the Java API integration test should have emitted a transaction event"
+    for aggregate_type, event in events:
+        jsonschema.validate(event, schemas[aggregate_type])
 
 
 def test_csv_export_snapshot_migration_is_tenant_isolated_and_immutable():

@@ -74,18 +74,20 @@ Updated: 2026-10-07 08:08, Europe/Moscow.
 | F52 | Excel-compatible CSV export, filters, safe text, scoped download | CODE COMPLETE — final local regression passed; SeaweedFS runtime integration NOT_RUN because Docker is unavailable | F51 | 0f50266 (polling-test stabilization); dd0b35f (Task 4); 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
 | F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | 5adeccf |
 | F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | 2a6cf21 |
-| F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE LOCALLY — ordered installed-model selection, safe unavailable response, operator instructions, and no remote inventory enumeration including health; commit/push pending | F54 | pending |
+| F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | LOCALLY GREEN, PUSHED — F55 code at `5df8b06`; 3/4 workflows passed. Core workflow exposed an unrelated event-contract test defect; local correction passed, follow-up push pending | F54 | 5df8b06 |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F55 — safe local model selection, explicit cloud opt-in, no-Ollama usability, and deployment model management.
-- Status: VERIFIED LOCALLY — implementation and complete regression pass; commit/push pending.
+- Status: REGRESSION — F55 code is locally green and pushed. One GitHub Core job exposed a failing DB-backed contract test that scanned internal events as public contracts; corrected and locally verified, follow-up commit/push pending.
 - Acceptance: local self-hosted default; resolve configured model then exact installed preferences only; no remote fallback; deterministic/manual finance flows remain available without Ollama; Vision stays allowlisted; server-side model management is documented.
 - Evidence: plan `docs/superpowers/plans/2026-10-07-f55-local-ai-models.md`; operator guide `docs/AI_MODELS.md`. Test-first RED caught 200 for a missing local model, direct configured embedding selection, repeated outage inventory calls, and remote health enumeration. Fixes use bounded/cached inventory, exact installed preference resolution, safe 503 when no local text provider exists, and health status `REMOTE_MODEL_STATUS_UNCHECKED` without remote requests. `OLLAMA_VISION_MODELS` remains allowlisted; local allowlisted models must be installed. No live cloud requests or model-quality claims.
 - GREEN: Python contracts/migration/intelligence/Telegram 296 passed, 1 optional skip; Core `:services:core:check --rerun-tasks`; Go `test ./... -count=1` and `go vet ./...`; Web 92 tests and TypeScript/Vite production build; `git diff --check`. Go 1.27.1 was downloaded to `%TEMP%`, SHA-256 verified against go.dev, and used without changing system PATH/install.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, current code based on `2a6cf21`.
-- Next: commit/push F55 and progress; inspect GitHub workflow status.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `5df8b06017dcc92a5bd5ac8368958d8423038165`; commit pushed to `origin/feat/saas-rewrite`.
+- GitHub runs for `5df8b06`: Python/contracts/Go success; repository tests success; receipt storage integration success; Core/PostgreSQL failed only at `test_persisted_core_events_match_public_json_schema` with `KeyError: aggregate_type` after scanning internal `export`/`goal` events. Core Gradle check itself passed.
+- Reproduced locally against isolated PostgreSQL on port 55432. Scoped the schema test to supported public aggregate types and the stored `aggregate_type` column. Targeted test passed; DB-backed `pytest tools/contracts -q` passed 79/79.
+- Next: commit/push the regression-test correction, inspect rerun workflows, then begin F56 tests-first.
 - Updated at: 2026-10-07 08:08 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
@@ -1513,4 +1515,4 @@ Updated: 2026-10-07 08:08, Europe/Moscow.
 - Health reports remote model installation as unchecked. Added its sanitized diagnostic to Core's allowlist and RU/EN Web messages. Health resolves local installed preferences consistently and reports invalid local model config without exposing settings.
 - Operator guide and `.env.example` now document Ollama CLI model lifecycle, exact-tag fallback, cloud key storage, no remote inventory, and no-Ollama behavior. F54/F55 parity entries include tests and evidence.
 - GREEN: Python/contracts/migration/Intelligence/Telegram 296 passed, 1 optional skip; Core complete check passed; Go test and vet passed on checksum-verified portable runtime; Web 92 passed and production build passed; `git diff --check` passed. No billable cloud inference ran.
-- Commit/push and GitHub workflow status pending.
+- F55 feature commit/push: `5df8b06` (`feat(F55): resolve safe local AI models`). Three GitHub workflows passed; Core/PostgreSQL's Java check passed but its Python outbox schema test failed on internal event rows. Regression-test correction is staged for follow-up verification.
