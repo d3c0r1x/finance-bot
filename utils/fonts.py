@@ -18,6 +18,16 @@ MONO_CANDIDATES = (
     "/Library/Fonts/Arial Unicode.ttf",
 )
 
+SANS_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+    r"C:\Windows\Fonts\segoeui.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/SFNS.ttf",
+)
+
 
 def mono_font(size: int, fallback: bool = True):
     """Моноширинный шрифт заданного размера; `fallback=False` — None, если его нет."""
@@ -30,4 +40,18 @@ def mono_font(size: int, fallback: bool = True):
             return ImageFont.truetype(path, size)
         except OSError:
             continue  # файл есть, но Pillow его не понимает — пробуем следующий
+    return ImageFont.load_default() if fallback else None
+
+
+def sans_font(size: int, fallback: bool = True):
+    """Resolve a proportional font with Cyrillic coverage on common desktop OSes."""
+    from PIL import ImageFont
+
+    for path in SANS_CANDIDATES:
+        if not os.path.isfile(path):
+            continue
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
     return ImageFont.load_default() if fallback else None

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
+import { formatMoney } from './formatting';
 
 type Language = 'ru' | 'en';
 
@@ -51,10 +52,7 @@ const copy = {
 } as const;
 
 function money(amount: string | null, language: Language): string {
-  if (amount === null) return '—';
-  return new Intl.NumberFormat(language === 'ru' ? 'ru-RU' : 'en-US', {
-    style: 'currency', currency: 'RUB', maximumFractionDigits: 2,
-  }).format(Number(amount));
+  return formatMoney(amount, 'RUB', language);
 }
 
 function percent(amount: string, language: Language): string {

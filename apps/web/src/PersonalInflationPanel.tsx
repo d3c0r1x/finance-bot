@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, type PersonalInflationItem } from './api';
+import { formatMoney } from './formatting';
 
 const copy = {
   ru: {
@@ -31,9 +32,7 @@ export function PersonalInflationPanel({ tenantId, language }: { tenantId: strin
     queryFn: () => api.getPersonalInflation(tenantId),
     retry: false,
   });
-  const money = (amount: string) => new Intl.NumberFormat(locale, {
-    style: 'currency', currency: 'RUB', maximumFractionDigits: 2,
-  }).format(Number(amount));
+  const money = (amount: string) => formatMoney(amount, 'RUB', language);
   const percent = (amount: string) => {
     const value = Number(amount);
     return `${value > 0 ? '+' : ''}${new Intl.NumberFormat(locale, {

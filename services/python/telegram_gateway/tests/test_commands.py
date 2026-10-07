@@ -1354,12 +1354,18 @@ def test_report_command_uses_shared_report_dto_and_renders_photo_with_family_sco
         sent.append(method)
 
     monkeypatch.setattr(Bot, "__call__", record_request)
-    monkeypatch.setattr(telegram_app, "render_report", lambda _report: ("image/png", b"png-bytes"))
+    report_languages = []
+
+    def render(_report, *, language):
+        report_languages.append(language)
+        return "image/png", b"png-bytes"
+
+    monkeypatch.setattr(telegram_app, "render_report", render)
     message = Message(
         message_id=105,
         date=datetime(2026, 10, 4, tzinfo=timezone.utc),
         chat=Chat(id=42, type="private"),
-        from_user=User(id=42, is_bot=False, first_name="Alex"),
+        from_user=User(id=42, is_bot=False, first_name="Alex", language_code="ru-RU"),
         text="/report week family",
         entities=[MessageEntity(type="bot_command", offset=0, length=7)],
     )
@@ -1374,21 +1380,23 @@ def test_report_command_uses_shared_report_dto_and_renders_photo_with_family_sco
         asyncio.run(bot.session.close())
 
     assert calls == [("opaque-context", "week", None, None, None, "family")]
+    assert report_languages == ["ru"]
     assert len(sent) == 1
     assert sent[0].__class__.__name__ == "SendPhoto"
     assert sent[0].photo.filename == "finance-report.png"
-    assert "75.50 RUB" in sent[0].caption
-    assert "Еда за 7 дней: 430.00 / 1000.00 RUB" in sent[0].caption
-    assert "Остаток лимита еды: 570.00 RUB" in sent[0].caption
-    assert "Недостаточно истории для темпа" in sent[0].caption
+    assert "75,50 ₽" in sent[0].caption
+    assert "Еда за 7 дней: 430,00 ₽ / 1 000,00 ₽" in sent[0].caption
+    assert "Остаток лимита еды: 570,00 ₽" in sent[0].caption
+    assert "Исторический темп: недостаточно истории" in sent[0].caption
     assert "Обычный недельный расход: 0.00 RUB" not in sent[0].caption
-    assert "Необязательные покупки: 20.00 RUB · 16.7% от проверенных 120.00 RUB" in sent[0].caption
+    assert "Необязательные покупки: 20,00 ₽ (16,7% от проверенных 120,00 ₽)" in sent[0].caption
     assert sent[0].reply_markup.keyboard[0][0].text == "Меню"
 
 
 def test_report_command_accepts_custom_dates_and_text_fallback(monkeypatch):
     sent = []
     calls = []
+    render_languages = []
     report = {"period": "custom", "scope": "personal", "fromDate": "2026-09-01", "toDate": "2026-09-30",
               "asOfDate": "2026-09-30", "timezone": "Europe/Moscow", "currency": "RUB",
               "incomeTotal": "100.00", "expenseTotal": "75.50", "debtPaymentTotal": "0.00",
@@ -1411,13 +1419,16 @@ def test_report_command_accepts_custom_dates_and_text_fallback(monkeypatch):
         sent.append(method)
 
     monkeypatch.setattr(Bot, "__call__", record_request)
-    monkeypatch.setattr(telegram_app, "render_report", lambda value: (
-        "text/plain; charset=utf-8", report_text(value).encode("utf-8")))
+    def render(value, *, language):
+        render_languages.append(language)
+        return "text/plain; charset=utf-8", report_text(value, language).encode("utf-8")
+
+    monkeypatch.setattr(telegram_app, "render_report", render)
     message = Message(
         message_id=106,
         date=datetime(2026, 10, 4, tzinfo=timezone.utc),
         chat=Chat(id=42, type="private"),
-        from_user=User(id=42, is_bot=False, first_name="Alex"),
+        from_user=User(id=42, is_bot=False, first_name="Alex", language_code="en"),
         text="/report 2026-09-01 2026-09-30",
         entities=[MessageEntity(type="bot_command", offset=0, length=7)],
     )
@@ -1432,6 +1443,7 @@ def test_report_command_accepts_custom_dates_and_text_fallback(monkeypatch):
         asyncio.run(bot.session.close())
 
     assert calls == [("custom", None, "2026-09-01", "2026-09-30", "personal")]
+    assert render_languages == ["en"]
     assert len(sent) == 1
     assert "Daily optional purchases:" in sent[0].text
     assert "2026-09-01: 0.00 RUB, 2026-09-02: 2.50 RUB" in sent[0].text
@@ -1446,7 +1458,7 @@ def test_report_caption_discloses_partial_waste_without_fabricated_totals():
                   "reviewedSpend": None, "optionalSpend": None, "optionalShare": None},
     })
 
-    assert "Нет суммы у позиций: 1; итоги не рассчитаны" in caption
+    assert "у 1 позиции нет суммы" in caption
     assert "Необязательные покупки: 0.00" not in caption
 
 

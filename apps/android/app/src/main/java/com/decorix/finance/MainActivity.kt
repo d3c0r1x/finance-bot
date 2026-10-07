@@ -568,7 +568,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 "near" -> if (russian) "Почти достигнут" else "Near limit"
                 else -> if (russian) "Лимит исчерпан" else "Limit reached"
             }
-            Text("${if (alert.threshold == "near") "⚠️" else "🚨"} $threshold: $label · ${alert.spent} / ${alert.limit} RUB",
+            Text("${if (alert.threshold == "near") "⚠️" else "🚨"} $threshold: $label · " +
+                "${formatMoney(alert.spent, language)} / ${formatMoney(alert.limit, language)}",
                 color = if (alert.threshold == "near") MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
         }
         if (!state.authenticated) {
@@ -1298,8 +1299,10 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
         Text(if (russian) "За ${summary.month} · на ${summary.asOfDate}" else "${summary.month} · as of ${summary.asOfDate}")
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(if (russian) "Доходы месяца: ${summary.incomeTotal} ₽" else "Monthly income: ${summary.incomeTotal} RUB")
-                Text(if (russian) "Расходы месяца: ${summary.expenseTotal} ₽" else "Monthly expenses: ${summary.expenseTotal} RUB")
+                Text(if (russian) "Доходы месяца: ${formatMoney(summary.incomeTotal, language)}"
+                    else "Monthly income: ${formatMoney(summary.incomeTotal, language)}")
+                Text(if (russian) "Расходы месяца: ${formatMoney(summary.expenseTotal, language)}"
+                    else "Monthly expenses: ${formatMoney(summary.expenseTotal, language)}")
                 Text(if (russian) "Операций: ${summary.transactionCount}" else "Transactions: ${summary.transactionCount}")
             }
         }
@@ -1312,21 +1315,29 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
         summary.safeToSpend?.let { cash ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(if (russian) "Безопасно тратить в день: ${cash.safePerDay} ₽" else "Safe to spend per day: ${cash.safePerDay} RUB")
-                    Text(if (russian) "Свободно до ${cash.horizonDate}: ${cash.safeTotal} ₽" else "Available through ${cash.horizonDate}: ${cash.safeTotal} RUB")
-                    Text(if (russian) "Резерв 10%: ${cash.reserve} ₽" else "10% reserve: ${cash.reserve} RUB")
-                    Text(if (russian) "Обязательные списания: ${cash.promisedPayments} ₽" else "Committed payments: ${cash.promisedPayments} RUB")
+                    Text(if (russian) "Безопасно тратить в день: ${formatMoney(cash.safePerDay, language)}"
+                        else "Safe to spend per day: ${formatMoney(cash.safePerDay, language)}")
+                    Text(if (russian) "Свободно до ${cash.horizonDate}: ${formatMoney(cash.safeTotal, language)}"
+                        else "Available through ${cash.horizonDate}: ${formatMoney(cash.safeTotal, language)}")
+                    Text(if (russian) "Резерв 10%: ${formatMoney(cash.reserve, language)}"
+                        else "10% reserve: ${formatMoney(cash.reserve, language)}")
+                    Text(if (russian) "Обязательные списания: ${formatMoney(cash.promisedPayments, language)}"
+                        else "Committed payments: ${formatMoney(cash.promisedPayments, language)}")
                 }
             }
         }
         budget?.let {
-            Text(if (russian) "Лимит месяца: ${it.effectiveTotalLimit} ₽ · потрачено ${it.totalMonthlySpent} ₽ · ${it.totalLimitStatus}"
-            else "Monthly budget: ${it.effectiveTotalLimit} RUB · spent ${it.totalMonthlySpent} RUB · ${it.totalLimitStatus}")
+            Text(if (russian) "Лимит месяца: ${formatMoney(it.effectiveTotalLimit, language)} · потрачено " +
+                "${formatMoney(it.totalMonthlySpent, language)} · ${formatSemanticStatus("limitStatus", it.totalLimitStatus, language)}"
+            else "Monthly budget: ${formatMoney(it.effectiveTotalLimit, language)} · spent " +
+                "${formatMoney(it.totalMonthlySpent, language)} · ${formatSemanticStatus("limitStatus", it.totalLimitStatus, language)}")
             LinearProgressIndicator(progress = { amountFraction(it.totalMonthlySpent, it.effectiveTotalLimit) },
                 modifier = Modifier.fillMaxWidth())
             val food = summary.rolling7FoodStatus
-            Text(if (russian) "Еда за 7 дней: ${food.spent} / ${food.limit} ₽ · ${food.paceStatus}"
-            else "Food over 7 days: ${food.spent} / ${food.limit} RUB · ${food.paceStatus}")
+            Text(if (russian) "Еда за 7 дней: ${formatMoney(food.spent, language)} / ${formatMoney(food.limit, language)} · " +
+                formatSemanticStatus("paceStatus", food.paceStatus, language)
+            else "Food over 7 days: ${formatMoney(food.spent, language)} / ${formatMoney(food.limit, language)} · " +
+                formatSemanticStatus("paceStatus", food.paceStatus, language))
         }
     }
 }
@@ -1395,21 +1406,31 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(if (russian) "Доходы: ${report.incomeTotal} ₽" else "Income: ${report.incomeTotal} ${report.currency}")
-                            Text(if (russian) "Расходы: ${report.expenseTotal} ₽" else "Expenses: ${report.expenseTotal} ${report.currency}")
-                            Text(if (russian) "Платежи по долгам: ${report.debtPaymentTotal} ₽" else "Debt payments: ${report.debtPaymentTotal} ${report.currency}")
-                            Text(if (russian) "Возвраты: ${report.refundTotal} ₽" else "Refunds: ${report.refundTotal} ${report.currency}")
+                            Text(if (russian) "Доходы: ${formatMoney(report.incomeTotal, language, report.currency)}"
+                                else "Income: ${formatMoney(report.incomeTotal, language, report.currency)}")
+                            Text(if (russian) "Расходы: ${formatMoney(report.expenseTotal, language, report.currency)}"
+                                else "Expenses: ${formatMoney(report.expenseTotal, language, report.currency)}")
+                            Text(if (russian) "Платежи по долгам: ${formatMoney(report.debtPaymentTotal, language, report.currency)}"
+                                else "Debt payments: ${formatMoney(report.debtPaymentTotal, language, report.currency)}")
+                            Text(if (russian) "Возвраты: ${formatMoney(report.refundTotal, language, report.currency)}"
+                                else "Refunds: ${formatMoney(report.refundTotal, language, report.currency)}")
                             Text(if (russian) "Операций: ${report.transactionCount}" else "Transactions: ${report.transactionCount}")
                             report.weekendSharePercent?.let {
                                 Text(if (russian) "Доля расходов в выходные: $it%" else "Weekend expense share: $it%")
                             }
                             report.monthlyBudgetLimit?.let { limit ->
-                                Text(if (russian) "Лимит месяца: $limit ₽ · остаток ${report.monthlyBudgetRemaining ?: "—"} ₽"
-                                else "Monthly budget: $limit ${report.currency} · remaining ${report.monthlyBudgetRemaining ?: "—"} ${report.currency}")
+                                Text(if (russian) "Лимит месяца: ${formatMoney(limit, language, report.currency)} · остаток " +
+                                    formatMoney(report.monthlyBudgetRemaining, language, report.currency)
+                                else "Monthly budget: ${formatMoney(limit, language, report.currency)} · remaining " +
+                                    formatMoney(report.monthlyBudgetRemaining, language, report.currency))
                             }
                             val food = report.rolling7FoodStatus
-                            Text(if (russian) "Еда за 7 дней: ${food.spent} / ${food.limit} ₽ · ${food.paceStatus}"
-                            else "Food over 7 days: ${food.spent} / ${food.limit} ${report.currency} · ${food.paceStatus}")
+                            Text(if (russian) "Еда за 7 дней: ${formatMoney(food.spent, language, report.currency)} / " +
+                                "${formatMoney(food.limit, language, report.currency)} · " +
+                                formatSemanticStatus("paceStatus", food.paceStatus, language)
+                            else "Food over 7 days: ${formatMoney(food.spent, language, report.currency)} / " +
+                                "${formatMoney(food.limit, language, report.currency)} · " +
+                                formatSemanticStatus("paceStatus", food.paceStatus, language))
                         }
                     }
                 }
@@ -1422,23 +1443,25 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                             if (!waste.available) {
                                 Text(wasteUnavailableMessage(waste, russian))
                             } else {
-                                val share = waste.optionalShare?.toBigDecimalOrNull()?.multiply(java.math.BigDecimal(100))
-                                    ?.setScale(1, java.math.RoundingMode.HALF_UP)?.stripTrailingZeros()?.toPlainString() ?: "—"
-                                val optional = waste.optionalSpend ?: "—"
-                                val reviewed = waste.reviewedSpend ?: "—"
-                                Text(if (russian) "Необязательные покупки: $optional ₽ · $share% от проверенных $reviewed ₽"
-                                else "Optional purchases: $optional ${report.currency} · $share% of reviewed $reviewed ${report.currency}")
+                                val rawShare = waste.optionalShare?.toBigDecimalOrNull()?.multiply(java.math.BigDecimal(100))
+                                    ?.setScale(1, java.math.RoundingMode.HALF_UP)?.stripTrailingZeros()?.toPlainString()
+                                val share = rawShare?.let { if (russian) it.replace('.', ',') else it } ?: "—"
+                                val optional = formatMoney(waste.optionalSpend, language, report.currency)
+                                val reviewed = formatMoney(waste.reviewedSpend, language, report.currency)
+                                Text(if (russian) "Необязательные покупки: $optional · $share% от проверенных $reviewed"
+                                else "Optional purchases: $optional · $share% of reviewed $reviewed")
                                 Text(if (russian) "Проверено: ${waste.reviewedItemCount} · необязательных: ${waste.optionalItemCount}"
                                 else "Reviewed: ${waste.reviewedItemCount} · optional: ${waste.optionalItemCount}")
                                 waste.bySource.toSortedMap().forEach { (source, amount) ->
-                                    Text(if (russian) "Источник $source: $amount ₽" else "Source $source: $amount ${report.currency}")
+                                    Text(if (russian) "Источник $source: ${formatMoney(amount, language, report.currency)}"
+                                        else "Source $source: ${formatMoney(amount, language, report.currency)}")
                                 }
                                 waste.topItems.forEach { item ->
-                                    Text("${item.name}: ${item.amount} ${report.currency} · ${item.source}")
+                                    Text("${item.name}: ${formatMoney(item.amount, language, report.currency)} · ${item.source}")
                                 }
                                 waste.corrected.forEach { item ->
-                                    Text(if (russian) "Исправлено: ${item.productName} · ${item.amount} ₽"
-                                    else "Corrected: ${item.productName} · ${item.amount} ${report.currency}")
+                                    Text(if (russian) "Исправлено: ${item.productName} · ${formatMoney(item.amount, language, report.currency)}"
+                                        else "Corrected: ${item.productName} · ${formatMoney(item.amount, language, report.currency)}")
                                 }
                             }
                         }
@@ -1446,7 +1469,7 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                 }
                 items(report.expenseByCategory.toSortedMap().entries.toList()) { entry ->
                     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("${entry.key}: ${entry.value} ${report.currency}")
+                        Text("${entry.key}: ${formatMoney(entry.value, language, report.currency)}")
                         LinearProgressIndicator(progress = { amountFraction(entry.value, categoryMaximum) },
                             modifier = Modifier.fillMaxWidth())
                     }
@@ -1457,7 +1480,7 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                 }
                 items(report.expenseByDay.toSortedMap().entries.toList()) { entry ->
                     Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("${entry.key}: ${entry.value} ${report.currency}")
+                        Text("${entry.key}: ${formatMoney(entry.value, language, report.currency)}")
                         LinearProgressIndicator(progress = { amountFraction(entry.value, dailyMaximum) },
                             modifier = Modifier.fillMaxWidth())
                     }
@@ -1469,7 +1492,7 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                     }
                     items(report.waste.optionalByDay.toSortedMap().entries.toList()) { entry ->
                         Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text("${entry.key}: ${entry.value} ${report.currency}")
+                            Text("${entry.key}: ${formatMoney(entry.value, language, report.currency)}")
                             LinearProgressIndicator(progress = { amountFraction(entry.value, optionalDailyMaximum) },
                                 modifier = Modifier.fillMaxWidth())
                         }
@@ -1522,8 +1545,14 @@ private fun BudgetScreen(state: FinanceUiState, language: String,
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (russian) "Лимиты · ${budget.month}" else "Limits · ${budget.month}", style = MaterialTheme.typography.titleLarge)
-        Text(if (russian) "Расход еды за 7 дней: ${budget.rolling7FoodStatus.spent} / ${budget.rolling7FoodStatus.limit} ₽ · ${budget.rolling7FoodStatus.paceStatus}"
-            else "Food over 7 days: ${budget.rolling7FoodStatus.spent} / ${budget.rolling7FoodStatus.limit} RUB · ${budget.rolling7FoodStatus.paceStatus}")
+        Text(if (russian) "Расход еды за 7 дней: " +
+            "${formatMoney(budget.rolling7FoodStatus.spent, language)} / " +
+            "${formatMoney(budget.rolling7FoodStatus.limit, language)} · " +
+            formatSemanticStatus("paceStatus", budget.rolling7FoodStatus.paceStatus, language)
+            else "Food over 7 days: " +
+                "${formatMoney(budget.rolling7FoodStatus.spent, language)} / " +
+                "${formatMoney(budget.rolling7FoodStatus.limit, language)} · " +
+                formatSemanticStatus("paceStatus", budget.rolling7FoodStatus.paceStatus, language))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { scope = "family" }) { Text(if (russian) "Семейный" else "Family") }
             TextButton(onClick = { scope = "personal" }) { Text(if (russian) "Личный" else "Personal") }
@@ -1571,18 +1600,27 @@ private fun BudgetScreen(state: FinanceUiState, language: String,
             }
         }
         state.budgetProposal?.let { proposal ->
-            Text(if (russian) "Предложен лимит ${proposal.totalLimit} ₽ · ${proposal.proposalSource} · ${proposal.historyDays} дн."
-            else "Suggested total ${proposal.totalLimit} RUB · ${proposal.proposalSource} · ${proposal.historyDays} days")
+            Text(if (russian) "Предложен лимит ${formatMoney(proposal.totalLimit, language)} · ${proposal.proposalSource} · ${proposal.historyDays} дн."
+            else "Suggested total ${formatMoney(proposal.totalLimit, language)} · ${proposal.proposalSource} · ${proposal.historyDays} days")
         }
-        Text(if (russian) "Лимит за месяц: ${budget.effectiveTotalLimit} ₽ · потрачено ${budget.totalMonthlySpent} ₽ · ${budget.totalLimitStatus}"
-            else "Monthly limit: ${budget.effectiveTotalLimit} RUB · spent ${budget.totalMonthlySpent} RUB · ${budget.totalLimitStatus}")
+        Text(if (russian) "Лимит за месяц: ${formatMoney(budget.effectiveTotalLimit, language)} · потрачено " +
+            "${formatMoney(budget.totalMonthlySpent, language)} · " +
+            formatSemanticStatus("limitStatus", budget.totalLimitStatus, language)
+            else "Monthly limit: ${formatMoney(budget.effectiveTotalLimit, language)} · spent " +
+                "${formatMoney(budget.totalMonthlySpent, language)} · " +
+                formatSemanticStatus("limitStatus", budget.totalLimitStatus, language))
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             items(budget.effectiveLimits.toSortedMap().entries.toList()) { entry ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Text(entry.key, style = MaterialTheme.typography.titleMedium)
-                        Text(if (russian) "Действует ${entry.value} ₽ · потрачено ${budget.monthlySpent[entry.key] ?: "0.00"} ₽ · ${budget.limitStatus[entry.key] ?: "disabled"}"
-                        else "Effective ${entry.value} RUB · spent ${budget.monthlySpent[entry.key] ?: "0.00"} RUB · ${budget.limitStatus[entry.key] ?: "disabled"}")
+                        val status = budget.limitStatus[entry.key] ?: "disabled"
+                        Text(if (russian) "Действует ${formatMoney(entry.value, language)} · потрачено " +
+                            "${formatMoney(budget.monthlySpent[entry.key] ?: "0.00", language)} · " +
+                            formatSemanticStatus("limitStatus", status, language)
+                            else "Effective ${formatMoney(entry.value, language)} · spent " +
+                                "${formatMoney(budget.monthlySpent[entry.key] ?: "0.00", language)} · " +
+                                formatSemanticStatus("limitStatus", status, language))
                     }
                 }
             }

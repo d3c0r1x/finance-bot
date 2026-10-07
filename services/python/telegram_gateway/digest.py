@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from services.python.presentation.report_renderer import _validated_report, rolling_food_lines
+from services.python.presentation.report_renderer import (
+    _display_money,
+    _validated_report,
+    rolling_food_lines,
+)
 
 
 def render_digest(report: Mapping[str, object], kind: str, language: str,
@@ -27,10 +31,10 @@ def render_digest(report: Mapping[str, object], kind: str, language: str,
         heading = "Ежедневная сводка" if kind == "daily" else "Недельный дайджест"
         lines = [f"{heading} · {from_date:%d.%m.%Y}" if kind == "daily"
                  else f"{heading} · {from_date:%d.%m}–{to_date:%d.%m.%Y}",
-                 f"Доходы: {report['incomeTotal']} {currency}",
-                 f"Расходы: {report['expenseTotal']} {currency}",
-                 f"Платежи по долгам: {report['debtPaymentTotal']} {currency}",
-                 f"Возвраты: {report['refundTotal']} {currency}"]
+                 f"Доходы: {_display_money(report['incomeTotal'], currency, language)}",
+                 f"Расходы: {_display_money(report['expenseTotal'], currency, language)}",
+                 f"Платежи по долгам: {_display_money(report['debtPaymentTotal'], currency, language)}",
+                 f"Возвраты: {_display_money(report['refundTotal'], currency, language)}"]
         lines.extend(rolling_food_lines(food, currency, language))
         lines.extend(_goal_outcome_lines(goal_outcome, currency, language))
         return "\n".join(lines)
@@ -38,10 +42,10 @@ def render_digest(report: Mapping[str, object], kind: str, language: str,
     heading = "Daily summary" if kind == "daily" else "Weekly digest"
     lines = [f"{heading} · {from_date:%Y-%m-%d}" if kind == "daily"
              else f"{heading} · {from_date:%Y-%m-%d}–{to_date:%Y-%m-%d}",
-             f"Income: {report['incomeTotal']} {currency}",
-             f"Expenses: {report['expenseTotal']} {currency}",
-             f"Debt payments: {report['debtPaymentTotal']} {currency}",
-             f"Refunds: {report['refundTotal']} {currency}"]
+             f"Income: {_display_money(report['incomeTotal'], currency, language)}",
+             f"Expenses: {_display_money(report['expenseTotal'], currency, language)}",
+             f"Debt payments: {_display_money(report['debtPaymentTotal'], currency, language)}",
+             f"Refunds: {_display_money(report['refundTotal'], currency, language)}"]
     lines.extend(rolling_food_lines(food, currency, language))
     lines.extend(_goal_outcome_lines(goal_outcome, currency, language))
     return "\n".join(lines)
@@ -61,11 +65,13 @@ def _goal_outcome_lines(outcome: Mapping[str, object] | None, currency: object,
     spent = outcome["spent"]
     monthly_limit = outcome["monthlyLimit"]
     if language == "ru":
-        spent_text = spent if spent is not None else "неизвестно"
-        limit_text = monthly_limit if monthly_limit is not None else "не задан"
+        spent_text = (_display_money(spent, currency, language) if spent is not None else "неизвестно")
+        limit_text = (_display_money(monthly_limit, currency, language)
+                      if monthly_limit is not None else "не задан")
         return [f"Цель недели завершена: {name}",
-                f"Потрачено: {spent_text} {currency}", f"Лимит: {limit_text} {currency}"]
-    spent_text = spent if spent is not None else "unknown"
-    limit_text = monthly_limit if monthly_limit is not None else "not set"
+                f"Потрачено: {spent_text}", f"Лимит: {limit_text}"]
+    spent_text = (_display_money(spent, currency, language) if spent is not None else "unknown")
+    limit_text = (_display_money(monthly_limit, currency, language)
+                  if monthly_limit is not None else "not set")
     return [f"Weekly goal completed: {name}",
-            f"Spent: {spent_text} / monthly limit {limit_text} {currency}"]
+            f"Spent: {spent_text} / monthly limit {limit_text}"]

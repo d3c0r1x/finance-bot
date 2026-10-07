@@ -190,14 +190,16 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             await message.answer("Отчёт вернул неверную область. Повторите /report позже.", reply_markup=MAIN_MENU)
             return
         try:
-            content_type, content = render_report(report)
+            language_code = message.from_user.language_code if message.from_user else None
+            language = "ru" if (language_code or "").lower().startswith("ru") else "en"
+            content_type, content = render_report(report, language=language)
         except (TypeError, ValueError, KeyError):
             await message.answer("Отчёт получен в неверном формате. Попробуйте позже.", reply_markup=MAIN_MENU)
             return
         if content_type == "image/png":
             await message.answer_photo(
                 BufferedInputFile(content, filename="finance-report.png"),
-                caption=_report_caption(report),
+                caption=_report_caption(report, language),
                 reply_markup=MAIN_MENU,
             )
             return
@@ -1477,44 +1479,26 @@ def _product_catalog_caption(catalog: dict) -> str:
     return "\n".join(lines)[:1000]
 
 
-def _report_caption(report: dict) -> str:
-    scope = "семейный" if report["scope"] == "family" else "личный"
-    lines = [f"{scope.capitalize()} отчёт: {report['fromDate']} — {report['toDate']}",
-             f"Доходы: {report['incomeTotal']} {report['currency']}",
-             f"Расходы: {report['expenseTotal']} {report['currency']}"]
+def _report_caption(report: dict, language: str = "ru") -> str:
+    from services.python.presentation.report_renderer import (
+        _display_money, _waste_lines, rolling_food_lines,
+    )
+
+    if language not in {"ru", "en"}:
+        raise ValueError("Unsupported report language")
+    russian = language == "ru"
+    scope = ("семейный" if report["scope"] == "family" else "личный") if russian else (
+        "Family" if report["scope"] == "family" else "Personal")
+    lines = [f"{scope.capitalize()} отчёт: {report['fromDate']} — {report['toDate']}" if russian
+             else f"{scope} report: {report['fromDate']} — {report['toDate']}",
+             ("Доходы: " if russian else "Income: ") + _display_money(report["incomeTotal"], report["currency"], language),
+             ("Расходы: " if russian else "Expenses: ") + _display_money(report["expenseTotal"], report["currency"], language)]
     food = report.get("rolling7FoodStatus")
     if isinstance(food, dict):
-        if food.get("limitStatus") == "disabled":
-            lines.append(f"Еда за 7 дней: {food['spent']} {report['currency']} · лимит отключён")
-        else:
-            lines.append(f"Еда за 7 дней: {food['spent']} / {food['limit']} {report['currency']}")
-            if food.get("remaining") is not None:
-                lines.append(f"Остаток лимита еды: {food['remaining']} {report['currency']}")
-        if food.get("paceStatus") == "insufficient_history":
-            lines.append("Недостаточно истории для темпа")
-        elif food.get("usualWeeklySpend") is not None:
-            lines.append(f"Обычный недельный расход: {food['usualWeeklySpend']} {report['currency']} "
-                         f"({food['historyWeeks']} недель)")
+        lines.extend(rolling_food_lines(food, report["currency"], language))
     waste = report.get("waste")
     if isinstance(waste, dict):
-        if waste.get("available") is True and waste.get("optionalShare") is not None:
-            share = Decimal(str(waste["optionalShare"])) * 100
-            lines.append(f"Необязательные покупки: {waste['optionalSpend']} {report['currency']} · "
-                         f"{share:.1f}% от проверенных {waste['reviewedSpend']} {report['currency']}")
-        elif waste.get("reasonCode") == "missing_amounts":
-            missing_count = waste.get("missingAmountCount")
-            if isinstance(missing_count, int) and missing_count >= 0:
-                lines.append(f"Нет суммы у позиций: {missing_count}; итоги не рассчитаны")
-            else:
-                lines.append("Некоторые позиции чеков без суммы; итоги не рассчитаны")
-        elif waste.get("reasonCode") == "no_reviewed_items":
-            lines.append("Нет проверенных позиций чеков")
-        elif waste.get("reasonCode") == "too_many_items":
-            lines.append("Слишком много позиций для анализа необязательных покупок")
-        elif waste.get("reasonCode") == "analytics_unavailable":
-            lines.append("Аналитика необязательных покупок временно недоступна")
-        elif waste.get("available") is False:
-            lines.append("Итоги необязательных покупок недоступны")
+        lines.extend(_waste_lines(waste, report["currency"], language))
     return "\n".join(lines)
 
 

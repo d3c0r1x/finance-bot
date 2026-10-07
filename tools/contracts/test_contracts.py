@@ -125,7 +125,6 @@ def test_weekly_notification_claim_contract_carries_nullable_goal_outcome():
     assert claim["allOf"], "daily claim must explicitly forbid a non-null goal outcome"
     assert "/internal/v1/telegram/notifications/claim" in spec["paths"]
     assert "/internal/v1/telegram/notifications/{intentId}/delivery" in spec["paths"]
-
     assert outcome["required"] == ["id", "name", "unit", "bought", "countTarget", "spent",
                                     "monthlyLimit", "met", "completedAt"]
     assert outcome["properties"]["unit"]["enum"] == ["count", "sum"]
@@ -150,13 +149,22 @@ def test_weekly_notification_claim_contract_carries_nullable_goal_outcome():
     }
     validator.validate(valid)
     validator.validate({**valid, "digestKind": "daily", "goalOutcome": None})
-    with pytest.raises(ValidationError):
-        validator.validate({**valid, "digestKind": "daily"})
     for field, value in (("unit", "volume"), ("bought", -1), ("spent", "0"),
                          ("monthlyLimit", "1.2"), ("met", "true")):
         malformed = {**valid, "goalOutcome": {**valid["goalOutcome"], field: value}}
         with pytest.raises(ValidationError):
             validator.validate(malformed)
+    with pytest.raises(ValidationError):
+        validator.validate({**valid, "digestKind": "daily"})
+
+
+def test_presentation_statuses_remain_semantic_core_codes():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    rolling = spec["components"]["schemas"]["RollingFoodStatus"]["properties"]
+    assert rolling["limitStatus"]["enum"] == ["disabled", "normal", "near", "exceeded"]
+    assert rolling["paceStatus"]["enum"] == ["insufficient_history", "normal", "over", "under"]
+    assert rolling["limit"]["type"] == "string"
+    assert rolling["spent"]["type"] == "string"
 
 
 def test_csv_export_request_and_status_contract_are_exposed_to_api_and_bff():

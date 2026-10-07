@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type GoalCandidate, type GoalOutcome, type GoalProgress, type MemberGoal } from './api';
+import { formatMoney } from './formatting';
 
 type Language = 'ru' | 'en';
 
@@ -44,10 +45,7 @@ const copy = {
 } as const;
 
 function money(value: string | null, language: Language): string {
-  if (value === null) return '—';
-  return new Intl.NumberFormat(language === 'ru' ? 'ru-RU' : 'en-US', {
-    style: 'currency', currency: 'RUB', maximumFractionDigits: 2,
-  }).format(Number(value));
+  return formatMoney(value, 'RUB', language);
 }
 
 function number(value: string, language: Language): string {

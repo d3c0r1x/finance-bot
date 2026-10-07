@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type CreateReceipt, type ProductPriceComparison, type Receipt, type ReceiptItem, type ReceiptItemInput } from './api';
 import { ReceiptRecalculationPanel } from './ReceiptRecalculationPanel';
+import { formatMoney } from './formatting';
 
 type Language = 'ru' | 'en';
 
@@ -605,9 +606,7 @@ function PriceHistory({ comparison, language, t }: {
   comparison: ProductPriceComparison; language: Language; t: Translations;
 }) {
   const locale = language === 'ru' ? 'ru-RU' : 'en-US';
-  const money = (value: string) => new Intl.NumberFormat(locale, {
-    style: 'currency', currency: 'RUB', maximumFractionDigits: 2,
-  }).format(Number(value));
+  const money = (value: string) => formatMoney(value, 'RUB', language);
   const date = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(value));
   const shown = comparison.history.slice(-12);
   const values = shown.map((point) => Number(point.unitPrice));

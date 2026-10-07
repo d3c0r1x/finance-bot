@@ -29,11 +29,11 @@ class FinanceScreensTest {
             FinanceBudgetAlert("__total__", "exceeded", "55000.00", "56000.00"),
         )))
 
-        compose.onNodeWithText("⚠️ Почти достигнут: еда · 4500.00 / 5000.00 RUB").assertIsDisplayed()
-        compose.onNodeWithText("🚨 Лимит исчерпан: Общий лимит · 56000.00 / 55000.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("⚠️ Почти достигнут: еда · 4 500,00 ₽ / 5 000,00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("🚨 Лимит исчерпан: Общий лимит · 56 000,00 ₽ / 55 000,00 ₽").assertIsDisplayed()
         compose.onNodeWithText("EN").performClick()
-        compose.onNodeWithText("⚠️ Near limit: еда · 4500.00 / 5000.00 RUB").assertIsDisplayed()
-        compose.onNodeWithText("🚨 Limit reached: Total limit · 56000.00 / 55000.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("⚠️ Near limit: еда · 4,500.00 RUB / 5,000.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("🚨 Limit reached: Total limit · 56,000.00 RUB / 55,000.00 RUB").assertIsDisplayed()
     }
 
     @Test fun budgetAndDebtScreensLoadForOwnerInRussian() {
@@ -42,7 +42,7 @@ class FinanceScreensTest {
 
         compose.onNodeWithText("Бюджеты").performClick()
         compose.onNodeWithText("Лимиты · 2026-10").assertIsDisplayed()
-        compose.onNodeWithText("Расход еды за 7 дней: 350.25 / 1000.00 ₽ · insufficient_history").assertIsDisplayed()
+        compose.onNodeWithText("Расход еды за 7 дней: 350,25 ₽ / 1 000,00 ₽ · Недостаточно истории").assertIsDisplayed()
 
         compose.onNodeWithText("Долги").performClick()
         compose.onNodeWithText("Кредитная карта").performScrollTo().assertIsDisplayed()
@@ -334,13 +334,13 @@ class FinanceScreensTest {
             ), report = report()))
 
         compose.onNodeWithText("Обзор").performClick()
-        compose.onNodeWithText("Доходы месяца: 95000.00 ₽").assertIsDisplayed()
-        compose.onNodeWithText("Расходы месяца: 42000.35 ₽").assertIsDisplayed()
-        compose.onNodeWithText("Безопасно тратить в день: 4444.44 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Доходы месяца: 95 000,00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Расходы месяца: 42 000,35 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Безопасно тратить в день: 4 444,44 ₽").assertIsDisplayed()
 
         compose.onNodeWithText("Отчёты").performScrollTo().performClick()
-        compose.onNodeWithText("Доходы: 120000.00 ₽").assertIsDisplayed()
-        compose.onNodeWithText("Платежи по долгам: 3000.00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Доходы: 120 000,00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Платежи по долгам: 3 000,00 ₽").assertIsDisplayed()
     }
 
     @Test fun reportControlsRequestSelectedDateRangeAndFamilyScope() {
@@ -366,19 +366,19 @@ class FinanceScreensTest {
         compose.onNodeWithTag("report-results").performScrollToIndex(2)
         compose.onNodeWithText("Расходы по дням").assertIsDisplayed()
         compose.onNodeWithTag("report-results").performScrollToIndex(3)
-        compose.onNodeWithText("2026-10-01: 15000.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("2026-10-01: 15 000,00 ₽").assertIsDisplayed()
         compose.onNodeWithTag("report-results").performScrollToIndex(4)
-        compose.onNodeWithText("2026-10-02: 0.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("2026-10-02: 0,00 ₽").assertIsDisplayed()
     }
 
     @Test fun reportShowsWasteAmountsSourcesAndCorrectionsInBothLanguages() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), report = report()))
         compose.onNodeWithText("Отчёты").performScrollTo().performClick()
         compose.onNodeWithTag("report-results").performScrollToIndex(1)
-        compose.onNodeWithText("Необязательные покупки: 20.00 ₽ · 16.7% от проверенных 120.00 ₽").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Источник model: 13.00 ₽").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Сок: 13.00 RUB · model").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Исправлено: Молоко · 30.00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Необязательные покупки: 20,00 ₽ · 16,7% от проверенных 120,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Источник model: 13,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Сок: 13,00 ₽ · model").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Исправлено: Молоко · 30,00 ₽").performScrollTo().assertIsDisplayed()
 
         compose.onNodeWithText("EN").performClick()
         compose.onNodeWithTag("report-results").performScrollToIndex(1)
@@ -395,11 +395,11 @@ class FinanceScreensTest {
         compose.onNodeWithTag("report-results").performScrollToIndex(4)
         compose.onNodeWithText("Необязательные покупки по дням").assertIsDisplayed()
         compose.onNodeWithTag("report-results").performScrollToIndex(5)
-        compose.onNodeWithText("2026-10-01: 0.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("2026-10-01: 0,00 ₽").assertIsDisplayed()
         compose.onNodeWithTag("report-results").performScrollToIndex(6)
-        compose.onNodeWithText("2026-10-02: 13.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("2026-10-02: 13,00 ₽").assertIsDisplayed()
         compose.onNodeWithTag("report-results").performScrollToIndex(7)
-        compose.onNodeWithText("2026-10-03: 7.00 RUB").assertIsDisplayed()
+        compose.onNodeWithText("2026-10-03: 7,00 ₽").assertIsDisplayed()
     }
 
     @Test fun reportUnavailableWasteShowsReasonWithoutZeroAmount() {

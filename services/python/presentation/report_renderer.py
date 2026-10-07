@@ -184,12 +184,51 @@ def _validated_waste(value: object, *, present: bool,
     return {**value, "_validatedOptionalByDay": optional_days}
 
 
-def _waste_lines(waste: Mapping[str, object] | None, currency: str) -> list[str]:
+def _validated_language(language: str) -> str:
+    if language not in {"ru", "en"}:
+        raise ValueError("Unsupported presentation language")
+    return language
+
+
+def _display_money(value: Decimal | str, currency: str, language: str) -> str:
+    amount = Decimal(value)
+    number = f"{amount:,.2f}"
+    if language == "ru":
+        number = number.replace(",", " ").replace(".", ",")
+        symbol = "₽" if currency == "RUB" else currency
+        return f"{number} {symbol}"
+    return f"{number} {currency}"
+
+
+def _fit_text(draw, text: str, font, max_width: int) -> str:
+    """Clip long user-provided labels by rendered width, preserving a visible ellipsis."""
+    value = str(text)
+    if draw.textlength(value, font=font) <= max_width:
+        return value
+    ellipsis = "…"
+    while value and draw.textlength(value + ellipsis, font=font) > max_width:
+        value = value[:-1]
+    return value + ellipsis if value else ellipsis
+
+
+def _waste_lines(waste: Mapping[str, object] | None, currency: str,
+                 language: str = "en") -> list[str]:
     if waste is None:
         return []
+    language = _validated_language(language)
     if not waste["available"]:
         reason = waste["reasonCode"]
         missing_count = waste["missingAmountCount"]
+        if language == "ru":
+            if reason == "missing_amounts":
+                suffix = "позиции нет суммы" if missing_count % 10 == 1 and missing_count % 100 != 11 else "позиций нет суммы"
+                return [f"Необязательные покупки недоступны: у {missing_count} {suffix}; итоги не рассчитаны"]
+            messages = {
+                "no_reviewed_items": "В этом периоде нет проверенных позиций чеков; итог не рассчитан",
+                "too_many_items": "Анализ необязательных покупок недоступен: слишком много позиций",
+                "analytics_unavailable": "Анализ покупок временно недоступен",
+            }
+            return [messages.get(str(reason), "Анализ покупок недоступен")]
         if reason == "missing_amounts":
             noun = "item has" if missing_count == 1 else "items have"
             return [f"Optional purchases unavailable: {missing_count} receipt {noun} no amount; totals not calculated"]
@@ -201,19 +240,39 @@ def _waste_lines(waste: Mapping[str, object] | None, currency: str) -> list[str]
         return [messages.get(str(reason), f"Optional-spend analysis unavailable ({reason})")]
 
     share = Decimal(str(waste["optionalShare"])) * 100
-    lines = [f"Optional purchases: {waste['optionalSpend']} {currency} "
-             f"({share:.1f}% of reviewed {waste['reviewedSpend']} {currency})",
+    share_text = f"{share:.1f}"
+    if language == "ru":
+        share_text = share_text.replace(".", ",")
+    if language == "ru":
+        lines = [f"Необязательные покупки: {_display_money(waste['optionalSpend'], currency, language)} "
+                 f"({share_text}% от проверенных {_display_money(waste['reviewedSpend'], currency, language)})",
+                 f"Проверено позиций: {waste['reviewedItemCount']} · необязательных: {waste['optionalItemCount']}"]
+        lines.extend(f"Источник {source}: {_display_money(amount, currency, language)}"
+                     for source, amount in sorted(waste["bySource"].items()))
+        lines.extend(f"{item['name']}: {_display_money(item['amount'], currency, language)} ({item['source']})"
+                     for item in waste["topItems"][:5])
+        lines.extend(f"Исправлено: {item['productName']} · {_display_money(item['amount'], currency, language)}"
+                     for item in waste["corrected"][:5])
+        optional_days = waste.get("_validatedOptionalByDay", {})
+        if optional_days:
+            lines.append("Необязательные покупки по дням: " + ", ".join(
+                f"{day}: {_display_money(amount, currency, language)}"
+                for day, amount in sorted(optional_days.items())))
+        return lines
+
+    lines = [f"Optional purchases: {_display_money(waste['optionalSpend'], currency, language)} "
+             f"({share_text}% of reviewed {_display_money(waste['reviewedSpend'], currency, language)})",
              f"Reviewed items: {waste['reviewedItemCount']} · optional items: {waste['optionalItemCount']}"]
-    lines.extend(f"Source {source}: {amount} {currency}"
+    lines.extend(f"Source {source}: {_display_money(amount, currency, language)}"
                  for source, amount in sorted(waste["bySource"].items()))
-    lines.extend(f"{item['name']}: {item['amount']} {currency} ({item['source']})"
+    lines.extend(f"{item['name']}: {_display_money(item['amount'], currency, language)} ({item['source']})"
                  for item in waste["topItems"][:5])
-    lines.extend(f"Corrected: {item['productName']} · {item['amount']} {currency}"
+    lines.extend(f"Corrected: {item['productName']} · {_display_money(item['amount'], currency, language)}"
                  for item in waste["corrected"][:5])
     optional_days = waste.get("_validatedOptionalByDay", {})
     if optional_days:
         lines.append("Daily optional purchases: " + ", ".join(
-            f"{day}: {amount} {currency}" for day, amount in sorted(optional_days.items())))
+            f"{day}: {_display_money(amount, currency, language)}" for day, amount in sorted(optional_days.items())))
     return lines
 
 
@@ -268,66 +327,84 @@ def _required_text(report: Mapping[str, object], field: str) -> str:
     return value
 
 
-def render_report_png(report: Mapping[str, object]) -> bytes:
+def render_report_png(report: Mapping[str, object], language: str = "en") -> bytes:
+    language = _validated_language(language)
     from_date, to_date, categories, days, budget, _food_status = _validated_report(report)
     waste = _validated_waste(report.get("waste"), present="waste" in report,
                              from_date=from_date, to_date=to_date)
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
+        from utils.fonts import sans_font
     except ImportError as error:
         raise RendererUnavailable("Pillow is unavailable") from error
 
-    waste_lines = _waste_lines(waste, _required_text(report, "currency"))
+    currency = _required_text(report, "currency")
+    waste_lines = _waste_lines(waste, currency, language)
     image = Image.new("RGB", (PNG_SIZE[0], PNG_SIZE[1] + (160 if waste is not None else 0)), "#f7f9fc")
     draw = ImageDraw.Draw(image)
-    font = ImageFont.load_default(size=17)
-    title_font = ImageFont.load_default(size=30)
-    subtitle_font = ImageFont.load_default(size=15)
-    draw.text((36, 28), "Finance report", fill="#172338", font=title_font)
+    font = sans_font(17)
+    title_font = sans_font(30)
+    subtitle_font = sans_font(15)
+    labels = ({"title": "Финансовый отчёт", "income": "Доходы", "expenses": "Расходы",
+               "debts": "Платежи по долгам", "refunds": "Возвраты", "budget": "Лимит месяца",
+               "categories": "Расходы по категориям", "no_categories": "Нет расходов по категориям",
+               "daily": "Расходы по дням", "remaining": "Остаток", "optional": "Необязательные покупки",
+               "spending": "Необязательные траты", "sources": "Источники", "top_items": "Лишние покупки",
+               "corrections": "Разрешённые исправления", "none": "Нет"}
+              if language == "ru" else
+              {"title": "Finance report", "income": "Income", "expenses": "Expenses",
+               "debts": "Debt payments", "refunds": "Refunds", "budget": "Monthly budget usage",
+               "categories": "Expenses by category", "no_categories": "No category expenses",
+               "daily": "Daily expenses", "remaining": "Remaining", "optional": "Optional purchases",
+               "spending": "Optional spending", "sources": "Sources", "top_items": "Top optional items",
+               "corrections": "Allowed corrections", "none": "None"})
+    draw.text((36, 28), labels["title"], fill="#172338", font=title_font)
     draw.text((38, 70), f"{from_date.isoformat()} - {to_date.isoformat()} · {_required_text(report, 'timezone')}",
               fill="#68778e", font=subtitle_font)
 
-    currency = _required_text(report, "currency")
     summary = [
-        ("Income", str(report["incomeTotal"])),
-        ("Expenses", str(report["expenseTotal"])),
-        ("Debt payments", str(report["debtPaymentTotal"])),
-        ("Refunds", str(report["refundTotal"])),
+        (labels["income"], _display_money(report["incomeTotal"], currency, language)),
+        (labels["expenses"], _display_money(report["expenseTotal"], currency, language)),
+        (labels["debts"], _display_money(report["debtPaymentTotal"], currency, language)),
+        (labels["refunds"], _display_money(report["refundTotal"], currency, language)),
     ]
     for index, (label, amount) in enumerate(summary):
         x = 36 + index * 225
         draw.rounded_rectangle((x, 106, x + 208, 164), radius=10, fill="white", outline="#e2e8f0")
         draw.text((x + 12, 116), label, fill="#68778e", font=font)
-        draw.text((x + 12, 138), f"{amount} {currency}", fill="#172338", font=font)
+        draw.text((x + 12, 138), amount, fill="#172338", font=font)
 
     if budget is not None and budget[0] > 0:
         limit, remaining = budget
         spent = max(Decimal("0.00"), limit - remaining)
-        draw.text((38, 184), "Monthly budget usage", fill="#25354b", font=font)
+        draw.text((38, 184), labels["budget"], fill="#25354b", font=font)
         draw.rounded_rectangle((250, 188, 520, 202), radius=7, fill="#e8edf4")
         width = round(270 * min(Decimal("1"), spent / limit))
         if width:
             draw.rounded_rectangle((250, 188, 250 + width, 202), radius=7, fill="#78aee6")
-        draw.text((540, 181), f"{spent:.2f} / {limit:.2f} {currency}", fill="#25354b", font=subtitle_font)
-        draw.text((540, 199), f"Remaining: {remaining:.2f} {currency}", fill="#68778e", font=subtitle_font)
-    elif budget is not None:
-        draw.text((38, 184), f"Monthly budget disabled: 0.00 {currency}; remaining: {budget[1]:.2f} {currency}",
+        draw.text((540, 181), f"{_display_money(spent, currency, language)} / "
+                  f"{_display_money(limit, currency, language)}", fill="#25354b", font=subtitle_font)
+        draw.text((540, 199), f"{labels['remaining']}: {_display_money(remaining, currency, language)}",
                   fill="#68778e", font=subtitle_font)
-    draw.text((38, 228), "Expenses by category", fill="#25354b", font=font)
+    elif budget is not None:
+        draw.text((38, 184), f"{labels['budget']}: {_display_money(Decimal('0.00'), currency, language)}; "
+                  f"{labels['remaining'].lower()}: {_display_money(budget[1], currency, language)}",
+                  fill="#68778e", font=subtitle_font)
+    draw.text((38, 228), labels["categories"], fill="#25354b", font=font)
     sorted_categories = sorted(categories.items(), key=lambda pair: (-pair[1], pair[0]))[:10]
     category_max = max((amount for _, amount in sorted_categories), default=Decimal("0"))
     if not sorted_categories:
-        draw.text((38, 252), "No category expenses", fill="#8290a5", font=font)
+        draw.text((38, 252), labels["no_categories"], fill="#8290a5", font=font)
     for index, (label, amount) in enumerate(sorted_categories):
         y = 252 + index * 28
-        draw.text((38, y), label[:18], fill="#526177", font=font)
+        draw.text((38, y), _fit_text(draw, label, font, 142), fill="#526177", font=font)
         draw.rounded_rectangle((190, y + 6, 436, y + 17), radius=6, fill="#e8edf4")
         width = int(246 * amount / category_max) if category_max > 0 else 0
         if width:
             draw.rounded_rectangle((190, y + 6, 190 + width, y + 17), radius=6, fill="#78aee6")
-        draw.text((444, y), f"{amount:.2f}", fill="#25354b", font=font)
+        draw.text((444, y), _display_money(amount, currency, language), fill="#25354b", font=font)
 
-    draw.text((38, 530), "Daily expenses", fill="#25354b", font=font)
+    draw.text((38, 530), labels["daily"], fill="#25354b", font=font)
     graph = (518, 220, 920, 500)
     left, top, right, bottom = graph
     for gridline in range(4):
@@ -363,10 +440,10 @@ def render_report_png(report: Mapping[str, object]) -> bytes:
     draw.text((right - 94, 506), end_label, fill="#68778e", font=subtitle_font)
     if optional_values:
         draw.ellipse((190, 534, 202, 546), fill="#d77441")
-        draw.text((208, 530), "Optional purchases", fill="#25354b", font=font)
+        draw.text((208, 530), labels["optional"], fill="#25354b", font=font)
 
     if waste_lines:
-        draw.text((38, 552), "Optional spending", fill="#25354b", font=font)
+        draw.text((38, 552), labels["spending"], fill="#25354b", font=font)
         if waste is None or not waste["available"]:
             draw.text((38, 582), waste_lines[0][:110], fill="#526177", font=subtitle_font)
         else:
@@ -381,11 +458,15 @@ def render_report_png(report: Mapping[str, object]) -> bytes:
             columns = [(38, "Sources", sources), (350, "Top optional items", top_items),
                        (660, "Allowed corrections", corrected)]
             for x, title, rows in columns:
-                draw.text((x, 628), title, fill="#25354b", font=subtitle_font)
+                title = {"Sources": labels["sources"], "Top optional items": labels["top_items"],
+                         "Allowed corrections": labels["corrections"]}[title]
+                draw.text((x, 628), _fit_text(draw, title, subtitle_font, 270),
+                          fill="#25354b", font=subtitle_font)
                 if not rows:
-                    draw.text((x, 650), "None", fill="#8290a5", font=subtitle_font)
+                    draw.text((x, 650), labels["none"], fill="#8290a5", font=subtitle_font)
                 for index, row in enumerate(rows):
-                    draw.text((x, 650 + index * 22), row[:40], fill="#526177", font=subtitle_font)
+                    draw.text((x, 650 + index * 22), _fit_text(draw, row, subtitle_font, 270),
+                              fill="#526177", font=subtitle_font)
 
     output = BytesIO()
     image.save(output, format="PNG", optimize=True)
@@ -402,15 +483,17 @@ def rolling_food_lines(status: Mapping[str, object] | None, currency: str, langu
 
     if language == "ru":
         if food_status["limitStatus"] == "disabled":
-            lines = [f"Еда за 7 дней: {food_status['spent']} {currency} · лимит отключён"]
+            lines = [f"Еда за 7 дней: {_display_money(food_status['spent'], currency, language)} · лимит отключён"]
         else:
-            lines = [f"Еда за 7 дней: {food_status['spent']} / {food_status['limit']} {currency}"]
+            lines = [f"Еда за 7 дней: {_display_money(food_status['spent'], currency, language)} / "
+                     f"{_display_money(food_status['limit'], currency, language)}"]
             if food_status["remaining"] is not None:
-                lines.append(f"Остаток лимита еды: {food_status['remaining']} {currency}")
+                lines.append(f"Остаток лимита еды: {_display_money(food_status['remaining'], currency, language)}")
         if food_status["paceStatus"] == "insufficient_history":
             lines.append("Исторический темп: недостаточно истории")
         else:
-            lines.append(f"Обычный недельный расход: {food_status['usualWeeklySpend']} {currency} "
+            lines.append(f"Обычный недельный расход: "
+                         f"{_display_money(food_status['usualWeeklySpend'], currency, language)} "
                          f"({food_status['historyWeeks']} недель истории)")
         return lines
 
@@ -428,34 +511,62 @@ def rolling_food_lines(status: Mapping[str, object] | None, currency: str, langu
     return lines
 
 
-def report_text(report: Mapping[str, object]) -> str:
+def report_text(report: Mapping[str, object], language: str = "en") -> str:
+    language = _validated_language(language)
     from_date, to_date, categories, days, budget, food_status = _validated_report(report)
     currency = _required_text(report, "currency")
+    if language == "ru":
+        lines = [
+            f"Финансовый отчёт: {from_date:%d.%m.%Y} — {to_date:%d.%m.%Y}",
+            f"Доходы: {_display_money(report['incomeTotal'], currency, language)}",
+            f"Расходы: {_display_money(report['expenseTotal'], currency, language)}",
+            f"Платежи по долгам: {_display_money(report['debtPaymentTotal'], currency, language)}",
+            f"Возвраты: {_display_money(report['refundTotal'], currency, language)}",
+            "Расходы по категориям:",
+        ]
+        lines.extend(f"{key}: {_display_money(amount, currency, language)}"
+                     for key, amount in sorted(categories.items()))
+        lines.append("Расходы по дням: " + ", ".join(
+            f"{day}: {_display_money(amount, currency, language)}" for day, amount in days.items()))
+        if budget is not None:
+            lines.append(f"Лимит месяца: {_display_money(budget[0], currency, language)}; остаток: "
+                         f"{_display_money(budget[1], currency, language)}")
+        lines.extend(rolling_food_lines(food_status, currency, language))
+        lines.extend(_waste_lines(_validated_waste(report.get("waste"), present="waste" in report,
+                                                   from_date=from_date, to_date=to_date), currency, language))
+        return "\n".join(lines)
+
     lines = [
         f"Finance report: {_required_text(report, 'fromDate')} — {_required_text(report, 'toDate')}",
-        f"Income: {report['incomeTotal']} {currency}",
-        f"Expenses: {report['expenseTotal']} {currency}",
-        f"Debt payments: {report['debtPaymentTotal']} {currency}",
-        f"Refunds: {report['refundTotal']} {currency}",
+        f"Income: {_display_money(report['incomeTotal'], currency, language)}",
+        f"Expenses: {_display_money(report['expenseTotal'], currency, language)}",
+        f"Debt payments: {_display_money(report['debtPaymentTotal'], currency, language)}",
+        f"Refunds: {_display_money(report['refundTotal'], currency, language)}",
         "Expenses by category:",
     ]
-    lines.extend(f"{key}: {amount:.2f} {currency}" for key, amount in sorted(categories.items()))
-    lines.append("Daily expenses: " + ", ".join(f"{key}: {amount:.2f} {currency}" for key, amount in days.items()))
+    lines.extend(f"{key}: {_display_money(amount, currency, language)}" for key, amount in sorted(categories.items()))
+    lines.append("Daily expenses: " + ", ".join(
+        f"{key}: {_display_money(amount, currency, language)}" for key, amount in days.items()))
     if budget is not None:
-        lines.append(f"Monthly budget: {budget[0]:.2f} {currency}; remaining: {budget[1]:.2f} {currency}")
-    lines.extend(rolling_food_lines(food_status, currency))
+        lines.append(f"Monthly budget: {_display_money(budget[0], currency, language)}; remaining: "
+                     f"{_display_money(budget[1], currency, language)}")
+    lines.extend(rolling_food_lines(food_status, currency, language))
     lines.extend(_waste_lines(_validated_waste(report.get("waste"), present="waste" in report,
-                                               from_date=from_date, to_date=to_date), currency))
+                                               from_date=from_date, to_date=to_date), currency, language))
     return "\n".join(lines)
 
 
 def render_report(report: Mapping[str, object],
-                  png_renderer: Callable[[Mapping[str, object]], bytes] = render_report_png) -> tuple[str, bytes]:
+                  png_renderer: Callable[[Mapping[str, object]], bytes] = render_report_png,
+                  *, language: str = "en") -> tuple[str, bytes]:
+    language = _validated_language(language)
     _validated_report(report)
     try:
+        if png_renderer is render_report_png:
+            return "image/png", png_renderer(report, language=language)
         return "image/png", png_renderer(report)
     except RendererUnavailable:
-        return "text/plain; charset=utf-8", report_text(report).encode("utf-8")
+        return "text/plain; charset=utf-8", report_text(report, language).encode("utf-8")
 
 
 def _product_decimal(value: object, field: str, places: int, *, positive: bool = True) -> Decimal:

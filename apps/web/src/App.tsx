@@ -16,6 +16,7 @@ import { GoalsPanel } from './GoalsPanel';
 import { ExportsPanel } from './ExportsPanel';
 import { MembersPanel } from './MembersPanel';
 import { HealthPanel } from './HealthPanel';
+import { absoluteDecimal, compareDecimal, formatMoney, formatSemanticStatus, subtractDecimal } from './formatting';
 import './styles.css';
 
 const copy = {
@@ -615,7 +616,7 @@ export function App() {
             onApply={() => applyBudgetProposal.mutate()}
             onKeepCurrent={() => { setShowBudgetSetup(false); setBudgetProposal(null); setBudgetSetupError(undefined); }} />
             : <Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard t={t} summary={summary.data} error={summary.error?.message}
+          <Route path="/dashboard" element={<Dashboard t={t} language={language} summary={summary.data} error={summary.error?.message}
             budgets={budgets.data} pending={summary.isPending} onRetry={() => void summary.refetch()} />} />
           <Route path="/transactions" element={<section className="transactions-layout">
             <form className="transaction-form panel" onSubmit={(event) => {
@@ -718,10 +719,8 @@ export function App() {
               {transactionBudgetAlerts.length > 0 && <div className="budget-alert-notice" role="status" aria-live="polite">
                 {transactionBudgetAlerts.map((alert) => {
                   const label = alert.budgetKey === '__total__' ? t.budgetTotal : alert.budgetKey;
-                  const number = (value: string) => Number(value).toLocaleString(language === 'ru' ? 'ru-RU' : 'en-US',
-                    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   return <p key={`${alert.budgetKey}-${alert.threshold}`}>
-                    {budgetStatusLabel(t, alert.threshold)}: <strong>{label}</strong> · {number(alert.spent)} / {number(alert.limit)} RUB
+                    {budgetStatusLabel(alert.threshold, language)}: <strong>{label}</strong> · {formatMoney(alert.spent, 'RUB', language)} / {formatMoney(alert.limit, 'RUB', language)}
                   </p>;
                 })}
               </div>}
@@ -809,15 +808,13 @@ function Brand({ t, language, setLanguage }: { t: Translations; language: Langua
   </div>;
 }
 
-function Dashboard({ t, summary, budgets, error, pending, onRetry }: {
-  t: Translations; summary?: Summary; budgets?: BudgetOverview; error?: string; pending: boolean; onRetry: () => void;
+function Dashboard({ t, language, summary, budgets, error, pending, onRetry }: {
+  t: Translations; language: Language; summary?: Summary; budgets?: BudgetOverview; error?: string; pending: boolean; onRetry: () => void;
 }) {
   if (pending) return <p className="empty-state">{t.loading}</p>;
   if (error || !summary) return <div className="empty-state"><p role="alert">{error || t.error}</p>
     <button className="button button-quiet" onClick={onRetry}>{t.retry}</button></div>;
-  const format = (value: string) => new Intl.NumberFormat('ru-RU', {
-    style: 'currency', currency: summary.currency, maximumFractionDigits: 2,
-  }).format(Number(value));
+  const format = (value: string | null) => formatMoney(value, summary.currency, language);
   return <section className="dashboard-panel">
     <div className="panel-heading"><div><span className="eyebrow">{summary.month}</span><h2>{t.dashboard}</h2></div></div>
     <div className="summary-grid">
@@ -827,14 +824,15 @@ function Dashboard({ t, summary, budgets, error, pending, onRetry }: {
     </div>
     {summary.daysElapsed > 0 && summary.dailyExpensePace && <div className="monthly-pace">
       <span>{t.dailyPace}: <strong>{format(summary.dailyExpensePace)}</strong></span>
-      {budgets && <span>{t.status}: <strong>{budgetStatusLabel(t, budgets.totalLimitStatus)}</strong></span>}
+      {budgets && <span>{t.status}: <strong>{budgetStatusLabel(budgets.totalLimitStatus, language)}</strong></span>}
       {budgets && budgets.totalLimitStatus !== 'disabled' && <span>{t.currentBudgetRemaining}: <strong>
-        {format((Number(budgets.effectiveTotalLimit) - Number(budgets.totalMonthlySpent)).toFixed(2))}
+        {format(subtractDecimal(budgets.effectiveTotalLimit, budgets.totalMonthlySpent))}
       </strong></span>}
       {summary.projectedExpenseTotal && <span>{t.monthProjection}: <strong>{format(summary.projectedExpenseTotal)}</strong></span>}
-      {summary.projectedExpenseTotal && budgets && Number(budgets.effectiveTotalLimit) > 0 && (() => {
-        const delta = Number(budgets.effectiveTotalLimit) - Number(summary.projectedExpenseTotal);
-        return <span>{delta >= 0 ? t.projectedReserve : t.projectedOverrun}: <strong>{format(Math.abs(delta).toFixed(2))}</strong></span>;
+      {summary.projectedExpenseTotal && budgets && compareDecimal(budgets.effectiveTotalLimit, '0') === 1 && (() => {
+        const delta = subtractDecimal(budgets.effectiveTotalLimit, summary.projectedExpenseTotal);
+        const deltaSign = delta === null ? null : compareDecimal(delta, '0');
+        return <span>{deltaSign !== -1 ? t.projectedReserve : t.projectedOverrun}: <strong>{format(delta === null ? null : absoluteDecimal(delta))}</strong></span>;
       })()}
     </div>}
     {summary.safeToSpend && <div className="monthly-pace safe-to-spend">
@@ -845,35 +843,29 @@ function Dashboard({ t, summary, budgets, error, pending, onRetry }: {
       <span>{t.promisedPayments}: <strong>{format(summary.safeToSpend.promisedPayments)}</strong></span>
       <span>{summary.safeToSpend.incomeBasis === 'actual_income' ? t.actualIncomeBasis : t.plannedIncomeBasis}: <strong>{format(summary.safeToSpend.incomeBase)}</strong></span>
     </div>}
-    <RollingFoodSummary t={t} status={summary.rolling7FoodStatus} format={format} />
+    <RollingFoodSummary t={t} language={language} status={summary.rolling7FoodStatus} format={format} />
     <Link className="button button-primary" to="/transactions">{t.operations}</Link>
   </section>;
 }
 
-function RollingFoodSummary({ t, status, format }: {
-  t: Translations; status: import('./api').RollingFoodStatus; format: (amount: string) => string;
+function RollingFoodSummary({ t, language, status, format }: {
+  t: Translations; language: Language; status: import('./api').RollingFoodStatus; format: (amount: string) => string;
 }) {
-  const paceLabel = status.paceStatus === 'over' ? t.foodPaceOver
-    : status.paceStatus === 'under' ? t.foodPaceUnder
-    : status.paceStatus === 'normal' ? t.foodPaceNormal : t.insufficientFoodHistory;
+  const paceLabel = status.paceStatus === 'insufficient_history' ? t.insufficientFoodHistory
+    : formatSemanticStatus('paceStatus', status.paceStatus, language);
   return <aside className="rolling-food-summary" aria-label={t.rollingFood}>
     <strong>{t.rollingFood}</strong>
     <span>{t.foodWindow}: {status.fromDate} — {status.toDate}</span>
     <span>{t.rollingSpent}: <strong>{format(status.spent)}</strong></span>
-    <span>{t.foodLimit}: <strong>{format(status.limit)}</strong> · {budgetStatusLabel(t, status.limitStatus)}</span>
+    <span>{t.foodLimit}: <strong>{format(status.limit)}</strong> · {budgetStatusLabel(status.limitStatus, language)}</span>
     {status.remaining !== null && <span>{t.foodRemaining}: <strong>{format(status.remaining)}</strong></span>}
     {status.usualWeeklySpend !== null && <span>{t.usualFoodPace}: <strong>{format(status.usualWeeklySpend)}</strong> · {paceLabel}</span>}
     {status.usualWeeklySpend === null && <span>{paceLabel}</span>}
   </aside>;
 }
 
-function budgetStatusLabel(t: Translations, status: string): string {
-  switch (status) {
-    case 'near': return t.statusNear;
-    case 'exceeded': return t.statusExceeded;
-    case 'disabled': return t.statusDisabled;
-    default: return t.statusNormal;
-  }
+function budgetStatusLabel(status: string, language: Language): string {
+  return formatSemanticStatus('limitStatus', status, language);
 }
 
 function ReportPanel({ t, tenantId, language, canWrite }: {
@@ -891,9 +883,7 @@ function ReportPanel({ t, tenantId, language, canWrite }: {
     enabled: customReady,
     retry: false,
   });
-  const format = (amount: string) => new Intl.NumberFormat(language === 'ru' ? 'ru-RU' : 'en-US', {
-    style: 'currency', currency: 'RUB', maximumFractionDigits: 2,
-  }).format(Number(amount));
+  const format = (amount: string) => formatMoney(amount, 'RUB', language);
 
   return <section className="report-panel panel">
     <div className="panel-heading"><div><span className="eyebrow">{report.data?.timezone ?? 'RUB'}</span><h2>{t.reports}</h2></div></div>
@@ -932,7 +922,7 @@ function ReportPanel({ t, tenantId, language, canWrite }: {
             <span>{t.weekendShare}</span><strong>{report.data.weekendSharePercent}%</strong>
           </article>}
         </div>
-        <RollingFoodSummary t={t} status={report.data.rolling7FoodStatus} format={format} />
+      <RollingFoodSummary t={t} language={language} status={report.data.rolling7FoodStatus} format={format} />
         <WasteSummary t={t} report={report.data.waste} format={format} language={language} />
         {report.data.monthlyBudgetLimit !== null && report.data.monthlyBudgetRemaining !== null && <p className="report-budget">
           {scope === 'family' ? t.monthlyFamilyBudget : t.monthlyPersonalBudget}: <strong>{format(report.data.monthlyBudgetLimit)}</strong>
@@ -1017,40 +1007,40 @@ function ReportBudgetUsageChart({ t, scope, limit, remaining, month, format }: {
   t: Translations; scope: FinanceReport['scope']; limit: string; remaining: string; month: string;
   format: (amount: string) => string;
 }) {
+  const spent = subtractDecimal(limit, remaining) ?? '0';
+  const nonNegativeSpent = compareDecimal(spent, '0') === -1 ? '0' : spent;
   const limitAmount = Number(limit);
-  const remainingAmount = Number(remaining);
-  const spent = Math.max(0, limitAmount - remainingAmount);
-  const usage = Math.min(100, spent / limitAmount * 100);
+  const spentAmount = Number(nonNegativeSpent);
+  const usage = Math.min(100, limitAmount > 0 ? spentAmount / limitAmount * 100 : 0);
   return <figure className="budget-usage-chart" role="figure" aria-label={t.budgetUsage}>
     <figcaption>{t.budgetUsage} · {month}</figcaption>
     <ul><li>
       <span className="chart-label">{scope === 'family' ? t.monthlyFamilyBudget : t.monthlyPersonalBudget}</span>
       <span className="chart-track" aria-hidden="true"><span className="chart-bar" style={{ width: `${usage}%` }} /></span>
-      <strong>{format(spent.toFixed(2))} / {format(limit)}</strong>
+      <strong>{format(nonNegativeSpent)} / {format(limit)}</strong>
     </li></ul>
   </figure>;
 }
 
 function BudgetUsageChart({ t, language, budgets }: { t: Translations; language: Language; budgets: BudgetOverview }) {
   const rows = budgetRows.filter(([key]) => key !== '__total__').flatMap(([key, ru, en]) => {
-    const limit = Number(budgets.effectiveLimits[key] ?? '0');
-    if (limit <= 0) return [];
-    const spent = Number(budgets.monthlySpent[key] ?? '0');
+    const limit = budgets.effectiveLimits[key] ?? '0';
+    if (compareDecimal(limit, '0') !== 1) return [];
+    const spent = budgets.monthlySpent[key] ?? '0';
     return [{ key, name: language === 'ru' ? ru : en, spent, limit }];
   });
-  const totalLimit = Number(budgets.effectiveTotalLimit);
-  if (totalLimit > 0) rows.unshift({ key: '__total__', name: t.budgetTotal,
-    spent: Number(budgets.totalMonthlySpent), limit: totalLimit });
+  const totalLimit = budgets.effectiveTotalLimit;
+  if (compareDecimal(totalLimit, '0') === 1) rows.unshift({ key: '__total__', name: t.budgetTotal,
+    spent: budgets.totalMonthlySpent, limit: totalLimit });
   return <figure className="budget-usage-chart" role="figure" aria-label={t.budgetUsage}>
     <figcaption>{t.budgetUsage}</figcaption>
     {rows.length === 0 ? <p className="empty-state">{t.statusDisabled}</p> : <ul>
       {rows.map((row) => <li key={row.key}>
         <span className="chart-label">{row.name}</span>
         <span className="chart-track" aria-hidden="true">
-          <span className="chart-bar" style={{ width: `${Math.min(100, Math.max(0, row.spent / row.limit * 100))}%` }} />
+          <span className="chart-bar" style={{ width: `${Math.min(100, Math.max(0, Number(row.spent) / Number(row.limit) * 100))}%` }} />
         </span>
-        <strong>{row.spent.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          {' / '}{row.limit.toLocaleString(language === 'ru' ? 'ru-RU' : 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₽</strong>
+        <strong>{formatMoney(row.spent, 'RUB', language)} / {formatMoney(row.limit, 'RUB', language)}</strong>
       </li>)}
     </ul>}
   </figure>;
@@ -1422,9 +1412,7 @@ function TransactionRow({ item, language, t, canWrite, onEdit, onRepeat, onVoid 
   item: Transaction; language: Language; t: Translations; canWrite: boolean;
   onEdit: () => void; onRepeat: () => void; onVoid: () => void;
 }) {
-  const amount = new Intl.NumberFormat(language === 'ru' ? 'ru-RU' : 'en-US', {
-    style: 'currency', currency: 'RUB', maximumFractionDigits: 2,
-  }).format(Number(item.amount));
+  const amount = formatMoney(item.amount, 'RUB', language);
   const date = new Intl.DateTimeFormat(language === 'ru' ? 'ru-RU' : 'en-US', {
     dateStyle: 'medium',
   }).format(new Date(item.occurredAt));

@@ -1,5 +1,6 @@
 """Форматирование: суммы, полоски прогресса, эмодзи категорий, безопасный Markdown."""
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN, localcontext
 
 from config import OLLAMA_MODEL
 
@@ -19,12 +20,19 @@ def md_code(text) -> str:
 
 def format_amount(value) -> str:
     try:
-        value = float(value)
-    except (TypeError, ValueError):
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
         return str(value)
-    if value == int(value):
-        return f"{int(value):,}".replace(",", " ") + " ₽"
-    return f"{value:,.2f}".replace(",", " ").replace(".", ",") + " ₽"
+    if not amount.is_finite():
+        return str(value)
+    if amount == amount.to_integral_value():
+        return f"{amount:,.0f}".replace(",", " ") + " ₽"
+    with localcontext() as context:
+        context.prec = max(50, len(amount.as_tuple().digits) + 2)
+        rounded = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
+    if rounded == 0:
+        rounded = abs(rounded)
+    return f"{rounded:,.2f}".replace(",", " ").replace(".", ",") + " ₽"
 
 
 MONTHS_RU = ("январь", "февраль", "март", "апрель", "май", "июнь",

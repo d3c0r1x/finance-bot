@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, type ShoppingCandidate, type ShoppingList } from './api';
+import { formatMoney } from './formatting';
 
 const copy = {
   ru: {
@@ -52,9 +53,7 @@ export function ShoppingPanel({ tenantId, language }: { tenantId: string; langua
     onSuccess: (next) => queryClient.setQueryData<ShoppingList>(queryKey, next),
   });
   const locale = language === 'ru' ? 'ru-RU' : 'en-US';
-  const money = (amount: string) => new Intl.NumberFormat(locale, {
-    style: 'currency', currency: 'RUB', maximumFractionDigits: 2,
-  }).format(Number(amount));
+  const money = (amount: string) => formatMoney(amount, 'RUB', language);
   const date = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(value));
   const copyList = async () => {
     try {

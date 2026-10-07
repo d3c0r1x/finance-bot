@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type RecurringSeries } from './api';
+import { formatMoney } from './formatting';
 
 const copy = {
   ru: {
@@ -31,7 +32,7 @@ export function RecurringPanel({ tenantId, language }: { tenantId: string; langu
       ? api.muteRecurringSeries(tenantId, seriesId) : api.unmuteRecurringSeries(tenantId, seriesId),
     onSuccess: (next) => queryClient.setQueryData(queryKey, next),
   });
-  const money = (value: string) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 }).format(Number(value));
+  const money = (value: string) => formatMoney(value, 'RUB', language);
   const date = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${value}T12:00:00Z`));
 
   return <section className="panel recurring-panel" aria-labelledby="recurring-title" aria-busy={projection.isPending}>

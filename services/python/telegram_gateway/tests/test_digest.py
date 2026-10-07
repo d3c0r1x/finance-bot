@@ -41,8 +41,8 @@ def test_daily_digest_uses_core_values_and_renders_russian():
                                expenseByDay={"2026-10-05": "400.00"}), "daily", "ru")
 
     assert "Ежедневная сводка" in text
-    assert "Расходы: 400.00 RUB" in text
-    assert "Еда за 7 дней: 400.00 / 500.00 RUB" in text
+    assert "Расходы: 400,00 ₽" in text
+    assert "Еда за 7 дней: 400,00 ₽ / 500,00 ₽" in text
     assert "Обычный недельный расход" not in text
 
 
@@ -70,7 +70,7 @@ def test_goal_outcome_renders_count_in_russian_and_sum_in_english():
     assert "Цель недели завершена: Кофе" in count_text
     assert "Куплено: 3 из 4" in count_text
     assert "Weekly goal completed: Groceries" in sum_text
-    assert "Spent: 450.00 / monthly limit 5000.00 RUB" in sum_text
+    assert "Spent: 450.00 RUB / monthly limit 5,000.00 RUB" in sum_text
 
 
 def test_unknown_goal_sum_is_explicit_and_empty_report_still_sends_outcome():

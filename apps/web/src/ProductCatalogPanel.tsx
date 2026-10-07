@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, type ProductCatalogCard } from './api';
+import { formatMoney } from './formatting';
 
 const text = {
   ru: {
@@ -47,8 +48,7 @@ export function ProductCatalogPanel({ tenantId, language }: { tenantId: string; 
 function ProductCardView({ product, language }: { product: ProductCatalogCard; language: 'ru' | 'en' }) {
   const t = text[language];
   const locale = language === 'ru' ? 'ru-RU' : 'en-US';
-  const money = (amount: string) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 })
-    .format(Number(amount));
+  const money = (amount: string) => formatMoney(amount, 'RUB', language);
   const date = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(value));
   const values = product.history.map((point) => Number(point.unitPrice)).filter(Number.isFinite);
   const minimum = Math.min(...values);

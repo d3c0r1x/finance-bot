@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { api, type ImportPreview, type ImportRow, type MerchantReclassificationPreview } from './api';
+import { formatMoney } from './formatting';
 
 type Language = 'ru' | 'en';
 type Copy = {
@@ -101,9 +102,7 @@ const copy: Record<Language, Copy> = {
 };
 
 function money(value: string, language: Language): string {
-  return new Intl.NumberFormat(language === 'ru' ? 'ru-RU' : 'en-US', {
-    style: 'currency', currency: 'RUB', minimumFractionDigits: 2, maximumFractionDigits: 2,
-  }).format(Number(value));
+  return formatMoney(value, 'RUB', language);
 }
 
 export function ImportsPanel({ tenantId, language }: { tenantId: string; language: Language }) {

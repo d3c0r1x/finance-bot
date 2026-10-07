@@ -76,22 +76,23 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 | F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | 2a6cf21 |
 | F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE — local gates and all four GitHub workflows GREEN after contract-test correction | F54 | 5df8b06, 0edc20b |
 | F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | COMPLETE — 11 focused tests, synthetic receipt regression, CI GREEN | F55 | ab4a38d |
-| F57 | Russian formatting, Telegram escaping, fonts, text fallback | NOT_STARTED | F56 | pending |
+| F57 | Russian formatting, Telegram escaping, fonts, text fallback | LOCAL GREEN — Python/contracts 199; Web 95/build; Android unit 4; Android 8.1 instrumentation 50; APK built/launched; commit/push pending | F56 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F57 — Russian formatting, Telegram escaping, fonts, and text fallback across presentation surfaces.
-- Status: ANALYSIS — F56 complete; next goal is scoped from `PLAN.md` F57.
-- Acceptance: follow `PLAN.md` F57 and identify shared presentation boundaries, real RU/EN format cases, platform/font coverage, and safe fallback before tests.
+- Status: LOCAL GREEN — awaiting F57 commit and remote workflow check.
+- Acceptance: shared Python/Web formatting, localized image/text report, Cyrillic font fallback, semantic Android labels and exact decimal display; keep Core DTO codes locale-neutral.
+- Evidence: `docs/superpowers/plans/2026-10-07-f57-presentation.md`. Initial Python RED 5 failed/2 passed and Web module-missing RED; Web exact-decimal RED captured the absent BigInt arithmetic helpers.
 - Evidence: F56 feature commit `ab4a38d` is pushed. GitHub run `37577879007` passed all workflow steps, including private-path guard, legacy suites, and empty JSON module smoke.
 - Ownership: `receipt_inventory.py`, `docs/EVALUATION.md`, and `.github/workflows/tests.yml` are tracked starting points. User-local data `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` remain untracked and out of scope.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `020bf119d3940ec0c446d6e135222fe0c11edae0`; F55 product and final progress commits pushed.
-- GREEN: `pytest tools/evaluation/tests/test_receipt_inventory.py -q -p no:cacheprovider` — 11 passed; synthetic-only legacy `receipt_test.py` with `samples.load_samples=lambda:{}` — passed; `git diff --check` passed. The first synthetic runner attempt failed only because the Windows console could not encode an emoji; rerun with `PYTHONIOENCODING=utf-8` passed. GitHub run `37577879007` passed all steps in 4m22s.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `0d44dd7351796dc16dc46c935956413388e71ef5`; F56 progress commit pushed, F57 changes remain uncommitted.
+- GREEN: Python/contracts/report/Telegram command suites — 199 passed; Web `pnpm test` — 95 passed; Web `pnpm build` passed. Android `testDebugUnitTest` passed with 4 tests from a temporary ASCII junction after the direct Cyrillic path caused Gradle's test worker to report `ClassNotFoundException`. Android `assembleDebug assembleDebugAndroidTest` passed. Isolated Android 8.1/API 27 emulator reports `OK (50 tests)`; `com.decorix.finance.debug` installed and launched without a fatal crash. APK SHA-256: `5D6D6F12A62697C1A693BFC6F328B98330931002E097307A168A2DA69D285E97`. Rerun `git diff --check` before commit.
 - Privacy note: one accidental local no-argument CLI smoke did scan a photo under ignored `data/receipts`; it changed or copied no files. No receipt manifest was opened or committed. Do not run default local inventory again; use synthetic monkeypatched paths. This is not evidence about owner receipt quality.
 - F56 commit/push: `ab4a38d` (`feat(F56): add receipt evaluation module and privacy gate`); final progress update pending.
-- Next: inspect F57 presentation code and build its acceptance plan before tests.
-- Updated at: 2026-10-07 08:49 Europe/Moscow.
+- Next: rerun final diff checks, commit/push F57, inspect triggered GitHub workflows, then start F58.
+- Updated at: 2026-10-07 09:31 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -1548,3 +1549,12 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 - Pushed `ab4a38d8095c6ed38077bcdeff3c119734155975` to `feat/saas-rewrite`.
 - GitHub Actions run `37577879007` is GREEN (4m22s): privacy guard, dependency setup, smoke, handlers, receipt tests, and new empty-inventory JSON CLI step all passed.
 - F56 complete. Next plan item: F57 Russian formatting, Telegram escaping, font portability, and text fallback.
+
+## E4.100 F57 presentation parity — 2026-10-07 09:31 MSK
+
+- Read `PLAN.md` F57 and `docs/specs/CONTINUATION.md`; detailed plan and initial RED evidence: `docs/superpowers/plans/2026-10-07-f57-presentation.md`.
+- Python: exact decimal formatting, RU/EN report PNG/text and digest, platform sans-font resolution, bounded long labels, text fallback, Telegram language selection and captions. Web: shared exact string money/status formatter, exact `BigInt` subtraction for displayed balances, and panel adoption. Android: exact localized money, semantic-code mapping on dashboard/report/budget/alerts; Core DTO codes unchanged. Contracts pin stable semantic status enums.
+- RED: Python 5 failed/2 passed; Web formatter module missing; Web decimal arithmetic helper missing; Android 8.1 UI regression first showed five stale assertions, then one outdated RU top-item expectation. Updated those assertions to the approved locale behavior.
+- GREEN: Python/contracts/report/Telegram command suite 199 passed. Web 95 tests passed and production build passed. Android Gradle unit suite 4 passed from a temporary ASCII junction; `assembleDebug assembleDebugAndroidTest` passed. Isolated Android 8.1/API 27 instrumentation: `OK (50 tests)`; debug APK installed and launched without fatal crash. APK SHA-256: `5D6D6F12A62697C1A693BFC6F328B98330931002E097307A168A2DA69D285E97`.
+- Portable Temurin 17 and API 27 AVD were created under `%TEMP%`; no system Java/PATH changes or user AVD changes. No private receipts or personal finance data were used.
+- Final `git diff --check`, F57 commit/push and GitHub workflow inspection remain. Then begin F58 configuration/secrets/docs/licence gates.
