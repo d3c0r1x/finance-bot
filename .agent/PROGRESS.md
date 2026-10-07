@@ -1,10 +1,10 @@
 # Execution progress
 
-Updated: 2026-10-07 08:24, Europe/Moscow.
+Updated: 2026-10-07 08:37, Europe/Moscow.
 
 ## Global plan
 
-- Plan: `PLAN.md`, original specification from the planning chat.
+- Plan: `PLAN.md`, SHA-256 `D6D5163AB1AB1B2C76501430435663C24E9E853F293371789681410A19D03FA9`; original specification from the planning chat.
 - Mandatory supplement: `docs/specs/CONTINUATION.md`, version 1.1.
 - Approval: user requested continuation of the approved rewrite, Android and
   future provider abstraction in the referenced chats; current user explicitly
@@ -75,22 +75,20 @@ Updated: 2026-10-07 08:24, Europe/Moscow.
 | F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | 5adeccf |
 | F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | 2a6cf21 |
 | F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE — local gates and all four GitHub workflows GREEN after contract-test correction | F54 | 5df8b06, 0edc20b |
-| F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | TODO — acceptance plan pending | F55 | none |
+| F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | ANALYSIS — acceptance and test boundary recorded; implementation not started | F55 | none |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F55 — safe local model selection, explicit cloud opt-in, no-Ollama usability, and deployment model management.
-- Status: COMPLETE — local gates and all four relevant GitHub workflows GREEN.
-- Acceptance: local self-hosted default; resolve configured model then exact installed preferences only; no remote fallback; deterministic/manual finance flows remain available without Ollama; Vision stays allowlisted; server-side model management is documented.
-- Evidence: plan `docs/superpowers/plans/2026-10-07-f55-local-ai-models.md`; operator guide `docs/AI_MODELS.md`. Test-first RED caught 200 for a missing local model, direct configured embedding selection, repeated outage inventory calls, and remote health enumeration. Fixes use bounded/cached inventory, exact installed preference resolution, safe 503 when no local text provider exists, and health status `REMOTE_MODEL_STATUS_UNCHECKED` without remote requests. `OLLAMA_VISION_MODELS` remains allowlisted; local allowlisted models must be installed. No live cloud requests or model-quality claims.
-- GREEN: Python contracts/migration/intelligence/Telegram 296 passed, 1 optional skip; Core `:services:core:check --rerun-tasks`; Go `test ./... -count=1` and `go vet ./...`; Web 92 tests and TypeScript/Vite production build; `git diff --check`. Go 1.27.1 was downloaded to `%TEMP%`, SHA-256 verified against go.dev, and used without changing system PATH/install.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `0edc20b3c61b41a9e960ece13bf547bd360adede`; both commits pushed to `origin/feat/saas-rewrite`.
-- GitHub runs for `5df8b06`: Python/contracts/Go, repository tests, and receipt storage integration passed. Core/PostgreSQL Gradle passed; its Python contract test exposed a fixture-selection bug by scanning internal `export`/`goal` events.
-- Reproduced locally against isolated PostgreSQL on port 55432. Scoped the schema test to supported public aggregate types and the stored `aggregate_type` column. Targeted test passed; DB-backed `pytest tools/contracts -q` passed 79/79.
-- Follow-up commit/push: `0edc20b` (`test(core): validate only public outbox event contracts`). GitHub reruns all passed: Core/PostgreSQL `37575696661`; repository tests `37575696676`; Python/contracts/Go `37575696734`. Receipt storage integration passed on feature SHA `5df8b06`.
-- Next: commit this final F55 progress update, then analyze F56 and write acceptance tests before implementation.
-- Updated at: 2026-10-07 08:24 Europe/Moscow.
+- ID and outcome: F56 — preserve receipt inventory CLI behavior under `tools/evaluation`, verify synthetic and private-sample handling, and keep private receipt data out of CI artifacts.
+- Status: ANALYSIS — acceptance plan written; no F56 code or tests changed.
+- Acceptance: `python -m tools.evaluation.receipt_inventory` and root `python receipt_inventory.py` work; preserve `--vision`, `--strict`, `--json`, `--limit`, `--debug`, and photo arguments; deterministic read-only collection; JSON output parses without human text; strict hard defects exit 1; CI checks private paths are untracked and runs synthetic-only JSON smoke without artifact upload.
+- Evidence: plan `docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md`; global requirement `PLAN.md` F56. Existing root CLI reads explicit paths, ignored `data/receipts`, and local `receipt_samples.json`; `.github/workflows/tests.yml` does not upload artifacts. Existing `--json` currently appends human summary and empty inventory prints prose, so valid JSON contract needs a targeted RED test.
+- Ownership: `receipt_inventory.py`, `docs/EVALUATION.md`, and `.github/workflows/tests.yml` are tracked starting points. User-local data `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` remain untracked and out of scope.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `020bf119d3940ec0c446d6e135222fe0c11edae0`; F55 product and final progress commits pushed.
+- GREEN: F55 local and GitHub gates passed; F56 tests NOT_RUN. Planning checks only: not yet run.
+- Next: add focused F56 tests, run them against current root CLI, and record observed RED before moving code.
+- Updated at: 2026-10-07 08:37 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -1518,3 +1516,11 @@ Updated: 2026-10-07 08:24, Europe/Moscow.
 - Operator guide and `.env.example` now document Ollama CLI model lifecycle, exact-tag fallback, cloud key storage, no remote inventory, and no-Ollama behavior. F54/F55 parity entries include tests and evidence.
 - GREEN: Python/contracts/migration/Intelligence/Telegram 296 passed, 1 optional skip; Core complete check passed; Go test and vet passed on checksum-verified portable runtime; Web 92 passed and production build passed; `git diff --check` passed. No billable cloud inference ran.
 - F55 feature commit/push: `5df8b06` (`feat(F55): resolve safe local AI models`). Initial Core/PostgreSQL Python contract test scanned internal events; follow-up `0edc20b` scopes validation to public event types. Targeted isolated PostgreSQL test and DB-backed contracts (79/79) pass. All rerun workflows passed: Core/PostgreSQL `37575696661`, repository tests `37575696676`, Python/contracts/Go `37575696734`; receipt storage integration passed on `5df8b06`. F55 is complete.
+
+## E4.96 F56 receipt evaluation analysis — 2026-10-07 08:37 MSK
+
+- F55 progress service commit `020bf11` is pushed; its CI/product acceptance remains recorded above.
+- Read `PLAN.md` F56, `.agent/PROGRESS.md`, existing receipt inventory, sample loader, evaluation docs, and workflow. No owner receipt photo or `receipt_samples.json` was opened.
+- Current CLI implementation lives at root; F56 assigns it to `tools/evaluation`. Preserve root command as shim. Existing workflow has no artifact upload and `.gitignore` excludes owner samples and `data/`.
+- `--json` baseline mixes JSON with human summary; empty inventory emits prose. Plan makes strict JSON-only stdout an explicit acceptance because flag promises machine output.
+- Plan: `docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md`. Next: write synthetic/temp-file tests and observe RED before implementation.
