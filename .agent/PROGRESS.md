@@ -70,19 +70,20 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 | F44.2 | Member-scoped preference, accepted goal, Core API/BFF | COMPLETE — `88f868b`; combined payload cap correction `e4d0d61`; isolated PostgreSQL, Core and contract gates pass | F44.1 | e4d0d61 |
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
 | F45 | Goal progress, purchase note, completion, history, next candidate | IN PROGRESS — F45.1–F45.3 committed; legacy history import through J remains | F44 | afcde2d, 85c30d1 |
-| F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — Core claim/ack lifecycle, Telegram rendering, and OpenAPI contract verified | F45 lifecycle | pending |
+| F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F46 — attach one pending completed goal outcome to a weekly Telegram digest, mark announced only after confirmed delivery.
-- Status: WAITING_PLAN_APPROVAL — design was approved by user; implementation plan is saved at `docs/superpowers/plans/2026-10-07-f46-goal-outcome-delivery.md`; no F46 code changed.
-- Acceptance: only oldest unannounced `origin='completed'` outcome attaches to one weekly intent; retry keeps the association; delivery success sets `announced_at`; terminal failure releases outcome; empty financial report still sends outcome; localized RU/EN message; lost acknowledgement may duplicate externally.
-- Changed files: design `docs/superpowers/specs/2026-10-07-f46-goal-outcome-delivery-design.md` committed as `e236920`; execution plan is uncommitted for user review. Existing user-owned untracked files remain untouched.
+- Status: COMPLETE — implementation plan `docs/superpowers/plans/2026-10-07-f46-goal-outcome-delivery.md`; final commit `9455567` pushed.
+- Acceptance: oldest unannounced `origin='completed'` outcome attaches to one weekly intent; retry keeps association; delivery success sets `announced_at`; terminal failure releases outcome; empty financial report still sends outcome; RU/EN rendering; lost acknowledgement may duplicate externally.
+- Evidence: Core check passed; Telegram gateway 101 passed; contracts/migrations 70 passed with 2 optional skips; Go tests/vet passed; Web 75 passed and production build passed; `git diff --check` passed. GitHub returned no workflow run for `9455567`.
 - User choice: add result inside weekly digest, not a separate immediate message.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `e236920`.
-- Runtime: no matching local server listener; Docker command unavailable; repository has no Wrangler/Cloudflare deployment config. Public HTTPS and persistent server remain unverified.
-- Updated at: 2026-10-07 05:01 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, HEAD `9455567`.
+- Runtime: public HTTPS and persistent server remain unverified; F46 is code/contract completion, not deployment proof.
+- Next: F47 bank-statement PDF import in `PLAN.md`; inspect current import implementation/spec and write a bounded test-first plan. F45 legacy-history ingestion remains separately open.
+- Updated at: 2026-10-07 05:27 Europe/Moscow.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
@@ -1403,4 +1404,4 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 
 - OpenAPI RED: `NotificationDeliveryClaim` did not exist. Added claim, outcome, acknowledgement schemas and internal routes with weekly-only eligibility, delivered marker semantics, and lost-ack duplicate risk.
 - Full GREEN: Core `:services:core:check`; Telegram gateway 101 passed; contracts/migrations 70 passed, 2 optional skips; Go `test ./... -count=1` and `go vet ./...`; Web 75 passed and production build; `git diff --check`.
-- Task 4 commit pending. F46 acceptance met; final commit and remote status remain.
+- Final commit/push: `9455567` (`feat(F46): deliver goal outcome in weekly digest`). `gh run list --commit 9455567` returned no runs; remote CI did not start. F46 complete.
