@@ -3471,6 +3471,130 @@ class TransactionApiPostgresTest {
         }
     }
 
+    @Test
+    void successfulWeeklyDeliveryMarksAttachedOutcomeAnnouncedOnce() throws Exception {
+        cleanupNotificationTestFixtures();
+        UUID ownerId = prepareNotificationMember();
+        UUID outcomeId = insertGoalOutcome(ownerId, "completed", "Продукт", 2, 2,
+                Instant.now().minusSeconds(120));
+        UUID intentId = insertNotificationIntent(ownerId, "weekly", LocalDate.now(ZoneOffset.UTC).minusDays(7));
+        String claim = claimNotifications(1);
+        String lease = com.jayway.jsonpath.JsonPath.read(claim, "$.items[0].leaseToken");
+
+        acknowledgeNotification(intentId, lease, "delivered");
+        Instant announcedAt = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE id = ? AND announcement_intent_id IS NOT NULL",
+                    Integer.class, outcomeId));
+            return jdbc.queryForObject("SELECT announced_at FROM goal_outcomes WHERE id = ?",
+                    Instant.class, outcomeId);
+        });
+        org.junit.jupiter.api.Assertions.assertNotNull(announcedAt);
+        mvc.perform(post("/internal/v1/telegram/notifications/{intentId}/delivery", intentId)
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"leaseToken\":\"" + lease + "\",\"outcome\":\"delivered\"}"))
+                .andExpect(status().isConflict());
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE id = ? AND announced_at = ?",
+                    Integer.class, outcomeId, java.sql.Timestamp.from(announcedAt)));
+        });
+        cleanupNotificationTestFixtures();
+    }
+
+    @Test
+    void retryableDeliveryKeepsAttachedOutcomeForSameIntent() throws Exception {
+        cleanupNotificationTestFixtures();
+        UUID ownerId = prepareNotificationMember();
+        UUID outcomeId = insertGoalOutcome(ownerId, "completed", "Продукт", 2, 1,
+                Instant.now().minusSeconds(120));
+        UUID intentId = insertNotificationIntent(ownerId, "weekly", LocalDate.now(ZoneOffset.UTC).minusDays(7));
+        String first = claimNotifications(1);
+        String firstLease = com.jayway.jsonpath.JsonPath.read(first, "$.items[0].leaseToken");
+        acknowledgeNotification(intentId, firstLease, "retryable_failure");
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE id = ? AND announcement_intent_id = ? "
+                            + "AND announced_at IS NULL", Integer.class, outcomeId, intentId));
+            jdbc.update("UPDATE notification_intents SET available_at = now() WHERE id = ?", intentId);
+        });
+        String retry = claimNotifications(1);
+        org.junit.jupiter.api.Assertions.assertEquals(intentId.toString(),
+                com.jayway.jsonpath.JsonPath.read(retry, "$.items[0].intentId"));
+        org.junit.jupiter.api.Assertions.assertEquals(outcomeId.toString(),
+                com.jayway.jsonpath.JsonPath.read(retry, "$.items[0].goalOutcome.id"));
+        cleanupNotificationTestFixtures();
+    }
+
+    @Test
+    void terminalDeliveryFailureReleasesOutcomeForNextWeeklyIntent() throws Exception {
+        for (String terminalOutcome : List.of("no_data", "permanent_failure")) {
+            cleanupNotificationTestFixtures();
+            UUID ownerId = prepareNotificationMember();
+            UUID outcomeId = insertGoalOutcome(ownerId, "completed", "Продукт", 2, 1,
+                    Instant.now().minusSeconds(120));
+            UUID firstIntent = insertNotificationIntent(ownerId, "weekly",
+                    LocalDate.now(ZoneOffset.UTC).minusDays(14));
+            String first = claimNotifications(1);
+            String lease = com.jayway.jsonpath.JsonPath.read(first, "$.items[0].leaseToken");
+            acknowledgeNotification(firstIntent, lease, terminalOutcome);
+
+            transactions.executeWithoutResult(status -> {
+                jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+                jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class,
+                        tenantId.toString());
+                org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                        "SELECT count(*) FROM goal_outcomes WHERE id = ? AND announcement_intent_id IS NULL "
+                                + "AND announced_at IS NULL", Integer.class, outcomeId));
+            });
+            UUID nextIntent = insertNotificationIntent(ownerId, "weekly", LocalDate.now(ZoneOffset.UTC).minusDays(7));
+            String next = claimNotifications(1);
+            org.junit.jupiter.api.Assertions.assertEquals(nextIntent.toString(),
+                    com.jayway.jsonpath.JsonPath.read(next, "$.items[0].intentId"));
+            org.junit.jupiter.api.Assertions.assertEquals(outcomeId.toString(),
+                    com.jayway.jsonpath.JsonPath.read(next, "$.items[0].goalOutcome.id"));
+        }
+        cleanupNotificationTestFixtures();
+    }
+
+    @Test
+    void exhaustedExpiredLeaseReleasesAttachedOutcome() throws Exception {
+        cleanupNotificationTestFixtures();
+        UUID ownerId = prepareNotificationMember();
+        UUID outcomeId = insertGoalOutcome(ownerId, "completed", "Продукт", 2, 1,
+                Instant.now().minusSeconds(120));
+        UUID exhaustedIntent = insertNotificationIntent(ownerId, "weekly",
+                LocalDate.now(ZoneOffset.UTC).minusDays(14));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.update("UPDATE notification_intents SET attempt_count = 7 WHERE id = ?", exhaustedIntent);
+        });
+        String claim = claimNotifications(1);
+        org.junit.jupiter.api.Assertions.assertEquals(outcomeId.toString(),
+                com.jayway.jsonpath.JsonPath.read(claim, "$.items[0].goalOutcome.id"));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            jdbc.update("UPDATE notification_intents SET lease_until = now() - interval '1 second' WHERE id = ?",
+                    exhaustedIntent);
+        });
+        UUID nextIntent = insertNotificationIntent(ownerId, "weekly", LocalDate.now(ZoneOffset.UTC).minusDays(7));
+
+        String next = claimNotifications(1);
+        org.junit.jupiter.api.Assertions.assertEquals(nextIntent.toString(),
+                com.jayway.jsonpath.JsonPath.read(next, "$.items[0].intentId"));
+        org.junit.jupiter.api.Assertions.assertEquals(outcomeId.toString(),
+                com.jayway.jsonpath.JsonPath.read(next, "$.items[0].goalOutcome.id"));
+        cleanupNotificationTestFixtures();
+    }
+
     private UUID prepareNotificationMember() {
         String notificationSubject = "keycloak|f46-notification-" + UUID.randomUUID();
         UUID newMemberId = addTenantMember(notificationSubject, "F46 notification test", "owner");
@@ -3530,6 +3654,14 @@ class TransactionApiPostgresTest {
         } catch (Exception exception) {
             throw new IllegalStateException("Notification claim failed", exception);
         }
+    }
+
+    private void acknowledgeNotification(UUID intentId, String leaseToken, String outcome) throws Exception {
+        mvc.perform(post("/internal/v1/telegram/notifications/{intentId}/delivery", intentId)
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"leaseToken\":\"" + leaseToken + "\",\"outcome\":\"" + outcome + "\"}"))
+                .andExpect(status().isOk());
     }
 
     @Test

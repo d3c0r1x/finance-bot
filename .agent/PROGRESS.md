@@ -1383,4 +1383,11 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 - Test-first RED: two PostgreSQL acceptance tests failed because `goalOutcome` was absent. Migration test failed because V41 was absent.
 - Added V41 link with one-outcome-per-intent unique index and pending-completed lookup index. Weekly claims attach oldest unannounced completed outcome transactionally; retries return same attached snapshot; daily claims remain null.
 - GREEN: focused Core PostgreSQL tests 2/2 pass against isolated `finance_test_codex_20261004`; migration checks 16 passed, 2 optional skips; `git diff --check` pending final newline cleanup.
-- Task 1 commit pending. Next: finalize Task 1 progress/plan, commit, then write Task 2 delivery acknowledgement lifecycle tests and observe RED.
+- Task 1 commit/push: `21576a1` (`feat(F46.1): attach outcomes to weekly claims`). Task 2 PostgreSQL lifecycle tests observed RED, then passed 4/4 focused methods after transactional delivered/retry/terminal/expired-lease transitions. Next: commit Task 2, then add Telegram validation/rendering tests and observe RED.
+
+## E4.83 F46.2 delivery acknowledgement lifecycle — 2026-10-07
+
+- Test-first RED: delivered outcome did not mark announcement, terminal failures retained association, and exhausted lease hid outcome from next intent. Retry retention already passed.
+- Core now marks delivered outcome once and clears link; preserves link on retry; releases it on no_data, permanent/exhausted failures. Expired exhausted leases release linked outcomes in the claim transaction.
+- GREEN: six focused Core notification PostgreSQL tests passed, covering claim and acknowledgement lifecycle.
+- Task 2 commit pending. Next: write Python Core client, digest renderer, and worker tests before implementation.

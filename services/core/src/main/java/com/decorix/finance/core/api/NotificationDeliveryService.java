@@ -175,13 +175,15 @@ public class NotificationDeliveryService {
         }
         return transaction.execute(status -> {
             enableServiceContext();
-            List<Integer> attempts = jdbc.query("""
-                    SELECT attempt_count FROM notification_intents
+            List<AcknowledgementRow> attempts = jdbc.query("""
+                    SELECT attempt_count, tenant_id FROM notification_intents
                     WHERE id = ? AND state = 'leased' AND lease_token = ? AND lease_until > now()
                     FOR UPDATE
-                    """, (rs, row) -> rs.getInt("attempt_count"), intentId, request.leaseToken());
+                    """, (rs, row) -> new AcknowledgementRow(rs.getInt("attempt_count"),
+                    rs.getObject("tenant_id", UUID.class)), intentId, request.leaseToken());
             if (attempts.isEmpty()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Delivery lease expired");
-            int attempt = attempts.get(0);
+            AcknowledgementRow acknowledgement = attempts.get(0);
+            int attempt = acknowledgement.attemptCount();
             String nextState;
             Instant retryAt = null;
             String attemptOutcome = request.outcome();
@@ -200,6 +202,8 @@ public class NotificationDeliveryService {
                 }
                 default -> throw new IllegalStateException("Validated notification result was not handled");
             }
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class,
+                    acknowledgement.tenantId().toString());
             jdbc.update("""
                     UPDATE notification_delivery_attempts
                     SET outcome = ?, completed_at = now(), error_code = ?, provider_message_id = ?
@@ -215,6 +219,19 @@ public class NotificationDeliveryService {
                     WHERE id = ? AND lease_token = ?
                     """, nextState, retryAt == null ? null : Timestamp.from(retryAt), request.errorCode(),
                     request.providerMessageId(), request.outcome(), intentId, request.leaseToken());
+            if ("delivered".equals(request.outcome())) {
+                jdbc.update("""
+                        UPDATE goal_outcomes
+                        SET announced_at = COALESCE(announced_at, now()), announcement_intent_id = NULL
+                        WHERE tenant_id = ? AND announcement_intent_id = ?
+                        """, acknowledgement.tenantId(), intentId);
+            } else if (!"pending".equals(nextState)) {
+                jdbc.update("""
+                        UPDATE goal_outcomes
+                        SET announcement_intent_id = NULL
+                        WHERE tenant_id = ? AND announcement_intent_id = ? AND announced_at IS NULL
+                        """, acknowledgement.tenantId(), intentId);
+            }
             return new DeliveryResponse(nextState);
         });
     }
@@ -322,11 +339,21 @@ public class NotificationDeliveryService {
                   AND intent.lease_until <= now() AND attempt.attempt_number = intent.attempt_count
                   AND attempt.outcome = 'started'
                 """);
-        jdbc.update("""
+        List<ExpiredIntent> exhausted = jdbc.query("""
                 UPDATE notification_intents SET state = 'failed', lease_token = NULL,
                   lease_until = NULL, last_error_code = 'attempts_exhausted', updated_at = now()
                 WHERE state = 'leased' AND lease_until <= now() AND attempt_count >= ?
-                """, MAX_ATTEMPTS);
+                RETURNING id, tenant_id
+                """, (rs, row) -> new ExpiredIntent(rs.getObject("id", UUID.class),
+                rs.getObject("tenant_id", UUID.class)), MAX_ATTEMPTS);
+        for (ExpiredIntent intent : exhausted) {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class,
+                    intent.tenantId().toString());
+            jdbc.update("""
+                    UPDATE goal_outcomes SET announcement_intent_id = NULL
+                    WHERE tenant_id = ? AND announcement_intent_id = ? AND announced_at IS NULL
+                    """, intent.tenantId(), intent.intentId());
+        }
     }
 
     private void enableServiceContext() {
@@ -352,4 +379,6 @@ public class NotificationDeliveryService {
             LocalDate scheduledLocalDate, String language, LocalDate reportFromDate, LocalDate reportToDate,
             String timezone, int attemptNumber, UUID leaseToken, long telegramUserId,
             GoalOutcomeMessage goalOutcome) {}
+    private record AcknowledgementRow(int attemptCount, UUID tenantId) {}
+    private record ExpiredIntent(UUID intentId, UUID tenantId) {}
 }

@@ -68,7 +68,7 @@
 - [x] **Step 4: Run focused Core test and migration checks**
   - Run the focused Gradle test; expected PASS.
   - Run: `.venv\Scripts\python.exe -m pytest tools/contracts/test_core_migration.py -q -p no:cacheprovider`; expected PASS.
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
   - Commit migration, Core DTO/service, acceptance test, migration check, and plan state as `feat(F46.1): attach outcomes to weekly claims`.
 
 ### Task 2: Core delivery acknowledgement lifecycle
@@ -83,19 +83,19 @@
 - On retryable failure below attempt limit, preserve the association.
 - On `no_data`, permanent failure, or exhausted retries, clear the association and leave `announced_at` null.
 
-- [ ] **Step 1: Write acknowledgement lifecycle tests**
+- [x] **Step 1: Write acknowledgement lifecycle tests**
   - `successfulWeeklyDeliveryMarksAttachedOutcomeAnnouncedOnce`: a valid lease and `delivered` set `announced_at`; duplicate acknowledgement is rejected and does not rewrite it.
   - `retryableDeliveryKeepsAttachedOutcomeForSameIntent`: retry leaves it unannounced and attached; next claim returns the same outcome.
   - `terminalDeliveryFailureReleasesOutcomeForNextWeeklyIntent`: terminal `permanent_failure` and `no_data` leave it unannounced and unlinked; a later weekly intent can claim it.
   - `exhaustedExpiredLeaseReleasesAttachedOutcome`: exhausting lease attempts leaves outcome available for later delivery.
-- [ ] **Step 2: Run focused tests and observe RED**
+- [x] **Step 2: Run focused tests and observe RED**
   - Run the four test methods in `TransactionApiPostgresTest` with the isolated PostgreSQL test database.
   - Expected: announcement/link columns do not transition with acknowledgement.
-- [ ] **Step 3: Implement acknowledgement transitions**
+- [x] **Step 3: Implement acknowledgement transitions**
   - Apply outcome updates inside the same transaction as the existing delivery attempt and intent updates.
   - Release attached outcomes whenever the intent reaches `skipped_no_data` or `failed`, including lease exhaustion.
   - Preserve association for `pending` retry state.
-- [ ] **Step 4: Run focused lifecycle tests**
+- [x] **Step 4: Run focused lifecycle tests**
   - Expected: all four tests PASS; regular notification retry tests remain PASS.
 - [ ] **Step 5: Commit Task 2**
   - Commit service and PostgreSQL tests as `feat(F46.2): mark goal outcome delivery`.
