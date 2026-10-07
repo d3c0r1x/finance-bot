@@ -18,6 +18,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -30,6 +31,7 @@ public class GoalCandidatesClient {
     private static final int MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
     private static final Pattern WATERMARK = Pattern.compile("^[1-9][0-9]{0,19}$");
     private static final Pattern MONEY = Pattern.compile("^(?:0|[1-9][0-9]{0,14})\\.[0-9]{2}$");
+    private static final Pattern PRODUCT_KEY = Pattern.compile("^[a-zа-я0-9]{1,256}$");
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
     private final ObjectMapper json;
     private final String serviceUrl;
@@ -119,6 +121,7 @@ public class GoalCandidatesClient {
         for (Candidate candidate : report.groups()) {
             if (candidate == null || candidate.key() == null || !candidate.key().startsWith("cat:")
                     || candidate.productKey() != null || !"count".equals(candidate.unit())
+                    || !validGroupMembers(candidate.memberProductKeys())
                     || candidate.countTarget() < 1 || candidate.monthlyLimit() != null
                     || candidate.name() == null || candidate.name().isBlank() || candidate.evidenceCount() < 2
                     || candidate.purchaseCount() < 2 || !money(candidate.monthlyRate())
@@ -136,6 +139,15 @@ public class GoalCandidatesClient {
 
     private static boolean money(String value) {
         return value != null && MONEY.matcher(value).matches() && new BigDecimal(value).signum() >= 0;
+    }
+
+    private static boolean validGroupMembers(List<String> members) {
+        if (members == null || members.isEmpty() || members.size() > 50_000) return false;
+        Set<String> unique = new HashSet<>();
+        for (String member : members) {
+            if (member == null || !PRODUCT_KEY.matcher(member).matches() || !unique.add(member)) return false;
+        }
+        return true;
     }
 
     private static ResponseStatusException unavailable() {

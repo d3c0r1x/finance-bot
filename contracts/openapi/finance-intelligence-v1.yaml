@@ -949,6 +949,20 @@ components:
         countTarget: { type: integer, minimum: 0 }
         monthlyLimit: { type: string, pattern: '^\d{1,15}\.\d{2}$' }
         memberProductKeys: { type: array, uniqueItems: true, minItems: 1, maxItems: 50000, items: { type: string, minLength: 1, maxLength: 256 } }
+      allOf:
+        - if:
+            properties: { scope: { const: group } }
+          then:
+            required: [memberProductKeys]
+        - if:
+            properties: { unit: { const: sum } }
+          then:
+            required: [monthlyLimit]
+            properties: { scope: { const: product }, countTarget: { const: 0 } }
+        - if:
+            properties: { unit: { const: count } }
+          then:
+            properties: { countTarget: { minimum: 1 } }
     F45Purchase:
       type: object
       additionalProperties: false

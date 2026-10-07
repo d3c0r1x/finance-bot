@@ -6002,7 +6002,7 @@ components:
     GoalOverview:
       type: object
       additionalProperties: false
-      required: [unit, active, inputWatermark, candidates, groups, skipped]
+      required: [unit, active, inputWatermark, candidates, groups, skipped, activeProgress, history]
       properties:
         unit: { type: string, enum: [count, sum] }
         active: { oneOf: [{ $ref: '#/components/schemas/MemberGoal' }, { type: 'null' }] }
@@ -6010,6 +6010,8 @@ components:
         candidates: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/GoalCandidate' } }
         groups: { type: array, maxItems: 2, items: { $ref: '#/components/schemas/GoalCandidate' } }
         skipped: { type: array, maxItems: 3, items: { $ref: '#/components/schemas/GoalSkippedCandidate' } }
+        activeProgress: { oneOf: [{ $ref: '#/components/schemas/GoalProgressF45' }, { type: 'null' }], description: Read-only progress from confirmed purchases for the active goal; unknown sums remain null. }
+        history: { type: array, maxItems: 48, items: { $ref: '#/components/schemas/GoalOutcome' }, description: All imported legacy outcomes (up to 24) plus the newest 24 Core completions. }
     GoalCandidate:
       type: object
       additionalProperties: false
@@ -6017,6 +6019,7 @@ components:
       properties:
         key: { type: string, minLength: 1, maxLength: 300 }
         productKey: { type: [string, 'null'], maxLength: 256 }
+        memberProductKeys: { type: array, uniqueItems: true, minItems: 1, maxItems: 50000, items: { type: string, minLength: 1, maxLength: 256 } }
         name: { type: string, minLength: 1, maxLength: 200 }
         unit: { type: string, enum: [count, sum] }
         monthlyRate: { type: string, pattern: '^\d+\.\d{2}$' }
@@ -6026,6 +6029,11 @@ components:
         estimatedReduction: { type: [string, 'null'], pattern: '^\d+\.\d{2}$' }
         purchaseCount: { type: integer, minimum: 2, maximum: 50000 }
         evidenceCount: { type: integer, minimum: 1, maximum: 50000 }
+      allOf:
+        - if:
+            properties: { key: { pattern: '^cat:' } }
+          then:
+            required: [memberProductKeys]
     GoalSkippedCandidate:
       type: object
       additionalProperties: false
@@ -6068,6 +6076,42 @@ components:
         endsAt: { type: string, format: date-time }
         status: { type: string, enum: [active, cancelled, completed] }
         version: { type: integer, minimum: 1 }
+    GoalProgressF45:
+      type: object
+      additionalProperties: false
+      required: [algorithmVersion, inputWatermark, unit, bought, spent, amountsUnknown, over, met, finished, daysLeft, windowStart, windowEnd]
+      properties:
+        algorithmVersion: { type: string, const: goal-progress-f45.v1 }
+        inputWatermark: { type: string, pattern: '^[1-9][0-9]{0,19}$' }
+        unit: { type: string, enum: [count, sum] }
+        bought: { type: integer, minimum: 0, maximum: 50000 }
+        spent: { type: [string, 'null'], pattern: '^\d{1,15}\.\d{2}$' }
+        amountsUnknown: { type: boolean }
+        over: { type: [boolean, 'null'] }
+        met: { type: [boolean, 'null'] }
+        finished: { type: boolean }
+        daysLeft: { type: integer, minimum: 0, maximum: 30 }
+        windowStart: { type: string, format: date-time }
+        windowEnd: { type: string, format: date-time }
+    GoalOutcome:
+      type: object
+      additionalProperties: false
+      required: [id, goalId, key, name, scope, unit, countTarget, monthlyLimit, bought, spent, met, acceptedAt, completedAt, origin]
+      properties:
+        id: { type: string, format: uuid }
+        goalId: { type: [string, 'null'], format: uuid }
+        key: { type: string, minLength: 1, maxLength: 300 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        scope: { type: string, enum: [product, group] }
+        unit: { type: string, enum: [count, sum] }
+        countTarget: { type: integer, minimum: 0 }
+        monthlyLimit: { type: [string, 'null'], pattern: '^\d{1,15}\.\d{2}$' }
+        bought: { type: integer, minimum: 0, maximum: 50000 }
+        spent: { type: [string, 'null'], pattern: '^\d{1,15}\.\d{2}$' }
+        met: { type: [boolean, 'null'] }
+        acceptedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        origin: { type: string, enum: [completed, legacy] }
     ClaimedAdviceAnalyticsJob:
       type: object
       additionalProperties: false

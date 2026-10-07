@@ -982,6 +982,18 @@ def test_goal_progress_f45_internal_contract_is_strict_and_nullable_for_unknown_
     Draft202012Validator(response_document, format_checker=FormatChecker()).validate(response)
 
 
+def test_goal_public_contract_exposes_progress_and_bounded_history():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    schemas = spec["components"]["schemas"]
+    overview = schemas["GoalOverview"]
+    assert {"activeProgress", "history"}.issubset(overview["required"])
+    assert overview["properties"]["history"]["maxItems"] == 48
+    assert overview["properties"]["history"]["items"]["$ref"] == "#/components/schemas/GoalOutcome"
+    assert schemas["GoalProgressF45"]["additionalProperties"] is False
+    assert schemas["GoalOutcome"]["additionalProperties"] is False
+    assert schemas["GoalCandidate"]["properties"]["memberProductKeys"]["uniqueItems"] is True
+
+
 def test_advice_evidence_internal_contract_is_strict_and_fixture_matches_schema():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
     operation = spec["paths"]["/internal/v1/analytics/advice/evidence-groups"]["post"]

@@ -5,9 +5,14 @@ import com.decorix.finance.core.api.GoalCandidatesApi.Candidate;
 import com.decorix.finance.core.api.GoalCandidatesApi.CandidateReport;
 import com.decorix.finance.core.api.GoalCandidatesApi.Decision;
 import com.decorix.finance.core.api.GoalCandidatesApi.Goal;
+import com.decorix.finance.core.api.GoalCandidatesApi.GoalOutcome;
+import com.decorix.finance.core.api.GoalCandidatesApi.GoalProgress;
 import com.decorix.finance.core.api.GoalCandidatesApi.GoalUnitResponse;
 import com.decorix.finance.core.api.GoalCandidatesApi.Overview;
 import com.decorix.finance.core.api.GoalCandidatesApi.Purchase;
+import com.decorix.finance.core.api.GoalCandidatesApi.F45GoalInput;
+import com.decorix.finance.core.api.GoalCandidatesApi.F45PurchaseInput;
+import com.decorix.finance.core.api.GoalCandidatesApi.ProgressRequest;
 import com.decorix.finance.core.api.GoalCandidatesApi.Request;
 import com.decorix.finance.core.api.GoalCandidatesApi.SkippedCandidate;
 import com.decorix.finance.core.domain.ProductIdentityPolicy;
@@ -34,21 +39,37 @@ public class GoalService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
     private final GoalCandidatesClient candidates;
+    private final GoalProgressClient progressClient;
     private final ObjectMapper json;
 
     public GoalService(JdbcTemplate jdbc, TransactionTemplate transaction,
-                       GoalCandidatesClient candidates, ObjectMapper json) {
+                       GoalCandidatesClient candidates, GoalProgressClient progressClient, ObjectMapper json) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.candidates = candidates;
+        this.progressClient = progressClient;
         this.json = json;
     }
 
     public Overview get(UUID tenantId, String subject) {
         Snapshot snapshot = transaction.execute(status -> snapshot(tenantId, subject, false));
         CandidateReport report = candidates.calculate(snapshot.request());
+        GoalProgress progress = null;
+        if (snapshot.active() != null) {
+            Goal active = snapshot.active();
+            F45GoalInput terms = new F45GoalInput(active.key(), active.scope(), active.unit(), active.acceptedAt(),
+                    active.endsAt(), active.countTarget(), active.monthlyLimit(), snapshot.activeMembers());
+            List<F45PurchaseInput> purchases = snapshot.request().purchases().stream()
+                    .map(purchase -> new F45PurchaseInput(purchase.productKey(), purchase.lineSum(), purchase.purchasedAt()))
+                    .toList();
+            progress = progressClient.calculate(new ProgressRequest(snapshot.request().inputWatermark(),
+                    snapshot.request().asOf(), terms, purchases));
+            if (progress.finished() && snapshot.canWrite()) {
+                if (closeIfFinished(tenantId, subject, active.id(), progress)) return get(tenantId, subject);
+            }
+        }
         return new Overview(snapshot.unit(), snapshot.active(), report.inputWatermark(),
-                report.products(), report.groups(), report.skipped());
+                report.products(), report.groups(), report.skipped(), progress, snapshot.history());
     }
 
     public Goal accept(UUID tenantId, String subject, AcceptRequest request) {
@@ -77,12 +98,13 @@ public class GoalService {
                 jdbc.update("""
                         INSERT INTO goals (id, tenant_id, owner_user_id, goal_key, goal_scope, display_name, unit,
                             baseline_rate, count_target, baseline_monthly_spend, monthly_limit, evidence_count,
-                            input_watermark, accepted_at, ends_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            input_watermark, accepted_at, ends_at, member_product_keys)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb))
                         """, id, tenantId, actor.userId(), selected.key(), scope, selected.name(), selected.unit(),
                         new BigDecimal(selected.monthlyRate()), selected.countTarget(), decimal(selected.monthlySpend()),
                         decimal(selected.monthlyLimit()), selected.evidenceCount(), request.inputWatermark(),
-                        Timestamp.from(acceptedAt), Timestamp.from(acceptedAt.plus(java.time.Duration.ofDays(30))));
+                        Timestamp.from(acceptedAt), Timestamp.from(acceptedAt.plus(java.time.Duration.ofDays(30))),
+                        serialize(acceptedMembers(selected, scope)));
                 Goal goal = goal(tenantId, actor.userId(), id);
                 audit(tenantId, subject, "goal", "goal.accepted", id, null, goal);
                 outbox(tenantId, "goal", id, 1, "goal.accepted", goal);
@@ -171,7 +193,9 @@ public class GoalService {
         String watermark = GoalCandidatesClient.watermark(unit, decisionRows, purchases, json);
         Request request = new Request(watermark, Instant.now(), unit, decisionRows, purchases);
         Goal active = activeGoal(tenantId, actor.userId());
-        return new Snapshot(unit, active, request);
+        List<String> members = active == null ? List.of() : memberProductKeys(tenantId, actor.userId(), active.id());
+        return new Snapshot(unit, active, members, history(tenantId, actor.userId()), request,
+                !"viewer".equals(actor.role()));
     }
 
     private Actor actor(UUID tenantId, String subject, boolean write) {
@@ -201,6 +225,82 @@ public class GoalService {
         return jdbc.query("SELECT id FROM goals WHERE tenant_id=? AND owner_user_id=? AND status='active'",
                 (rs, row) -> rs.getObject(1, UUID.class), tenantId, userId).stream().findFirst()
                 .map(id -> goal(tenantId, userId, id)).orElse(null);
+    }
+
+    private List<String> memberProductKeys(UUID tenantId, UUID userId, UUID goalId) {
+        List<String> raw = jdbc.query("SELECT member_product_keys::text FROM goals WHERE tenant_id=? AND owner_user_id=? AND id=?",
+                (rs, row) -> rs.getString(1), tenantId, userId, goalId);
+        if (raw.isEmpty()) return List.of();
+        try {
+            return json.readValue(raw.get(0), json.getTypeFactory().constructCollectionType(List.class, String.class));
+        } catch (JacksonException exception) {
+            throw new IllegalStateException("Stored goal membership is invalid", exception);
+        }
+    }
+
+    private List<GoalOutcome> history(UUID tenantId, UUID userId) {
+        return jdbc.query("""
+                SELECT id, goal_id, goal_snapshot->>'key' AS goal_key, goal_snapshot->>'name' AS goal_name,
+                    goal_snapshot->>'scope' AS goal_scope, goal_snapshot->>'unit' AS goal_unit,
+                    COALESCE((goal_snapshot->>'countTarget')::integer, 0) AS count_target,
+                    goal_snapshot->>'monthlyLimit' AS monthly_limit,
+                    COALESCE((progress_snapshot->>'bought')::integer, 0) AS bought,
+                    progress_snapshot->>'spent' AS spent,
+                    CASE WHEN progress_snapshot->'met' = 'null'::jsonb THEN NULL
+                         ELSE (progress_snapshot->>'met')::boolean END AS met,
+                    accepted_at, completed_at, origin
+                FROM goal_outcomes WHERE tenant_id=? AND owner_user_id=? AND
+                    (origin = 'legacy' OR id IN (
+                        SELECT id FROM goal_outcomes WHERE tenant_id=? AND owner_user_id=? AND origin='completed'
+                        ORDER BY completed_at DESC, id DESC LIMIT 24
+                    ))
+                ORDER BY completed_at DESC, id DESC
+                """, (rs, row) -> new GoalOutcome(rs.getObject("id", UUID.class), rs.getObject("goal_id", UUID.class),
+                rs.getString("goal_key"), rs.getString("goal_name"), rs.getString("goal_scope"), rs.getString("goal_unit"),
+                rs.getInt("count_target"), rs.getString("monthly_limit"), rs.getInt("bought"), rs.getString("spent"),
+                (Boolean) rs.getObject("met"), rs.getTimestamp("accepted_at").toInstant(),
+                rs.getTimestamp("completed_at").toInstant(), rs.getString("origin")), tenantId, userId, tenantId, userId);
+    }
+
+    private boolean closeIfFinished(UUID tenantId, String subject, UUID goalId, GoalProgress progress) {
+        return transaction.execute(status -> {
+            Actor actor = actor(tenantId, subject, true);
+            Goal before = goalOrNull(tenantId, actor.userId(), goalId);
+            if (before == null || !"active".equals(before.status()) || !progress.finished()) return false;
+            Snapshot current = snapshot(tenantId, subject, false, actor, preference(tenantId, actor.userId()));
+            if (current.active() == null || !goalId.equals(current.active().id())
+                    || !progress.inputWatermark().equals(current.request().inputWatermark())) return false;
+            int changed = jdbc.update("UPDATE goals SET status='completed', version=version+1, updated_at=now() "
+                            + "WHERE tenant_id=? AND owner_user_id=? AND id=? AND status='active' AND ends_at < ?",
+                    tenantId, actor.userId(), goalId, Timestamp.from(current.request().asOf()));
+            if (changed != 1) return false;
+            Goal completed = goal(tenantId, actor.userId(), goalId);
+            jdbc.update("""
+                    INSERT INTO goal_outcomes (tenant_id, owner_user_id, goal_id, origin, goal_snapshot,
+                        progress_snapshot, accepted_at, completed_at)
+                    VALUES (?, ?, ?, 'completed', CAST(? AS jsonb), CAST(? AS jsonb), ?, ?)
+                    ON CONFLICT (tenant_id, goal_id) WHERE goal_id IS NOT NULL DO NOTHING
+                    """, tenantId, actor.userId(), goalId, serialize(completed), serialize(progress),
+                    Timestamp.from(completed.acceptedAt()), Timestamp.from(current.request().asOf()));
+            jdbc.update("""
+                    DELETE FROM goal_outcomes WHERE tenant_id=? AND owner_user_id=? AND origin='completed'
+                      AND id IN (SELECT id FROM goal_outcomes WHERE tenant_id=? AND owner_user_id=? AND origin='completed'
+                                 ORDER BY completed_at DESC, id DESC OFFSET 24)
+                    """, tenantId, actor.userId(), tenantId, actor.userId());
+            audit(tenantId, subject, "goal", "goal.completed", goalId, before, completed);
+            outbox(tenantId, "goal", goalId, completed.version(), "goal.completed", completed);
+            return true;
+        });
+    }
+
+    private static List<String> acceptedMembers(Candidate candidate, String scope) {
+        List<String> members = candidate.memberProductKeys() == null ? List.of() : candidate.memberProductKeys();
+        if ("group".equals(scope) != !members.isEmpty())
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Goal candidate membership is invalid");
+        if (members.size() > MAX_ITEMS || new java.util.HashSet<>(members).size() != members.size()
+                || members.stream().anyMatch(key -> key == null || !key.matches("[a-zа-я0-9]{1,256}")))
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Goal candidate membership is invalid");
+        return members;
     }
 
     private Goal goalOrNull(UUID tenantId, UUID userId, UUID id) {
@@ -262,7 +362,8 @@ public class GoalService {
 
     private record Actor(UUID userId, String role) {}
     private record Fact(String name, BigDecimal lineSum, String verdict, String source, Instant purchasedAt) {}
-    private record Snapshot(String unit, Goal active, Request request) {}
+    private record Snapshot(String unit, Goal active, List<String> activeMembers, List<GoalOutcome> history,
+                            Request request, boolean canWrite) {}
     private static final class DecisionBuilder {
         final String key;
         final String name;

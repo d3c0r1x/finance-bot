@@ -40,6 +40,21 @@ def test_transaction_indexes_and_outbox_retry_fields_exist():
     assert "next_attempt_at" in sql
 
 
+def test_goal_progress_and_outcomes_migration_preserves_group_terms_and_tenant_isolation():
+    migration = next((path for path in MIGRATIONS if path.name.startswith("V40__goal_progress_and_outcomes")), None)
+    assert migration is not None, "goal progress and outcomes need an additive V40 migration"
+    normalized = re.sub(r"--[^\n]*", "", migration.read_text(encoding="utf-8").lower())
+    assert "add column member_product_keys jsonb not null" in normalized
+    assert "goals_membership_matches_scope" in normalized
+    assert "create trigger goals_members_immutable" in normalized
+    assert "create table goal_outcomes" in normalized
+    assert "origin in ('completed', 'legacy')" in normalized
+    assert "goal_outcomes_one_per_goal_idx" in normalized
+    assert "goal_outcomes_legacy_key_idx" in normalized
+    assert "alter table goal_outcomes enable row level security" in normalized
+    assert "alter table goal_outcomes force row level security" in normalized
+
+
 def test_receipt_migration_is_tenant_scoped_and_keeps_reader_evidence():
     sql = "\n".join(path.read_text(encoding="utf-8") for path in MIGRATIONS).lower()
     normalized = re.sub(r"--[^\n]*", "", sql)

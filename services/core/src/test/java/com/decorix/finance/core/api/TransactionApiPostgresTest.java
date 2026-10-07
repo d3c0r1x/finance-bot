@@ -142,6 +142,7 @@ class TransactionApiPostgresTest {
     @MockitoBean private ReceiptVisionClient receiptVisionClient;
     @MockitoBean private AdviceRecalculationImpactClient recalculationImpactClient;
     @MockitoBean private GoalCandidatesClient goalCandidatesClient;
+    @MockitoBean private GoalProgressClient goalProgressClient;
 
     private UUID tenantId;
     private String subject;
@@ -193,6 +194,28 @@ class TransactionApiPostgresTest {
         lenient().when(recalculationImpactClient.calculate(any())).thenReturn(new Impact(
                 "receipt-recalculation-impact.v1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 "available", "complete", "0.00", "0.00", "0.00"));
+        lenient().when(goalProgressClient.calculate(any())).thenAnswer(invocation -> {
+            GoalCandidatesApi.ProgressRequest request = invocation.getArgument(0);
+            Instant asOf = request.asOf();
+            var goal = request.goal();
+            List<GoalCandidatesApi.F45PurchaseInput> matching = request.purchases().stream()
+                    .filter(purchase -> !purchase.purchasedAt().isBefore(goal.acceptedAt())
+                            && !purchase.purchasedAt().isAfter(goal.endsAt()) && !purchase.purchasedAt().isAfter(asOf))
+                    .filter(purchase -> "product".equals(goal.scope()) ? purchase.productKey().equals(goal.key())
+                            : goal.memberProductKeys().contains(purchase.productKey()))
+                    .toList();
+            boolean unknown = matching.stream().anyMatch(purchase -> purchase.lineSum() == null);
+            BigDecimal spentAmount = matching.stream().filter(purchase -> purchase.lineSum() != null)
+                    .map(purchase -> new BigDecimal(purchase.lineSum())).reduce(BigDecimal.ZERO, BigDecimal::add);
+            Boolean over = "count".equals(goal.unit()) ? matching.size() > goal.countTarget()
+                    : unknown ? null : spentAmount.compareTo(new BigDecimal(goal.monthlyLimit())) > 0;
+            Boolean met = over == null ? null : !over;
+            return new GoalCandidatesApi.GoalProgress("goal-progress-f45.v1", request.inputWatermark(),
+                    goal.unit(), matching.size(), unknown ? null : spentAmount.setScale(2).toPlainString(), unknown,
+                    over, met, asOf.isAfter(goal.endsAt()),
+                    Math.max(0, (int) Math.ceil(java.time.Duration.between(asOf, goal.endsAt()).toMillis() / 86_400_000.0)),
+                    goal.acceptedAt(), goal.endsAt());
+        });
         RECURRING_FIXTURE_ENABLED.set(false);
         LAST_WASTE_REQUEST.set("");
         WASTE_RESPONSE_STATUS.set(200);
@@ -5588,6 +5611,144 @@ class TransactionApiPostgresTest {
     }
 
     @Test
+    void acceptedGroupGoalPersistsTheEligibleProductKeysFromItsPreview() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            for (String name : List.of("Чипсы", "Сухарики")) {
+                UUID transactionId = addReportTransaction(ownerId, subject, "expense", "100.00", "food",
+                        "2026-10-07T10:00:00Z");
+                addConfirmedReceiptItem(ownerId, subject, transactionId, name, "100.00", "harmful", "rule", 2);
+            }
+        });
+        var group = new GoalCandidatesApi.Candidate("cat:снеки", null, "Снеки и чипсы", "count",
+                "4.00", 2, "400.00", null, "200.00", 4, 4, List.of("чипсы", "сухарики"));
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> {
+            GoalCandidatesApi.Request request = invocation.getArgument(0);
+            return new GoalCandidatesApi.CandidateReport("goal-candidates-f44.v1", request.inputWatermark(),
+                    request.unit(), List.of(), List.of(group), List.of());
+        });
+        String preview = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String watermark = com.jayway.jsonpath.JsonPath.read(preview, "$.inputWatermark");
+        String accepted = mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json")
+                        .content("{\"candidateKey\":\"cat:снеки\",\"inputWatermark\":\"" + watermark + "\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.scope").value("group"))
+                .andReturn().getResponse().getContentAsString();
+        UUID goalId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(accepted, "$.id"));
+        String storedMembers = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForObject("SELECT member_product_keys::text FROM goals WHERE tenant_id=? AND id=?",
+                    String.class, tenantId, goalId);
+        });
+        org.junit.jupiter.api.Assertions.assertEquals("[\"чипсы\", \"сухарики\"]", storedMembers);
+    }
+
+    @Test
+    void activeGoalProgressCountsOnlyPurchasesAfterAcceptanceAndRefreshesAfterReceiptConfirmation() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            for (int index = 0; index < 4; index++) {
+                UUID transactionId = addReportTransaction(ownerId, subject, "expense", "40.00", "food",
+                        "2026-10-0" + (index + 1) + "T10:00:00Z");
+                addConfirmedReceiptItem(ownerId, subject, transactionId, "Чипсы", "40.00", "harmful", "rule", 2);
+            }
+        });
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> {
+            GoalCandidatesApi.Request request = invocation.getArgument(0);
+            var candidate = new GoalCandidatesApi.Candidate("чипсы", "чипсы", "Чипсы", "count", "4.00",
+                    2, "160.00", null, "80.00", 4, 4, List.of());
+            return new GoalCandidatesApi.CandidateReport("goal-candidates-f44.v1", request.inputWatermark(),
+                    request.unit(), List.of(candidate), List.of(), List.of());
+        });
+        String preview = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String watermark = com.jayway.jsonpath.JsonPath.read(preview, "$.inputWatermark");
+        String accepted = mvc.perform(post("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth)
+                        .contentType("application/json")
+                        .content("{\"candidateKey\":\"чипсы\",\"inputWatermark\":\"" + watermark + "\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String acceptedGoalId = com.jayway.jsonpath.JsonPath.read(accepted, "$.id");
+        UUID ownerId = userIdFor(subject);
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID transactionId = addReportTransaction(ownerId, subject, "expense", "55.00", "food", Instant.now().toString());
+            addConfirmedReceiptItem(ownerId, subject, transactionId, "Чипсы", "55.00", "neutral", "rule", 1);
+        });
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active.id").value(acceptedGoalId))
+                .andExpect(jsonPath("$.activeProgress.bought").value(1))
+                .andExpect(jsonPath("$.activeProgress.spent").value("55.00"))
+                .andExpect(jsonPath("$.activeProgress.met").value(true));
+    }
+
+    @Test
+    void expiredActiveGoalIsArchivedOnceWhileCancelledGoalNeverEntersHistory() throws Exception {
+        var auth = jwt().jwt(token -> token.subject(subject));
+        String viewerSubject = "keycloak|expired-goal-viewer-" + UUID.randomUUID();
+        addTenantMember(viewerSubject, "Expired goal viewer", "viewer");
+        var viewerAuth = jwt().jwt(token -> token.subject(viewerSubject));
+        List<UUID> goalIds = transactions.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            UUID ownerId = userIdFor(subject);
+            UUID viewerId = userIdFor(viewerSubject);
+            UUID completedId = UUID.randomUUID();
+            UUID cancelledId = UUID.randomUUID();
+            UUID viewerExpiredId = UUID.randomUUID();
+            Instant acceptedAt = Instant.now().minusSeconds(31L * 24 * 60 * 60);
+            Instant endsAt = acceptedAt.plusSeconds(30L * 24 * 60 * 60);
+            String insert = """
+                    INSERT INTO goals (id, tenant_id, owner_user_id, goal_key, goal_scope, display_name, unit,
+                        baseline_rate, count_target, baseline_monthly_spend, monthly_limit, evidence_count,
+                        input_watermark, accepted_at, ends_at, status, member_product_keys)
+                    VALUES (?, ?, ?, 'chips', 'product', 'Чипсы', 'count', 4, 2, 100, NULL, 2, '1', ?, ?, ?, '[]'::jsonb)
+                    """;
+            jdbc.update(insert, completedId, tenantId, ownerId, java.sql.Timestamp.from(acceptedAt),
+                    java.sql.Timestamp.from(endsAt), "active");
+            jdbc.update(insert, cancelledId, tenantId, ownerId, java.sql.Timestamp.from(acceptedAt.minusSeconds(1)),
+                    java.sql.Timestamp.from(endsAt.minusSeconds(1)), "cancelled");
+            jdbc.update(insert, viewerExpiredId, tenantId, viewerId, java.sql.Timestamp.from(acceptedAt),
+                    java.sql.Timestamp.from(endsAt), "active");
+            return List.of(completedId, cancelledId, viewerExpiredId);
+        });
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> goalCandidates(invocation.getArgument(0)));
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(viewerAuth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active.id").value(goalIds.get(2).toString()))
+                .andExpect(jsonPath("$.activeProgress.finished").value(true));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals("active", jdbc.queryForObject(
+                    "SELECT status FROM goals WHERE tenant_id=? AND id=?", String.class, tenantId, goalIds.get(2)));
+        });
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.active").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.history.length()").value(1))
+                .andExpect(jsonPath("$.history[0].goalId").value(goalIds.get(0).toString()))
+                .andExpect(jsonPath("$.history[0].origin").value("completed"));
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(auth))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.history.length()").value(1));
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            org.junit.jupiter.api.Assertions.assertEquals("completed", jdbc.queryForObject(
+                    "SELECT status FROM goals WHERE tenant_id=? AND id=?", String.class, tenantId, goalIds.get(0)));
+            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE tenant_id=? AND goal_id=?", Integer.class, tenantId, goalIds.get(0)));
+            org.junit.jupiter.api.Assertions.assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE tenant_id=? AND goal_id=?", Integer.class, tenantId, goalIds.get(1)));
+            org.junit.jupiter.api.Assertions.assertEquals(1, countTenantRows("outbox_events", "aggregate_id", goalIds.get(0)));
+        });
+    }
+
+    @Test
     void goalsEnforceOneActiveGoalAndViewerCannotChangeThem() throws Exception {
         var auth = jwt().jwt(token -> token.subject(subject));
         String viewerSubject = "keycloak|goals-viewer-" + UUID.randomUUID();
@@ -5835,7 +5996,7 @@ class TransactionApiPostgresTest {
         var candidate = new GoalCandidatesApi.Candidate("snack", "snack", "Чипсы", request.unit(),
                 "4.00", "count".equals(request.unit()) ? 2 : 0, unknownAmounts ? null : "400.00",
                 "sum".equals(request.unit()) ? "200.00" : null,
-                unknownAmounts ? null : "200.00", 4, 4);
+                unknownAmounts ? null : "200.00", 4, 4, List.of());
         return new GoalCandidatesApi.CandidateReport("goal-candidates-f44.v1", request.inputWatermark(),
                 request.unit(), List.of(candidate), List.of(), List.of());
     }

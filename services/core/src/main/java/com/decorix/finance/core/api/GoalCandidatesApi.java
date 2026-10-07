@@ -16,11 +16,13 @@ public final class GoalCandidatesApi {
                                   List<Candidate> products, List<Candidate> groups, List<SkippedCandidate> skipped) {}
     public record Candidate(String key, String productKey, String name, String unit,
                             String monthlyRate, int countTarget, String monthlySpend,
-                            String monthlyLimit, String estimatedReduction, int purchaseCount, int evidenceCount) {}
+                            String monthlyLimit, String estimatedReduction, int purchaseCount, int evidenceCount,
+                            List<String> memberProductKeys) {}
     public record SkippedCandidate(String productKey, String name, String monthlySpend, String reasonCode) {}
     public record Overview(String unit, Goal active, String inputWatermark,
                            List<Candidate> candidates, List<Candidate> groups,
-                           List<SkippedCandidate> skipped) {}
+                           List<SkippedCandidate> skipped, GoalProgress activeProgress,
+                           List<GoalOutcome> history) {}
     public record Goal(UUID id, String key, String scope, String name, String unit,
                        String monthlyRate, int countTarget, String monthlySpend, String monthlyLimit,
                        int evidenceCount, String inputWatermark, Instant acceptedAt, Instant endsAt,
@@ -28,4 +30,15 @@ public final class GoalCandidatesApi {
     public record GoalUnitRequest(String unit) {}
     public record GoalUnitResponse(String unit) {}
     public record AcceptRequest(String candidateKey, String inputWatermark) {}
+    public record F45GoalInput(String key, String scope, String unit, Instant acceptedAt, Instant endsAt,
+                               int countTarget, String monthlyLimit, List<String> memberProductKeys) {}
+    public record F45PurchaseInput(String productKey, String lineSum, Instant purchasedAt) {}
+    public record ProgressRequest(String inputWatermark, Instant asOf, F45GoalInput goal,
+                                  List<F45PurchaseInput> purchases) {}
+    public record GoalProgress(String algorithmVersion, String inputWatermark, String unit, int bought,
+                               String spent, boolean amountsUnknown, Boolean over, Boolean met,
+                               boolean finished, int daysLeft, Instant windowStart, Instant windowEnd) {}
+    public record GoalOutcome(UUID id, UUID goalId, String key, String name, String scope, String unit,
+                              int countTarget, String monthlyLimit, int bought, String spent, Boolean met,
+                              Instant acceptedAt, Instant completedAt, String origin) {}
 }
