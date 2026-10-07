@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 05:01, Europe/Moscow.
+Updated: 2026-10-07 06:02, Europe/Moscow.
 
 ## Global plan
 
@@ -69,20 +69,21 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 | F44.1 | Deterministic Go product/group candidates and internal service API | COMPLETE — `959c750`; nullable-amount correction `d8591d3`; Go/contract gates pass | F44 | d8591d3 |
 | F44.2 | Member-scoped preference, accepted goal, Core API/BFF | COMPLETE — `88f868b`; combined payload cap correction `e4d0d61`; isolated PostgreSQL, Core and contract gates pass | F44.1 | e4d0d61 |
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
-| F45 | Goal progress, purchase note, completion, history, next candidate | IN PROGRESS — F45.1–F45.3 committed; legacy history import through J remains | F44 | afcde2d, 85c30d1 |
+| F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
+| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — starting contract and repository audit | F51 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F45.4 — import legacy `advice:goal_history:{id}` rows through a read-only SQLite extractor and idempotent Core endpoint.
-- Status: IN PROGRESS — Core API and extractor implemented; API integration tests, contracts, and extractor tests are green. Full F45.4 regression and commits remain.
-- Acceptance: explicit legacy-user/tenant/member/timezone manifest; preserve every valid source row and exact values; quarantine uncertainty; bound batches to 500; service-token HTTPS upload; reruns idempotent; no finance or notification writes.
-- Evidence: extractor + contracts 87 passed with 2 optional database skips; full Core `:services:core:check` passed; Core migration acceptance methods passed against isolated PostgreSQL; Telegram gateway 101 passed; Go tests and vet passed; Web 75 passed and production build passed. `compileall` and final `git diff --check` passed.
-- Runtime: no real legacy SQLite database is present; source mapping and live migration rehearsal remain unverified.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `23db236`; Core API/spec/contract slice is committed and pushed. Extractor is still uncommitted.
-- Next: commit and push only extractor, its tests/docs, and CI test discovery; check remote Actions result, then close F45 code acceptance and resume remaining V1 goals. Live data rehearsal stays unverified.
-- Updated at: 2026-10-07 05:56 Europe/Moscow.
+- ID and outcome: F52 — implement the approved Excel-compatible CSV export, exact filters, safe text, and authorized download flow.
+- Status: IN PROGRESS — legacy serializer and old panel audited; F52 execution spec/plan created; versioned Go `csv-v1` writer and golden contract are GREEN. Core job/API, export worker/storage, and Web flow remain.
+- Acceptance: UTF-8 BOM, semicolon delimiter, Russian legacy column names/order, reproducible filter semantics, text formula-injection protection while numeric cells remain numeric, scoped export job and expiring download; no Telegram entry point.
+- Evidence: F45.4 importer + contracts 87 passed with 2 optional database skips; full Core `:services:core:check` passed; Core migration PostgreSQL acceptance passed; Telegram gateway 101 passed; Go tests/vet passed; Web 75 and production build passed. F52 Task 1 focused and full Go tests/vet passed; final diff check remains. Extractor `compileall` passed. Commits `23db236` and `462d758` pushed; GitHub returned no Actions run for `462d758`.
+- Runtime: no real legacy SQLite database exists; its mapping/rehearsal remains unverified under E8. No production export path exists yet.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `462d758`.
+- Next: finish Task 1 diff check and commit/push the CSV contract/writer; then add RED Core/PostgreSQL tests for export job scope, status, and snapshot authorization.
+- Updated at: 2026-10-07 06:02 Europe/Moscow.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 
@@ -92,7 +93,8 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 - Core migration endpoint and PostgreSQL acceptance tests are green. Full `:services:core:check` passed against isolated PostgreSQL; extractor + contract suites passed 87 tests with 2 optional skips; Telegram gateway 101 passed; Go tests/vet passed using cached Go 1.27.1; Web 75 passed and production build passed.
 - The extractor is read-only, groups by explicit tenant/member, batches at 500, requires HTTPS outside loopback, refuses unresolved quarantine unless explicitly reviewed, and relies on Core idempotency after interrupted uploads. `tools/migration/README.md` documents manifest and commands; CI contract job now runs extractor tests.
 - Core API/spec/contract slice committed and pushed as `23db236`; GitHub returned no Actions run for this SHA.
-- No real legacy SQLite database exists in this checkout. Live mapping, quarantine review, and rehearsal are not verified. F45 remains open until extractor commit and final status update; F45.4 must not imply a completed production migration.
+- Extractor/docs/CI slice committed and pushed as `462d758`; GitHub returned no Actions run for this SHA.
+- No real legacy SQLite database exists in this checkout. Live mapping, quarantine review, and rehearsal are not verified. F45 code acceptance is complete; F45.4 does not claim a completed production migration.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.
