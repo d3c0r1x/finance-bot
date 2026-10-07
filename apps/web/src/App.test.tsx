@@ -1131,4 +1131,34 @@ describe('web onboarding and transaction flow', () => {
     expect(event.defaultPrevented).toBe(true);
     await waitFor(() => expect(summaryCalls).toBe(3));
   });
+
+  it('opens the localized service status route and reads only the tenant BFF', async () => {
+    const healthUrls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/bff/session') return json({ authenticated: true, displayName: 'Alex' });
+      if (url === '/bff/me/tenants') return json([tenant]);
+      if (url.endsWith('/health')) {
+        healthUrls.push(url);
+        return json({ capabilities: {
+          localAi: { status: 'available', diagnosticCode: null },
+          receiptVision: { status: 'disabled', diagnosticCode: 'VISION_DISABLED' },
+          receiptOcr: { status: 'unavailable', diagnosticCode: 'TESSERACT_MISSING' },
+        } });
+      }
+      if (url.endsWith('/summary')) return json(dashboardSummary());
+      if (url.endsWith('/profile/me') || url.endsWith('/notification-preferences') || url.endsWith('/budgets')) return json({});
+      if (url.endsWith('/debts')) return json({ items: [] });
+      throw new Error(`Unexpected request ${url}`);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/health']}><QueryClientProvider client={client}><App /></QueryClientProvider></MemoryRouter>);
+
+    expect(await screen.findByRole('heading', { name: 'Состояние сервисов' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Состояние сервисов' })).toHaveClass('active');
+    expect(healthUrls).toEqual([`/bff/tenants/${tenant.tenantId}/health`]);
+    await user.click(screen.getByRole('button', { name: 'Обновить статус' }));
+    await waitFor(() => expect(healthUrls).toHaveLength(2));
+  });
 });

@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 07:34, Europe/Moscow.
+Updated: 2026-10-07 07:49, Europe/Moscow.
 
 ## Global plan
 
@@ -72,18 +72,19 @@ Updated: 2026-10-07 07:34, Europe/Moscow.
 | F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
 | F52 | Excel-compatible CSV export, filters, safe text, scoped download | CODE COMPLETE — final local regression passed; SeaweedFS runtime integration NOT_RUN because Docker is unavailable | F51 | 0f50266 (polling-test stabilization); dd0b35f (Task 4); 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
-| F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | pending |
+| F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | 5adeccf |
+| F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F53 — finish Web equivalents for the legacy desktop panel and restore shared navigation/refresh flows.
-- Status: GREEN — implementation, full Web regression, production build, and diff check passed.
-- Acceptance: eight tab equivalents, authorized member list and selected-member transaction transition, self profile link, shared refresh button/F5, active route state, RU/EN labels; Core enforces scope.
-- Evidence: Legacy inventory: `panel_ui/window.py`, `users.py`, and `transactions.py`. Focused tests first failed for missing `MembersPanel`, route, and refresh control; after implementation focused tests passed. Full Web regression: 13 files / 87 tests passed; `pnpm --dir apps/web build` passed TypeScript and Vite production build; `git diff --check` passed. Members API remains authoritative for scope; only self profile editing is linked. Plan: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, pending F53 commit.
-- Next: commit/push F53, then inspect F54 acceptance and write its tests before implementation.
-- Updated at: 2026-10-07 07:34 Europe/Moscow.
+- ID and outcome: F54 — expose safe local AI, Vision, and OCR availability in the app and provide private diagnostics.
+- Status: GREEN — Python, Core, contracts, Web, and production build gates pass; commit pending.
+- Acceptance: private bounded Ollama/Vision/Tesseract checks; public liveness remains shallow; sanitized membership-authenticated BFF; RU/EN Web status and manual refresh; no provider secrets/URLs/paths/raw errors in response.
+- Evidence: F53 committed/pushed as `5adeccf`; Web 13 files / 87 tests and production build passed. F54 RED recorded for missing private health endpoint, Core client/controller, and Web panel/route. GREEN: combined contracts/migration/intelligence/Telegram suite 282 passed, 1 optional DB skip; Core `:services:core:check --rerun-tasks` passed; Web 14 files / 91 tests and TypeScript/Vite build passed; `git diff --check` passed. Tests use deterministic local fixtures; real Ollama endpoint availability is not asserted. Core returns only allowlisted status/diagnostic codes; detailed provider internals remain private because a platform-operator identity is not implemented yet. Plans: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`, `docs/superpowers/plans/2026-10-07-f54-health-status.md`.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, F54 changes uncommitted.
+- Next: verify final diff, commit/push F54, inspect F55 acceptance, and continue test-first.
+- Updated at: 2026-10-07 07:49 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -141,6 +142,21 @@ Updated: 2026-10-07 07:34, Europe/Moscow.
 - Polling-test fix committed/pushed as `0f50266` (`test(F52.4): stabilize export status polling`). `gh run list --commit 0f50266` returned no workflows.
 - F52 code acceptance complete. SeaweedFS private-object round-trip is NOT_RUN because Docker and an S3 endpoint are unavailable; record as a separate deployment proof.
 - Next: F53 panel parity, starting with legacy inventory versus current Web routes/components.
+
+## E4.92 F53 Web panel parity — 2026-10-07 07:34 Europe/Moscow
+
+- Test-first RED: member component, route transition, active navigation, and shared refresh controls were missing. Added the authorized members route, selected-member transaction link, self-profile link, refresh button/F5, and active navigation state.
+- GREEN: Web 13 files / 87 tests, TypeScript/Vite production build, and `git diff --check` passed. Full suite caught duplicate accessible names for refresh and retry; global action now has a distinct label.
+- Plan: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`. Commit/push `5adeccf`; `gh run list --commit 5adeccf` returned no workflow runs.
+
+## E4.93 F54 health and capability status — 2026-10-07 07:49 Europe/Moscow
+
+- Test-first RED: Python private health route returned 404, Core client/controller types were absent, and Web `HealthPanel`/route could not resolve.
+- Added bounded private dependency checks for configured Ollama text and allowlisted vision models plus Tesseract; inventory stream is capped at 128 KiB and 512 models, checks time out, and raw provider errors/configuration never leave the probe. `/healthz` remains public and shallow.
+- Core calls the private endpoint with a service token, caps its timeout at five seconds, validates capability names/status/diagnostic codes, returns a fixed safe unavailable result on failure, and checks active tenant membership first. Web displays RU/EN states and user-safe explanations with manual refresh. Added both OpenAPI contracts and environment example.
+- GREEN: contracts, migration, intelligence, and Telegram suite 282 passed / 1 optional DB skip; Core `:services:core:check --rerun-tasks`; Web 14 files / 91 tests and production build; `git diff --check`.
+- Local provider runtime was not probed against a real Ollama/Tesseract installation; integration behavior is covered with controlled HTTP/filesystem fixtures. Detailed operator-only diagnostics still require the platform-operator authorization model from later SaaS work.
+- Plan: `docs/superpowers/plans/2026-10-07-f54-health-status.md`. Commit/push pending.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 

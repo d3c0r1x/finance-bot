@@ -73,6 +73,10 @@ finance:
       timeout: ${FINANCE_IMPORT_PARSER_TIMEOUT:PT30S}
   ai:
     execution-policy: ${FINANCE_AI_POLICY:local-only}
+    health:
+      url: ${FINANCE_AI_HEALTH_URL:${FINANCE_AI_RECEIPT_URL:}}
+      service-token: ${FINANCE_AI_HEALTH_SERVICE_TOKEN:${FINANCE_AI_SERVICE_TOKEN:}}
+      timeout: ${FINANCE_AI_HEALTH_TIMEOUT:PT3S}
     budget-proposal:
       url: ${FINANCE_AI_BUDGET_URL:}
       service-token: ${FINANCE_AI_SERVICE_TOKEN:}

@@ -7,6 +7,8 @@ export type TenantMembership = {
 };
 
 export type Session = { authenticated: boolean; displayName: string };
+export type HealthCapability = { status: 'available' | 'unavailable' | 'disabled'; diagnosticCode: string | null };
+export type IntelligenceHealth = { capabilities: { localAi: HealthCapability; receiptVision: HealthCapability; receiptOcr: HealthCapability } };
 export type TenantMember = { userId: string; displayName: string; role: TenantMembership['role'] };
 export type MemberProfile = { displayName: string; plannedIncome: number | null; onboardingState: 'started' | 'complete'; timezone: string; currency: 'RUB' };
 export type NotificationPreferences = {
@@ -409,6 +411,7 @@ export const api = {
   getSession: () => request<Session>('/bff/session'),
   getTenants: () => request<TenantMembership[]>('/bff/me/tenants'),
   getMembers: (tenantId: string) => request<TenantMember[]>(`/bff/tenants/${tenantId}/members`),
+  getHealth: (tenantId: string) => request<IntelligenceHealth>(`/bff/tenants/${tenantId}/health`),
   createExport: (tenantId: string, value: CreateCsvExport) => request<CsvExportJob>(
     `/bff/tenants/${tenantId}/exports`, { method: 'POST', body: JSON.stringify(value) },
   ),

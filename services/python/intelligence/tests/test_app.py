@@ -139,6 +139,44 @@ def test_internal_adapter_requires_service_token_and_validated_context(internal_
     assert generated == [VALID_CONTEXT]
 
 
+def test_healthz_stays_shallow_and_private_diagnostics_require_service_token(internal_server):
+    base_url, _ = internal_server
+    with httpx.Client(trust_env=False) as client:
+        live = client.get(f"{base_url}/healthz")
+        denied = client.get(f"{base_url}/internal/v1/health")
+
+    assert live.status_code == 200
+    assert live.json() == {"status": "ok"}
+    assert denied.status_code == 401
+
+
+def test_private_health_reports_only_sanitized_capability_codes(internal_server, monkeypatch):
+    base_url, _ = internal_server
+
+    async def fake_health():
+        return {
+            "capabilities": {
+                "localAi": {"status": "available", "diagnosticCode": None},
+                "receiptVision": {"status": "unavailable", "diagnosticCode": "MODEL_MISSING"},
+                "receiptOcr": {"status": "available", "diagnosticCode": None},
+            }
+        }
+
+    monkeypatch.setattr(IntelligenceHandler, "_collect_health", lambda self: fake_health(), raising=False)
+    with httpx.Client(trust_env=False) as client:
+        response = client.get(f"{base_url}/internal/v1/health",
+                              headers={"Authorization": "Bearer private-test-token"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"capabilities"}
+    assert body["capabilities"]["localAi"]["status"] == "available"
+    assert body["capabilities"]["receiptVision"]["diagnosticCode"] == "MODEL_MISSING"
+    serialized = json.dumps(body)
+    for private_value in ("private-test-token", "ollama:11434", "qwen", "TESSERACT_CMD", "C:/"):
+        assert private_value not in serialized
+
+
 def test_internal_merchant_classification_is_authenticated_and_validates_minimal_context(internal_server):
     base_url, generated = internal_server
     payload = {"merchants": ["  Market  ", "Taxi"]}

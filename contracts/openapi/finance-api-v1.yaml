@@ -98,6 +98,22 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /bff/tenants/{tenantId}/health:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      operationId: getBrowserIntelligenceHealth
+      summary: Read sanitized availability of AI and receipt processing capabilities
+      security:
+        - bffSession: []
+      responses:
+        '200':
+          description: Safe capability states; provider addresses, models, paths, and raw errors are excluded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntelligenceHealthStatus' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /bff/tenants/{tenantId}/transactions:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -4628,6 +4644,29 @@ components:
         userId: { type: string, format: uuid }
         displayName: { type: string, maxLength: 120 }
         role: { type: string, enum: [owner, admin, member, viewer] }
+    IntelligenceHealthStatus:
+      type: object
+      additionalProperties: false
+      required: [capabilities]
+      properties:
+        capabilities:
+          type: object
+          additionalProperties: false
+          required: [localAi, receiptVision, receiptOcr]
+          properties:
+            localAi: { $ref: '#/components/schemas/IntelligenceCapability' }
+            receiptVision: { $ref: '#/components/schemas/IntelligenceCapability' }
+            receiptOcr: { $ref: '#/components/schemas/IntelligenceCapability' }
+    IntelligenceCapability:
+      type: object
+      additionalProperties: false
+      required: [status, diagnosticCode]
+      properties:
+        status: { type: string, enum: [available, unavailable, disabled] }
+        diagnosticCode:
+          type: [string, 'null']
+          enum: [OLLAMA_UNAVAILABLE, MODEL_MISSING, VISION_DISABLED, VISION_CONFIG_INVALID,
+                 TESSERACT_MISSING, HEALTH_CHECK_FAILED, HEALTH_SERVICE_UNAVAILABLE, null]
     UpdateMemberProfile:
       type: object
       additionalProperties: false

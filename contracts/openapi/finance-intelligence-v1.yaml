@@ -18,6 +18,20 @@ paths:
                 required: [status]
                 properties:
                   status: { type: string, const: ok }
+  /internal/v1/health:
+    get:
+      operationId: getPrivateIntelligenceHealth
+      summary: Check local AI, receipt vision, and Tesseract availability without exposing configuration
+      security:
+        - serviceBearer: []
+      responses:
+        '200':
+          description: Sanitized dependency status; failures are represented in the response and do not affect liveness
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntelligenceHealthStatus' }
+        '401': { description: Internal service token is missing or invalid }
+        '503': { description: Service token is not configured }
   /internal/v1/prices/compare:
     post:
       operationId: compareConfirmedReceiptPrice
@@ -494,6 +508,29 @@ components:
       type: http
       scheme: bearer
   schemas:
+    IntelligenceHealthStatus:
+      type: object
+      additionalProperties: false
+      required: [capabilities]
+      properties:
+        capabilities:
+          type: object
+          additionalProperties: false
+          required: [localAi, receiptVision, receiptOcr]
+          properties:
+            localAi: { $ref: '#/components/schemas/IntelligenceCapability' }
+            receiptVision: { $ref: '#/components/schemas/IntelligenceCapability' }
+            receiptOcr: { $ref: '#/components/schemas/IntelligenceCapability' }
+    IntelligenceCapability:
+      type: object
+      additionalProperties: false
+      required: [status, diagnosticCode]
+      properties:
+        status: { type: string, enum: [available, unavailable, disabled] }
+        diagnosticCode:
+          type: [string, 'null']
+          enum: [OLLAMA_UNAVAILABLE, MODEL_MISSING, VISION_DISABLED, VISION_CONFIG_INVALID,
+                 TESSERACT_MISSING, HEALTH_CHECK_FAILED, null]
     MerchantClassificationContext:
       type: object
       additionalProperties: false

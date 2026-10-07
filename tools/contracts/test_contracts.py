@@ -1486,3 +1486,23 @@ def test_recurring_projection_routes_require_member_bound_responses():
     projection_schema = spec["components"]["schemas"]["RecurringProjection"]
     assert "mutedSeries" in projection_schema["required"]
     assert projection_schema["properties"]["mutedSeries"]["items"]["$ref"].endswith("RecurringSeries")
+
+
+def test_health_status_contracts_are_authenticated_and_exclude_provider_secrets():
+    public = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    private = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
+
+    browser_health = public["paths"]["/bff/tenants/{tenantId}/health"]["get"]
+    assert browser_health["security"] == [{"bffSession": []}]
+    public_schema = public["components"]["schemas"]["IntelligenceHealthStatus"]
+    assert public_schema["additionalProperties"] is False
+    assert set(public_schema["properties"]["capabilities"]["properties"]) == {"localAi", "receiptVision", "receiptOcr"}
+    capability = public["components"]["schemas"]["IntelligenceCapability"]
+    assert capability["additionalProperties"] is False
+    assert set(capability["properties"]) == {"status", "diagnosticCode"}
+
+    private_health = private["paths"]["/internal/v1/health"]["get"]
+    assert private_health["security"] == [{"serviceBearer": []}]
+    assert "security" not in private["paths"]["/healthz"]["get"]
+    private_schema = private["components"]["schemas"]["IntelligenceHealthStatus"]
+    assert private_schema["additionalProperties"] is False

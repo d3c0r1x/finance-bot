@@ -21,6 +21,7 @@ from services.python.intelligence.gateway import (AiRequestEnvelope, OllamaProvi
                                                   RequestCancelled, RequestDeadlineExceeded, UnsupportedCapability,
                                                   authorize_provider,
                                                   restrictive_policy, run_with_controls)
+from services.python.intelligence.health import collect_health
 from services.python.intelligence.model_scheduler import OLLAMA_MODEL_SCHEDULER
 from services.python.intelligence.merchant_classification import validate_context as validate_merchant_context
 from services.python.intelligence.tesseract import TesseractBusy, TesseractProvider, TesseractUnavailable
@@ -41,10 +42,26 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
     server_version = "FinanceIntelligence/1.0"
 
     def do_GET(self):
-        if self.path != "/healthz":
+        if self.path == "/healthz":
+            self._reply(200, {"status": "ok"})
+            return
+        if self.path != "/internal/v1/health":
             self._reply(404, {"error": "not_found"})
             return
-        self._reply(200, {"status": "ok"})
+        if not self._authenticated():
+            return
+        try:
+            self._reply(200, asyncio.run(self._collect_health()))
+        except Exception:
+            # Dependency diagnostics must not leak provider errors or impact liveness.
+            self._reply(200, {"capabilities": {
+                "localAi": {"status": "unavailable", "diagnosticCode": "HEALTH_CHECK_FAILED"},
+                "receiptVision": {"status": "unavailable", "diagnosticCode": "HEALTH_CHECK_FAILED"},
+                "receiptOcr": {"status": "unavailable", "diagnosticCode": "HEALTH_CHECK_FAILED"},
+            }})
+
+    async def _collect_health(self):
+        return await collect_health()
 
     def do_POST(self):
         cancel_match = re.fullmatch(r"/internal/v1/jobs/([0-9a-fA-F-]{36})/cancel", self.path)

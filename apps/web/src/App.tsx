@@ -15,12 +15,13 @@ import { AdviceAnalyticsPanel } from './AdviceAnalyticsPanel';
 import { GoalsPanel } from './GoalsPanel';
 import { ExportsPanel } from './ExportsPanel';
 import { MembersPanel } from './MembersPanel';
+import { HealthPanel } from './HealthPanel';
 import './styles.css';
 
 const copy = {
   ru: {
     brand: 'Finance', login: 'Войти', loginTitle: 'Финансы без шума', loginText: 'Один понятный обзор личных и семейных денег.',
-    workspace: 'Пространство', operations: 'Операции', receipts: 'Чеки', products: 'Товары', shopping: 'Покупки', inflation: 'Динамика цен', recurring: 'Регулярные', imports: 'Выписки', family: 'Пользователи', refreshData: 'Обновить данные', logout: 'Выйти', onboarding: 'Создать пространство',
+    workspace: 'Пространство', operations: 'Операции', receipts: 'Чеки', products: 'Товары', shopping: 'Покупки', inflation: 'Динамика цен', recurring: 'Регулярные', imports: 'Выписки', family: 'Пользователи', serviceHealth: 'Состояние сервисов', refreshData: 'Обновить данные', logout: 'Выйти', onboarding: 'Создать пространство',
     repeatSetup: 'Пройти настройку заново',
     onboardingText: 'Начните с личного пространства. Семью можно добавить позже.', name: 'Название пространства',
     timezone: 'Часовой пояс', create: 'Продолжить', startSetup: 'Начать настройку', next: 'Далее', back: 'Назад',
@@ -89,7 +90,7 @@ const copy = {
   },
   en: {
     brand: 'Finance', login: 'Sign in', loginTitle: 'Money, clearly', loginText: 'One clear view of your personal and family finances.',
-    workspace: 'Workspace', operations: 'Transactions', receipts: 'Receipts', products: 'Products', shopping: 'Shopping', inflation: 'Price trend', recurring: 'Recurring', imports: 'Statements', family: 'Members', refreshData: 'Refresh', logout: 'Sign out', onboarding: 'Create a workspace',
+    workspace: 'Workspace', operations: 'Transactions', receipts: 'Receipts', products: 'Products', shopping: 'Shopping', inflation: 'Price trend', recurring: 'Recurring', imports: 'Statements', family: 'Members', serviceHealth: 'Service status', refreshData: 'Refresh', logout: 'Sign out', onboarding: 'Create a workspace',
     repeatSetup: 'Run setup again',
     onboardingText: 'Start with a personal workspace. Add family later.', name: 'Workspace name',
     timezone: 'Time zone', create: 'Continue', startSetup: 'Start setup', next: 'Next', back: 'Back',
@@ -524,6 +525,7 @@ export function App() {
         <Link className={navClass('/exports')} to="/exports">{t.exports}</Link>
         <Link className={navClass('/family')} to="/family">{t.family}</Link>
         <Link className={navClass('/profile')} to="/profile">{t.profile}</Link>
+        <Link className={navClass('/health')} to="/health">{t.serviceHealth}</Link>
       </nav>
       <div className="sidebar-footer">
         <span className="user-avatar" aria-hidden="true">{session.data.displayName.slice(0, 1) || 'F'}</span>
@@ -594,6 +596,7 @@ export function App() {
             language={language} canWrite={activeTenant.role !== 'viewer'} />} />
           <Route path="/family" element={<MembersPanel tenantId={activeTenant.tenantId}
             role={activeTenant.role} currentUserId={activeTenant.userId} language={language} />} />
+          <Route path="/health" element={<HealthPanel tenantId={activeTenant.tenantId} language={language} />} />
           <Route path="/exports" element={<ExportsPanel tenantId={activeTenant.tenantId}
             role={activeTenant.role} language={language} timezone={activeTenant.timezone} />} />
           <Route path="/receipts" element={<ReceiptsPanel tenantId={activeTenant.tenantId}

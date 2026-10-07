@@ -32,6 +32,14 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 .members-panel { display: grid; gap: 18px; padding: 22px; }
 .member-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .member-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px; border: 1px solid #e9eef4; border-radius: 12px; background: #fbfcfe; }
+.health-panel { max-width: 900px; }
+.health-list { display: grid; gap: 10px; margin-top: 16px; }
+.health-row { align-items: center; border: 1px solid #e9eef4; border-radius: 14px; display: flex; gap: 16px; justify-content: space-between; padding: 16px; }
+.health-row p { color: var(--muted); margin: 6px 0 0; }
+.health-status { border-radius: 999px; font-size: .9rem; font-weight: 700; padding: 6px 11px; white-space: nowrap; }
+.health-status-available { background: #e8f6ef; color: #176b45; }
+.health-status-disabled { background: #f1f2f4; color: #59616c; }
+.health-status-unavailable { background: #fff0ed; color: #9b3427; }
 .member-identity { display: grid; gap: 5px; min-width: 0; }
 .member-identity h3 { margin: 0; color: #26354a; font-size: 15px; overflow-wrap: anywhere; }
 .member-identity span { color: #8290a5; font-size: 12px; }
@@ -330,3 +338,4 @@ h1, h2 { font-family: ui-sans-serif, system-ui, sans-serif; letter-spacing: -.04
 @media (max-width: 700px) { .import-upload form { grid-template-columns: 1fr; } .import-upload, .import-preview { padding: 17px 14px; } .import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .import-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; } .import-row-selection { grid-column: 1 / -1; } .import-period { grid-template-columns: auto 1fr; } }
 @media (max-width: 700px) { .export-form { grid-template-columns: 1fr; } .export-form button, .export-form .form-error { grid-column: auto; } }
 @media (max-width: 700px) { .inflation-summary, .inflation-comparisons { grid-template-columns: 1fr; } .inflation-product, .recurring-item { padding: 13px; } }
+@media (max-width: 640px) { .health-row { align-items: flex-start; flex-direction: column; } }
