@@ -92,6 +92,7 @@ class TransactionApiPostgresTest {
     private static final String ISSUER = "http://127.0.0.1:" + JWKS_SERVER.getAddress().getPort() + "/realms/finance";
     private static final String AI_SERVICE_TOKEN = "integration-ai-service-token";
     private static final String TELEGRAM_SERVICE_TOKEN = "integration-telegram-service-token";
+    private static final String MIGRATION_SERVICE_TOKEN = "integration-migration-service-token";
     private static final AtomicInteger AI_CALLS = new AtomicInteger();
     private static final AtomicReference<String> LAST_AI_REQUEST = new AtomicReference<>("");
     private static final AtomicReference<String> AI_DRAFT_RESPONSE = new AtomicReference<>("""
@@ -185,6 +186,7 @@ class TransactionApiPostgresTest {
                 () -> "http://127.0.0.1:" + AI_SERVER.getAddress().getPort());
         properties.add("finance.analytics.price-history.service-token", () -> ANALYTICS_SERVICE_TOKEN);
         properties.add("finance.telegram.service-token", () -> TELEGRAM_SERVICE_TOKEN);
+        properties.add("finance.migration.service-token", () -> MIGRATION_SERVICE_TOKEN);
         properties.add("finance.imports.parser.url", () -> "http://127.0.0.1:" + AI_SERVER.getAddress().getPort());
         properties.add("finance.imports.parser.service-token", () -> AI_SERVICE_TOKEN);
     }
@@ -3593,6 +3595,110 @@ class TransactionApiPostgresTest {
         org.junit.jupiter.api.Assertions.assertEquals(outcomeId.toString(),
                 com.jayway.jsonpath.JsonPath.read(next, "$.items[0].goalOutcome.id"));
         cleanupNotificationTestFixtures();
+    }
+
+    @Test
+    void legacyGoalHistoryMigrationImportsAllRowsIdempotentlyAndExposesHistory() throws Exception {
+        String legacySubject = "keycloak|legacy-goal-history-" + UUID.randomUUID();
+        UUID ownerId = addTenantMember(legacySubject, "Legacy goal owner", "owner");
+        List<java.util.Map<String, Object>> entries = new java.util.ArrayList<>();
+        for (int index = 0; index < 26; index++) entries.add(legacyGoalHistoryEntry(index));
+        String request = legacyGoalHistoryRequest(tenantId, ownerId, entries);
+        String path = "/internal/v1/migrations/goal-history";
+
+        mvc.perform(post(path).contentType("application/json").content(request))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post(path).header("X-Finance-Migration-Token", "wrong-token")
+                        .contentType("application/json").content(request))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post(path).header("X-Finance-Migration-Token", MIGRATION_SERVICE_TOKEN)
+                        .contentType("application/json").content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inserted").value(26))
+                .andExpect(jsonPath("$.alreadyPresent").value(0));
+        mvc.perform(post(path).header("X-Finance-Migration-Token", MIGRATION_SERVICE_TOKEN)
+                        .contentType("application/json").content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.inserted").value(0))
+                .andExpect(jsonPath("$.alreadyPresent").value(26));
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            org.junit.jupiter.api.Assertions.assertEquals(26, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE tenant_id = ? AND owner_user_id = ? "
+                            + "AND origin = 'legacy'", Integer.class, tenantId, ownerId));
+            org.junit.jupiter.api.Assertions.assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM notification_intents WHERE tenant_id = ? AND user_id = ?",
+                    Integer.class, tenantId, ownerId));
+            org.junit.jupiter.api.Assertions.assertEquals("Legacy goal 00", jdbc.queryForObject(
+                    "SELECT goal_snapshot->>'name' FROM goal_outcomes WHERE tenant_id = ? AND owner_user_id = ? "
+                            + "ORDER BY completed_at DESC LIMIT 1", String.class, tenantId, ownerId));
+            org.junit.jupiter.api.Assertions.assertEquals("18", jdbc.queryForObject(
+                    "SELECT goal_snapshot->>'legacyTarget' FROM goal_outcomes WHERE tenant_id = ? "
+                            + "AND owner_user_id = ? AND legacy_key LIKE '%:17'", String.class, tenantId, ownerId));
+            org.junit.jupiter.api.Assertions.assertEquals("0.00", jdbc.queryForObject(
+                    "SELECT goal_snapshot->>'legacyLimit' FROM goal_outcomes WHERE tenant_id = ? "
+                            + "AND owner_user_id = ? AND legacy_key LIKE '%:17'", String.class, tenantId, ownerId));
+        });
+        when(goalCandidatesClient.calculate(any())).thenAnswer(invocation ->
+                goalCandidates(invocation.getArgument(0)));
+
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId)
+                        .with(jwt().jwt(token -> token.subject(legacySubject))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.history.length()", org.hamcrest.Matchers.is(26)))
+                .andExpect(jsonPath("$.history[0].origin").value("legacy"));
+    }
+
+    @Test
+    void legacyGoalHistoryMigrationRejectsWholeBatchWhenOneEntryIsInvalid() throws Exception {
+        String legacySubject = "keycloak|legacy-goal-history-invalid-" + UUID.randomUUID();
+        UUID ownerId = addTenantMember(legacySubject, "Invalid legacy goal owner", "owner");
+        var valid = legacyGoalHistoryEntry(1);
+        var invalid = legacyGoalHistoryEntry(2);
+        invalid.put("completedAt", "2025-12-31T00:00:00Z");
+        List<java.util.Map<String, Object>> entries = List.of(valid, invalid);
+
+        mvc.perform(post("/internal/v1/migrations/goal-history")
+                        .header("X-Finance-Migration-Token", MIGRATION_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content(legacyGoalHistoryRequest(tenantId, ownerId, entries)))
+                .andExpect(status().isBadRequest());
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.queryForObject("SELECT set_config('app.notification_service', 'true', true)", String.class);
+            org.junit.jupiter.api.Assertions.assertEquals(0, jdbc.queryForObject(
+                    "SELECT count(*) FROM goal_outcomes WHERE tenant_id = ? AND owner_user_id = ?",
+                    Integer.class, tenantId, ownerId));
+        });
+    }
+
+    private java.util.Map<String, Object> legacyGoalHistoryEntry(int index) {
+        var entry = new java.util.LinkedHashMap<String, Object>();
+        entry.put("legacyKey", "goal-history:" + String.format("%064d", index + 1) + ":" + index);
+        entry.put("key", "product:coffee");
+        entry.put("name", String.format("Legacy goal %02d", index));
+        entry.put("scope", "product");
+        entry.put("unit", "sum");
+        entry.put("legacyTarget", index + 1);
+        entry.put("legacyLimit", "0.00");
+        entry.put("countTarget", 0);
+        entry.put("monthlyLimit", "500.00");
+        entry.put("bought", index);
+        entry.put("spent", null);
+        entry.put("met", null);
+        entry.put("saved", null);
+        entry.put("window", "01.01–31.01");
+        entry.put("acceptedAt", "2026-01-01T00:00:00Z");
+        entry.put("completedAt", String.format("2026-01-%02dT00:00:00Z", 31 - index));
+        return entry;
+    }
+
+    private String legacyGoalHistoryRequest(UUID requestTenantId, UUID ownerId,
+                                            List<java.util.Map<String, Object>> entries) throws Exception {
+        return new tools.jackson.databind.ObjectMapper().writeValueAsString(java.util.Map.of(
+                "tenantId", requestTenantId, "ownerUserId", ownerId, "outcomes", entries));
     }
 
     private UUID prepareNotificationMember() {

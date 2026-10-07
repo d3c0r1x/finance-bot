@@ -1199,6 +1199,27 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { description: Telegram identity is temporarily rate-limited }
         '503': { description: Telegram service credential is not configured }
+  /internal/v1/migrations/goal-history:
+    post:
+      operationId: importLegacyGoalHistory
+      security:
+        - financeMigrationToken: []
+      description: Dedicated migration-only route. Imports already normalized, offset-aware legacy history for an explicitly mapped tenant member. Repeating deterministic legacy keys is idempotent. This route creates no finance transactions or notification intents.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LegacyGoalHistoryImportRequest' }
+      responses:
+        '200':
+          description: Inserted and already-present row counts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LegacyGoalHistoryImportResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { description: Migration service credential is not configured }
   /internal/v1/telegram/notifications/claim:
     post:
       operationId: claimTelegramNotificationDeliveries
@@ -4325,6 +4346,10 @@ components:
       type: apiKey
       in: header
       name: X-Finance-Service-Token
+    financeMigrationToken:
+      type: apiKey
+      in: header
+      name: X-Finance-Migration-Token
   parameters:
     TenantId:
       name: tenantId
@@ -4489,6 +4514,47 @@ components:
             required: [unit]
           then:
             properties: { countTarget: { const: 0 } }
+    LegacyGoalHistoryEntry:
+      type: object
+      additionalProperties: false
+      required: [legacyKey, key, name, scope, unit, legacyTarget, legacyLimit, countTarget, monthlyLimit,
+                 bought, spent, met, saved,
+                 window, acceptedAt, completedAt]
+      properties:
+        legacyKey: { type: string, pattern: '^goal-history:[a-f0-9]{64}:[0-9]{1,4}$' }
+        key: { type: string, minLength: 1, maxLength: 256 }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        scope: { type: string, enum: [product, group] }
+        unit: { type: string, enum: [count, sum] }
+        legacyTarget: { type: integer, minimum: 0 }
+        legacyLimit: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,29})\.[0-9]{2}$' }
+        countTarget: { type: integer, minimum: 0 }
+        monthlyLimit: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,29})\.[0-9]{2}$' }
+        bought: { type: integer, minimum: 0 }
+        spent: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,29})\.[0-9]{2}$' }
+        met: { type: [boolean, 'null'] }
+        saved: { type: [string, 'null'], pattern: '^(?:0|[1-9][0-9]{0,29})\.[0-9]{2}$' }
+        window: { type: string, minLength: 1, maxLength: 128 }
+        acceptedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+    LegacyGoalHistoryImportRequest:
+      type: object
+      additionalProperties: false
+      required: [tenantId, ownerUserId, outcomes]
+      properties:
+        tenantId: { type: string, format: uuid }
+        ownerUserId: { type: string, format: uuid }
+        outcomes:
+          type: array
+          maxItems: 500
+          items: { $ref: '#/components/schemas/LegacyGoalHistoryEntry' }
+    LegacyGoalHistoryImportResponse:
+      type: object
+      additionalProperties: false
+      required: [inserted, alreadyPresent]
+      properties:
+        inserted: { type: integer, minimum: 0 }
+        alreadyPresent: { type: integer, minimum: 0 }
     NotificationDeliveryClaimRequest:
       type: object
       additionalProperties: false

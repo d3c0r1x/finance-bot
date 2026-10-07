@@ -158,6 +158,47 @@ def test_weekly_notification_claim_contract_carries_nullable_goal_outcome():
         with pytest.raises(ValidationError):
             validator.validate(malformed)
 
+
+def test_legacy_goal_history_import_contract_is_internal_and_repeat_safe():
+    spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    path = "/internal/v1/migrations/goal-history"
+    operation = spec["paths"][path]["post"]
+    assert operation["security"] == [{"financeMigrationToken": []}]
+    assert spec["components"]["securitySchemes"]["financeMigrationToken"]["type"] == "apiKey"
+    request = spec["components"]["schemas"]["LegacyGoalHistoryImportRequest"]
+    response = spec["components"]["schemas"]["LegacyGoalHistoryImportResponse"]
+    assert request["properties"]["outcomes"]["maxItems"] >= 24
+    assert response["required"] == ["inserted", "alreadyPresent"]
+    entry = spec["components"]["schemas"]["LegacyGoalHistoryEntry"]
+    assert entry["properties"]["legacyKey"]["pattern"].startswith("^goal-history:")
+    assert "null" in entry["properties"]["spent"]["type"]
+    assert "null" in entry["properties"]["met"]["type"]
+    assert {"legacyTarget", "legacyLimit"}.issubset(entry["required"])
+
+    expanded = {**request, "properties": {**request["properties"], "outcomes": {
+        **request["properties"]["outcomes"], "items": entry,
+    }}}
+    validator = Draft202012Validator(expanded, format_checker=FormatChecker())
+    valid = {
+        "tenantId": "0199b81a-4a9c-7000-8000-000000000001",
+        "ownerUserId": "0199b81a-4a9c-7000-8000-000000000002",
+        "outcomes": [{
+            "legacyKey": "goal-history:" + "a" * 64 + ":0", "key": "product:coffee", "name": "Coffee",
+            "scope": "product", "unit": "sum", "legacyTarget": 1, "legacyLimit": "0.00",
+            "countTarget": 0, "monthlyLimit": "500.00",
+            "bought": 2, "spent": None, "met": None, "saved": None, "window": "01.01–31.01",
+            "acceptedAt": "2026-01-01T00:00:00Z", "completedAt": "2026-01-31T00:00:00Z",
+        }],
+    }
+    validator.validate(valid)
+    for change in (
+        {"outcomes": [{**valid["outcomes"][0], "legacyKey": "random"}]},
+        {"outcomes": [{**valid["outcomes"][0], "spent": "0"}]},
+        {"outcomes": [{**valid["outcomes"][0], "acceptedAt": "2026-01-01 00:00:00"}]},
+    ):
+        with pytest.raises(ValidationError):
+            validator.validate({**valid, **change})
+
 def test_transaction_response_contract_accepts_core_budget_threshold_alerts():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     transaction = spec["components"]["schemas"]["Transaction"]
