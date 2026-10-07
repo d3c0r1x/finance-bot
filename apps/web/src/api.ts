@@ -41,6 +41,26 @@ export type Transaction = {
 };
 
 export type TransactionPage = { items: Transaction[]; nextCursor: string | null };
+export type CsvExportJob = {
+  id: string;
+  status: 'queued' | 'processing' | 'ready' | 'failed' | 'expired';
+  formatVersion: 'csv-v1';
+  fromDate: string;
+  toDate: string;
+  memberId: string | null;
+  allMembers: boolean;
+  rowCount: number;
+  snapshotAt: string;
+  createdAt: string;
+  expiresAt: string;
+  downloadUrl: string | null;
+};
+export type CreateCsvExport = {
+  formatVersion: 'csv-v1';
+  fromDate: string;
+  toDate: string;
+  memberId?: string;
+};
 export type DashboardSummary = {
   month: string; currency: 'RUB'; incomeTotal: string; expenseTotal: string; transactionCount: number;
   asOfDate: string; daysElapsed: number; daysInMonth: number; daysRemaining: number;
@@ -389,6 +409,12 @@ export const api = {
   getSession: () => request<Session>('/bff/session'),
   getTenants: () => request<TenantMembership[]>('/bff/me/tenants'),
   getMembers: (tenantId: string) => request<TenantMember[]>(`/bff/tenants/${tenantId}/members`),
+  createExport: (tenantId: string, value: CreateCsvExport) => request<CsvExportJob>(
+    `/bff/tenants/${tenantId}/exports`, { method: 'POST', body: JSON.stringify(value) },
+  ),
+  getExport: (tenantId: string, exportId: string) => request<CsvExportJob>(
+    `/bff/tenants/${tenantId}/exports/${exportId}`,
+  ),
   createTelegramLinkCode: () => request<TelegramLinkCode>('/bff/me/telegram-link', { method: 'POST' }),
   createTenant: (displayName: string, timezone: string, memberDisplayName: string, plannedIncome: number | null) => request<TenantMembership>('/bff/tenants', {
     method: 'POST',
