@@ -1349,3 +1349,12 @@ Updated: 2026-10-07 02:48, Europe/Moscow.
 - GREEN: Go `test ./... -count=1`, `go vet ./...`; all contract/migration tests 66 passed, 2 optional DB skips; focused F44/F45 contract tests passed; `gofmt -d` and `git diff --check` passed.
 - Committed/pushed `37f84ba` (`feat(F45.1): calculate goal progress`). GitHub returned no workflow run for the commit; CI is unverified.
 - Next: add Core/PostgreSQL RED tests for group membership persistence, owner/viewer boundaries, progress from member receipts, cancel exclusion, idempotent completion and history retention, then implement Core integration.
+
+## E4.79 F45.2 durable goal progress and lifecycle — 2026-10-07
+
+- Core now sends the active member's confirmed posted expense receipt facts to the strict Go progress client. Product scope matches the accepted key; group scope uses the immutable member-key snapshot captured at acceptance.
+- V40 adds RLS-protected group membership and durable outcome rows. Expired goals transition once with audit/outbox in the same transaction; cancelled goals never become outcomes; completed outcomes retain the newest 24 while legacy-origin rows are not pruned. Overview returns active progress and history.
+- TDD caught two cases: the initial viewer test fixture targeted the owner's private goal, so it was corrected to use an expired goal owned by the viewer; then the corrected test failed against unconditional completion because viewer reads attempted a write. Current behavior lets viewers read expired progress and leaves the transition to the writer.
+- GREEN: full `:services:core:check` against isolated PostgreSQL; Go `test ./... -count=1` and `go vet ./...`; contracts/migration tests 68 passed, 2 optional skips; `git diff --check`.
+- Commit `afcde2d` (`feat(F45.2): persist goal progress outcomes`). The new table/read path preserves all legacy-origin rows, but the global J migration importer is not implemented; this remains an open F45 acceptance item and is recorded in the execution plan.
+- Next: commit the Web F45.3 slice, then implement the missing J migration ingestion before marking F45 complete.

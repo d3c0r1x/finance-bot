@@ -20,7 +20,7 @@
 - [x] Add durable goal outcome/history, atomic completed status + audit/outbox, idempotent retries, cancellation semantics, and current candidates after a finished/cancelled goal.
 - [x] Run focused PostgreSQL/API, full Core checks, migrations/contracts and `git diff --check`.
 - [ ] Add/import legacy history through the J migration pipeline. V40 and history reads preserve all `origin='legacy'` rows, but the repository has no migration ingestion route yet; F45 stays open until the source mapping and import acceptance exist.
-- [ ] Commit F45.2 and record evidence.
+- [x] Commit F45.2 as `afcde2d`; record evidence. Legacy history ingestion remains an explicit unchecked dependency on J, so F45 is not yet complete.
 
 ## F45.3 Web progress, note and history
 
