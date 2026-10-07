@@ -78,19 +78,21 @@ Updated: 2026-10-07 05:01, Europe/Moscow.
 - ID and outcome: F45.4 — import legacy `advice:goal_history:{id}` rows through a read-only SQLite extractor and idempotent Core endpoint.
 - Status: IN PROGRESS — Core API and extractor implemented; API integration tests, contracts, and extractor tests are green. Full F45.4 regression and commits remain.
 - Acceptance: explicit legacy-user/tenant/member/timezone manifest; preserve every valid source row and exact values; quarantine uncertainty; bound batches to 500; service-token HTTPS upload; reruns idempotent; no finance or notification writes.
-- Evidence: extractor + contracts 87 passed with 2 optional database skips; full Core `:services:core:check` passed; Core migration acceptance methods passed against isolated PostgreSQL; Telegram gateway 101 passed; Go tests and vet passed; Web 75 passed and production build passed. `compileall` and final `git diff --check` remain to rerun.
+- Evidence: extractor + contracts 87 passed with 2 optional database skips; full Core `:services:core:check` passed; Core migration acceptance methods passed against isolated PostgreSQL; Telegram gateway 101 passed; Go tests and vet passed; Web 75 passed and production build passed. `compileall` and final `git diff --check` passed.
 - Runtime: no real legacy SQLite database is present; source mapping and live migration rehearsal remain unverified.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`; API changes are not committed yet.
-- Next: rerun final Python/contract and diff gates, commit and push named F45.4 files. Then close F45 and resume remaining V1 goals.
-- Updated at: 2026-10-07 05:52 Europe/Moscow.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `23db236`; Core API/spec/contract slice is committed and pushed. Extractor is still uncommitted.
+- Next: commit and push only extractor, its tests/docs, and CI test discovery; check remote Actions result, then close F45 code acceptance and resume remaining V1 goals. Live data rehearsal stays unverified.
+- Updated at: 2026-10-07 05:56 Europe/Moscow.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 
 - Observed RED before implementation: extractor module was missing. Added tests for read-only SQLite extraction, explicit owner/timezone mapping, exact legacy snapshots, duplicate keys, DST ambiguity/gaps, exact money, private quarantine, dry-run, bounded uploads, token transport, and response accounting.
 - RED exposed incorrect DST overlap detection, timestamp microsecond truncation, Decimal overflow escaping quarantine, count/sum rows Core would reject, malformed-key accounting, and upload continuing before quarantine review. Each failure received a targeted fix and regression assertion.
+- A local HTTP redirect test was initially flaky under Windows socket shutdown; replaced with a deterministic opener test that verifies redirect rejection without network I/O. It passes.
 - Core migration endpoint and PostgreSQL acceptance tests are green. Full `:services:core:check` passed against isolated PostgreSQL; extractor + contract suites passed 87 tests with 2 optional skips; Telegram gateway 101 passed; Go tests/vet passed using cached Go 1.27.1; Web 75 passed and production build passed.
 - The extractor is read-only, groups by explicit tenant/member, batches at 500, requires HTTPS outside loopback, refuses unresolved quarantine unless explicitly reviewed, and relies on Core idempotency after interrupted uploads. `tools/migration/README.md` documents manifest and commands; CI contract job now runs extractor tests.
-- No real legacy SQLite database exists in this checkout. Live mapping, quarantine review, and rehearsal are not verified. F45 remains open until final regression and commit; F45.4 must not imply a completed production migration.
+- Core API/spec/contract slice committed and pushed as `23db236`; GitHub returned no Actions run for this SHA.
+- No real legacy SQLite database exists in this checkout. Live mapping, quarantine review, and rehearsal are not verified. F45 remains open until extractor commit and final status update; F45.4 must not imply a completed production migration.
 ## E4.57 User MVP steering and plan update — 2026-10-06 11:45 MSK
 
 - User restated strict test-first work and set a 1.5-hour personal MVP priority. F01–F60 stay unchanged; post-V1 V2 work is excluded until V1 finishes.

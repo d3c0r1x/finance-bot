@@ -40,7 +40,7 @@ jobs:
             services/python/intelligence/requirements.txt
             services/python/telegram_gateway/requirements.txt
       - run: python -m pip install -r tools/contracts/requirements.txt -r services/python/document_import/requirements.txt -r services/python/intelligence/requirements.txt -r services/python/telegram_gateway/requirements.txt
-      - run: python -m pytest tools/contracts/test_contracts.py services/python/intelligence/tests services/python/telegram_gateway/tests -q
+      - run: python -m pytest tools/contracts/test_contracts.py tools/migration/test_goal_history.py services/python/intelligence/tests services/python/telegram_gateway/tests -q
 
   go-prices:
     runs-on: ubuntu-latest
