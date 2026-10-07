@@ -77,8 +77,8 @@ describe('ExportsPanel', () => {
     await screen.findByRole('heading', { name: 'CSV export' });
     fireEvent.click(screen.getByRole('button', { name: 'Create CSV' }));
     expect(await screen.findByText('Queued')).toBeInTheDocument();
-    expect(await screen.findByText('Preparing file')).toBeInTheDocument();
-    expect(await screen.findByText('Export failed')).toBeInTheDocument();
+    expect(await screen.findByText('Preparing file', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByText('Export failed', {}, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Download CSV' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create another export' })).toBeInTheDocument();
     expect(api.getExport).toHaveBeenCalledTimes(3);

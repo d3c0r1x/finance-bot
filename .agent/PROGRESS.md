@@ -71,19 +71,19 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 | F44.3 | RU/EN Web candidate and active-goal screen; writer/viewer actions | COMPLETE — `2e5dce4`; 72 Web tests, production build and Core regression pass | F44.2 | 2e5dce4 |
 | F45 | Goal progress, purchase note, completion, history, next candidate | COMPLETE — F45.1–F45.4 code acceptance is green; real SQLite rehearsal belongs to E8 and remains unverified | F44 | afcde2d, 85c30d1, 23db236, 462d758 |
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
-| F52 | Excel-compatible CSV export, filters, safe text, scoped download | IN PROGRESS — Tasks 1–4 locally verified; Task 5 full regression remains | F51 | pending Task 4 commit; 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
+| F52 | Excel-compatible CSV export, filters, safe text, scoped download | CODE COMPLETE — final local regression passed; SeaweedFS runtime integration NOT_RUN because Docker is unavailable | F51 | pending polling-test stabilization commit; dd0b35f (Task 4); 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F52 — implement the approved Excel-compatible CSV export, exact filters, safe text, and authorized download flow.
-- Status: IN PROGRESS — Tasks 1, 2a, 2b, 3a, and 3b are committed/pushed (`66de1a8`, `62370cd`, `e8ec4af`, `7e2088d`, `016a6a0`). Task 4 Web flow is locally verified; its commit and Task 5 regression remain.
+- Status: CODE COMPLETE — Tasks 1, 2a, 2b, 3a, 3b, and 4 are committed/pushed (`66de1a8`, `62370cd`, `e8ec4af`, `7e2088d`, `016a6a0`, `dd0b35f`). Final local gates pass. SeaweedFS runtime round-trip remains NOT_RUN because Docker is unavailable; this is a deployment proof, not code acceptance.
 - Acceptance: UTF-8 BOM, semicolon delimiter, Russian legacy column names/order, reproducible filter semantics, text formula-injection protection while numeric cells remain numeric, scoped export job and expiring download; no Telegram entry point.
-- Evidence: F52 Task 1 `66de1a8`, Task 2a `62370cd`, Task 2b `e8ec4af`, Task 3a `7e2088d`, and Task 3b `016a6a0` pushed. GitHub returned no workflows for these SHAs. Tasks 2a/2b and 3a observed RED then gates passed. Task 3a Go suite/vet passed; SeaweedFS private round-trip and anonymous-read test exists in CI but has not run locally because Docker is unavailable. Task 3b Core signed download tests and forced full `:services:core:check` passed against isolated PostgreSQL. Contract suite: 76 passed, 2 optional DB skips (local cache permission warning). Task 4 Web suite: 81 passed; TypeScript/Vite production build passed. No download URL enters audit data; ready exports receive a <=5 minute URL capped by job expiry. GitHub CI has no run for the existing F52 SHAs.
-- Runtime: no real legacy SQLite database exists; its mapping/rehearsal remains unverified under E8. No production export path exists yet.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `7e2088d` before Task 3b commit.
-- Next: commit verified Task 4 Web flow, then run final F52 regression and mark optional SeaweedFS integration NOT_RUN if no endpoint is available.
-- Updated at: 2026-10-07 07:17 Europe/Moscow.
+- Evidence: F52 Task 1 `66de1a8`, Task 2a `62370cd`, Task 2b `e8ec4af`, Task 3a `7e2088d`, Task 3b `016a6a0`, and Task 4 `dd0b35f` pushed. GitHub returned no workflows for these SHAs. Tasks 2a/2b, 3a, and 3b observed RED then gates passed. Final Core `:services:core:check --rerun-tasks` passed against isolated PostgreSQL; Go `test ./... -count=1` and `go vet ./...` passed; contracts/migrations 76 passed, 2 optional DB skips; Web 81 passed and production build passed; `git diff --check` passed. SeaweedFS private round-trip/anonymous-read integration is present but NOT_RUN because Docker and an S3 endpoint are unavailable. Ready exports receive a <=5 minute signed URL capped by job expiry; signatures never enter audit data. GitHub returned no workflow runs for F52 SHAs.
+- Runtime: no production S3 endpoint is configured; live object delivery is not verified. No real legacy SQLite database exists; migration rehearsal remains under E8.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `dd0b35f` before polling-test stabilization.
+- Next: commit polling-test timeout fix and progress evidence; then continue to next incomplete V1 goal.
+- Updated at: 2026-10-07 07:21 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -128,9 +128,11 @@ Updated: 2026-10-07 06:02, Europe/Moscow.
 
 - Test-first RED: focused Web suite failed because `ExportsPanel` was missing. Tests cover owner all-member scope, member/viewer own scope, admin-selected member, finite date range validation, queued/processing polling, empty header-only export, failed/expired states, and safe download visibility.
 - Added typed create/status API, timezone-local 30-day defaults, 366-day client bound, role-aware scope selector, 1-second status polling, RU/EN job states, empty result messaging, and download only for ready jobs with URL. Added `/exports` navigation and responsive layout.
-- GREEN: focused export suite 6/6; full Web suite 81 passed; `pnpm --dir apps/web build` passed. Core forced check, contracts 76 passed/2 optional skips, and Go tests/vet passed during this regression window.
-- Task 4 commit/push pending. Docker is unavailable locally; SeaweedFS integration remains unverified in workstation environment.
-- Next: commit Task 4 and run the final cross-service F52 gates.
+- GREEN: focused export suite 6/6; full Web suite 81 passed; `pnpm --dir apps/web build` passed. Final Core forced check, contracts 76 passed/2 optional skips, and Go tests/vet passed.
+- Final regression first exposed the polling test's default one-second query timeout racing the one-second refetch interval under parallel load. Increased only the test wait to four seconds; focused and full Web suites then passed. Product polling stays at one second.
+- Task 4 commit/push: `dd0b35f` (`feat(F52.4): add web CSV export flow`). GitHub returned no workflow run.
+- SeaweedFS integration is NOT_RUN locally because Docker and endpoint are unavailable. Code acceptance is complete; record live storage runtime separately.
+- Next: commit polling-test stabilization and finalize F52 progress evidence, then continue next incomplete V1 goal.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 
