@@ -771,17 +771,28 @@ features:
     feature: "Статус Ollama/Vision/Tesseract; `services/health.py`"
     target: "P health; J sanitized status; W/P settings"
     acceptance: "Пользователь видит доступность функций, оператор — диагностику без секретов"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/intelligence/tests/test_health.py
+      - services/python/intelligence/tests/test_app.py
+      - services/core/src/test/java/com/decorix/finance/core/api/IntelligenceHealthClientTest.java
+      - apps/web/src/HealthPanel.test.tsx
+    evidence:
+      - "F54 capability checks use a private bounded endpoint, membership-protected BFF, sanitized diagnostics and RU/EN Web status. F55 additionally prevents remote inventory enumeration. Runtime availability of external providers remains deployment-only proof."
     intentional_differences: []
   - id: F55
     feature: "Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"
     target: "P provider adapters; deployment config"
     acceptance: "Self-hosted локально без стороннего AI API; внешний inference только настроенный режим"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/intelligence/tests/test_models.py
+      - services/python/intelligence/tests/test_app.py
+      - services/python/intelligence/tests/test_health.py
+      - services/core/src/test/java/com/decorix/finance/core/api/IntelligenceHealthClientTest.java
+      - apps/web/src/HealthPanel.test.tsx
+    evidence:
+      - "Configured local model then exact installed preferences; embeddings excluded; inventory is bounded/cached and never enumerated remotely, including health. Missing local text model returns safe unavailable while Tesseract and manual finance flows stay independent. Cloud requires explicit policy and uses its configured model only. Operator setup is documented in docs/AI_MODELS.md; no live cloud inference or model-quality claim was tested."
     intentional_differences: []
   - id: F56
     feature: "Проверки receipt inventory, synthetic/private samples, CI"

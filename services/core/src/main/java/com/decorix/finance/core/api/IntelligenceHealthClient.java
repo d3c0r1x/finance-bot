@@ -21,7 +21,8 @@ public class IntelligenceHealthClient {
     private static final Set<String> STATUSES = Set.of("available", "unavailable", "disabled");
     private static final Duration MAX_TIMEOUT = Duration.ofSeconds(5);
     private static final Set<String> DIAGNOSTICS = Set.of("OLLAMA_UNAVAILABLE", "MODEL_MISSING", "VISION_DISABLED",
-            "VISION_CONFIG_INVALID", "TESSERACT_MISSING", "HEALTH_CHECK_FAILED", "HEALTH_SERVICE_UNAVAILABLE");
+            "VISION_CONFIG_INVALID", "TESSERACT_MISSING", "HEALTH_CHECK_FAILED", "HEALTH_SERVICE_UNAVAILABLE",
+            "REMOTE_MODEL_STATUS_UNCHECKED", "MODEL_CONFIG_INVALID");
 
     private final HttpClient http;
     private final ObjectMapper json;

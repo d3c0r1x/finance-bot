@@ -9,6 +9,7 @@ import json
 import httpx
 
 from services.python.intelligence.gateway import authorize_provider, is_local_endpoint
+from services.python.intelligence.models import parse_model_preferences, resolve_model
 from services.python.intelligence.vision import parse_vision_models
 
 MAX_MODEL_LIST_BYTES = 128 * 1024
@@ -56,15 +57,30 @@ async def collect_health(timeout: float = 1.5) -> dict:
     """Check configured feature dependencies without returning configuration or raw errors."""
     bounded_timeout = min(max(float(timeout), 0.05), 2.0)
     try:
-        models = await _installed_ollama_models(bounded_timeout)
+        endpoint = authorize_provider(os.getenv("OLLAMA_HOST", "http://localhost:11434").strip(),
+                                      os.getenv("FINANCE_AI_POLICY", "local-only").strip()).endpoint
+        remote_inventory = not is_local_endpoint(endpoint)
+        models = set() if remote_inventory else await _installed_ollama_models(bounded_timeout)
         ollama_error = False
     except Exception:
         models = set()
         ollama_error = True
+        remote_inventory = False
 
     text_model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct").strip()
-    if ollama_error:
+    model_config_invalid = False
+    if not remote_inventory and not ollama_error:
+        try:
+            text_model = resolve_model(text_model, parse_model_preferences(os.getenv("OLLAMA_MODEL_PREFERENCE")),
+                                       list(models))
+        except ValueError:
+            model_config_invalid = True
+    if remote_inventory:
+        local_ai = _capability("disabled", "REMOTE_MODEL_STATUS_UNCHECKED")
+    elif ollama_error:
         local_ai = _capability("unavailable", "OLLAMA_UNAVAILABLE")
+    elif model_config_invalid:
+        local_ai = _capability("unavailable", "MODEL_CONFIG_INVALID")
     elif text_model in models:
         local_ai = _capability("available")
     else:
@@ -81,6 +97,8 @@ async def collect_health(timeout: float = 1.5) -> dict:
         vision = _capability("unavailable", "VISION_CONFIG_INVALID")
     elif not vision_models:
         vision = _capability("disabled", "VISION_DISABLED")
+    elif remote_inventory:
+        vision = _capability("disabled", "REMOTE_MODEL_STATUS_UNCHECKED")
     elif ollama_error:
         vision = _capability("unavailable", "OLLAMA_UNAVAILABLE")
     elif any(model in models for model in vision_models):

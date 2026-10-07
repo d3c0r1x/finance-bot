@@ -25,6 +25,10 @@ class UnsupportedCapability(GatewayError):
     pass
 
 
+class ProviderUnavailable(GatewayError):
+    """A requested AI task has no usable provider in the approved execution policy."""
+
+
 class RequestCancelled(Exception):
     pass
 

@@ -27,6 +27,14 @@ VALID_CONTEXT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def local_model_inventory(monkeypatch):
+    async def installed_models(_endpoint, **_kwargs):
+        return ["qwen-text", "qwen2.5:7b-instruct"]
+
+    monkeypatch.setattr(intelligence_app, "list_installed_models", installed_models, raising=False)
+
+
 def ai_headers(task_kind, **overrides):
     input_schema, output_schema = {
         "budget-proposal": ("budget-proposal-context.v1", "budget-proposal-advice.v1"),
@@ -56,6 +64,10 @@ def internal_server(monkeypatch):
     monkeypatch.setenv("FINANCE_AI_POLICY", "local-only")
     monkeypatch.setenv("OLLAMA_HOST", "http://ollama:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen-text")
+    async def installed_models(_endpoint, **_kwargs):
+        return ["qwen-text"]
+
+    monkeypatch.setattr(intelligence_app, "list_installed_models", installed_models, raising=False)
     generated = []
 
     class StubIntelligenceHandler(IntelligenceHandler):
@@ -175,6 +187,67 @@ def test_private_health_reports_only_sanitized_capability_codes(internal_server,
     serialized = json.dumps(body)
     for private_value in ("private-test-token", "ollama:11434", "qwen", "TESSERACT_CMD", "C:/"):
         assert private_value not in serialized
+
+
+def test_local_provider_uses_only_an_installed_preferred_text_model(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+    monkeypatch.setenv("FINANCE_AI_POLICY", "local-only")
+    monkeypatch.setenv("OLLAMA_MODEL", "configured:missing")
+    monkeypatch.setenv("OLLAMA_MODEL_PREFERENCE", "preferred:8b,preferred:4b")
+
+    async def installed_models(_endpoint, **_kwargs):
+        return ["preferred:4b", "preferred:8b", "embed-small"]
+
+    monkeypatch.setattr(intelligence_app, "list_installed_models", installed_models, raising=False)
+    handler = object.__new__(IntelligenceHandler)
+    providers = handler._providers()
+
+    assert providers[0].model == "preferred:8b"
+
+
+def test_missing_local_models_keeps_receipt_ocr_provider(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+    monkeypatch.setenv("FINANCE_AI_POLICY", "local-only")
+    monkeypatch.setenv("OLLAMA_MODEL", "configured:missing")
+
+    async def no_models(_endpoint, **_kwargs):
+        return []
+
+    monkeypatch.setattr(intelligence_app, "list_installed_models", no_models, raising=False)
+    providers = object.__new__(IntelligenceHandler)._providers()
+    assert not any(provider.name == "ollama" for provider in providers)
+    assert any(provider.name == "tesseract" for provider in providers)
+
+
+def test_cloud_opt_in_uses_only_configured_model_without_remote_inventory(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.example")
+    monkeypatch.setenv("FINANCE_AI_POLICY", "cloud-opt-in")
+    monkeypatch.setenv("OLLAMA_MODEL", "cloud-configured:latest")
+
+    async def forbidden_inventory(*_args, **_kwargs):
+        raise AssertionError("Cloud model inventory must not be queried")
+
+    monkeypatch.setattr(intelligence_app, "list_installed_models", forbidden_inventory, raising=False)
+    handler = object.__new__(IntelligenceHandler)
+    providers = handler._providers()
+
+    assert providers[0].model == "cloud-configured:latest"
+
+
+def test_missing_local_ollama_returns_safe_unavailable_without_inference(internal_server, monkeypatch):
+    base_url, generated = internal_server
+
+    async def no_models(_endpoint, **_kwargs):
+        return []
+
+    monkeypatch.setattr(intelligence_app, "list_installed_models", no_models, raising=False)
+    with httpx.Client(trust_env=False) as client:
+        response = client.post(f"{base_url}/internal/v1/budget-proposals",
+                               headers=ai_headers("budget-proposal"), json=VALID_CONTEXT)
+
+    assert response.status_code == 503
+    assert response.json() == {"error": "unavailable"}
+    assert generated == []
 
 
 def test_internal_merchant_classification_is_authenticated_and_validates_minimal_context(internal_server):

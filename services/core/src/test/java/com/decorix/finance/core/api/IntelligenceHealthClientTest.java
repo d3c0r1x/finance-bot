@@ -22,7 +22,7 @@ class IntelligenceHealthClientTest {
                 path.set(exchange.getRequestURI().getPath());
                 byte[] response = ("{\"capabilities\":{"
                         + "\"localAi\":{\"status\":\"available\",\"diagnosticCode\":null},"
-                        + "\"receiptVision\":{\"status\":\"disabled\",\"diagnosticCode\":\"VISION_DISABLED\"},"
+                        + "\"receiptVision\":{\"status\":\"disabled\",\"diagnosticCode\":\"REMOTE_MODEL_STATUS_UNCHECKED\"},"
                         + "\"receiptOcr\":{\"status\":\"unavailable\",\"diagnosticCode\":\"TESSERACT_MISSING\"}},"
                         + "\"privateHost\":\"ollama-secret\"}")
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -40,6 +40,7 @@ class IntelligenceHealthClientTest {
             assertEquals("Bearer service-secret", authorization.get());
             assertEquals("available", status.capabilities().get("localAi").status());
             assertEquals("TESSERACT_MISSING", status.capabilities().get("receiptOcr").diagnosticCode());
+            assertEquals("REMOTE_MODEL_STATUS_UNCHECKED", status.capabilities().get("receiptVision").diagnosticCode());
             assertTrue(status.toString().contains("TESSERACT_MISSING"));
             assertTrue(!status.toString().contains("ollama-secret"));
         } finally {

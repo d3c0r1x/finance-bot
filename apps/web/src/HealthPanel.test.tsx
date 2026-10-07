@@ -46,6 +46,16 @@ describe('HealthPanel', () => {
     expect(screen.getByText('Disabled')).toBeInTheDocument();
   });
 
+  it('explains that remote model inventory is intentionally not checked', async () => {
+    vi.mocked(api.getHealth).mockResolvedValue({ capabilities: {
+      localAi: { status: 'disabled', diagnosticCode: 'REMOTE_MODEL_STATUS_UNCHECKED' },
+      receiptVision: { status: 'disabled', diagnosticCode: 'REMOTE_MODEL_STATUS_UNCHECKED' },
+      receiptOcr: { status: 'available', diagnosticCode: null },
+    } } as never);
+    mount();
+    expect(await screen.findAllByText('Список удалённых моделей не запрашивается.')).toHaveLength(2);
+  });
+
   it('shows a bounded retry state when the BFF cannot return status', async () => {
     vi.mocked(api.getHealth).mockRejectedValue(new Error('private host and token'));
     mount();

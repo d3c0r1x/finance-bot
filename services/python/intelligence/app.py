@@ -18,10 +18,12 @@ import httpx
 
 from services.python.intelligence.budget_proposals import validate_context
 from services.python.intelligence.gateway import (AiRequestEnvelope, OllamaProvider, PolicyDenied, ProviderRouter,
-                                                  RequestCancelled, RequestDeadlineExceeded, UnsupportedCapability,
-                                                  authorize_provider,
+                                                  ProviderUnavailable, RequestCancelled, RequestDeadlineExceeded,
+                                                  UnsupportedCapability,
+                                                  authorize_provider, is_local_endpoint,
                                                   restrictive_policy, run_with_controls)
 from services.python.intelligence.health import collect_health
+from services.python.intelligence.models import list_installed_models, parse_model_preferences, resolve_model
 from services.python.intelligence.model_scheduler import OLLAMA_MODEL_SCHEDULER
 from services.python.intelligence.merchant_classification import validate_context as validate_merchant_context
 from services.python.intelligence.tesseract import TesseractBusy, TesseractProvider, TesseractUnavailable
@@ -138,6 +140,9 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
         except PolicyDenied:
             self._reply(403, {"error": "policy_denied"})
             return
+        except ProviderUnavailable:
+            self._reply(503, {"error": "unavailable"})
+            return
         except UnsupportedCapability:
             self._reply(422, {"error": "unsupported_capability"})
             return
@@ -234,17 +239,33 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
     def _providers(self):
         endpoint = authorize_provider(os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/"),
                                       "cloud-opt-in")
-        model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+        configured_model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+        text_model = configured_model
+        installed = None
+        if is_local_endpoint(endpoint.endpoint):
+            try:
+                installed = asyncio.run(list_installed_models(endpoint.endpoint))
+                preferences = parse_model_preferences(os.getenv("OLLAMA_MODEL_PREFERENCE"))
+                text_model = resolve_model(configured_model, preferences, installed)
+            except (httpx.HTTPError, TypeError, ValueError):
+                # Invalid or unavailable inventory must fail closed for AI text tasks.
+                installed = []
+                text_model = None
         from services.python.intelligence.vision import (OllamaVisionPoolProvider, OllamaVisionProvider,
                                                          parse_vision_models)
         vision_models = parse_vision_models(os.getenv("OLLAMA_VISION_MODELS", ""))
         from services.python.intelligence.gateway import VertexAIProvider
 
-        providers = [OllamaProvider(endpoint.endpoint, model)]
+        providers = []
+        if installed is None or text_model in installed and "embed" not in text_model.casefold():
+            providers.append(OllamaProvider(endpoint.endpoint, text_model))
         if vision_models:
-            vision_pool = OllamaVisionPoolProvider(
-                [OllamaVisionProvider(endpoint.endpoint, vision_model) for vision_model in vision_models])
-            providers.append(vision_pool)
+            if installed is not None:
+                vision_models = tuple(model for model in vision_models if model in installed)
+            if vision_models:
+                vision_pool = OllamaVisionPoolProvider(
+                    [OllamaVisionProvider(endpoint.endpoint, vision_model) for vision_model in vision_models])
+                providers.append(vision_pool)
         providers.extend([TesseractProvider(), VertexAIProvider()])
         return providers
 
@@ -252,7 +273,15 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
                   task_kind=None):
         policy = restrictive_policy(os.getenv("FINANCE_AI_POLICY", "local-only").strip(),
                                     requested_policy or os.getenv("FINANCE_AI_POLICY", "local-only").strip())
-        return ProviderRouter(self._providers()).select(required_capabilities, policy, task_kind)
+        providers = self._providers()
+        try:
+            return ProviderRouter(providers).select(required_capabilities, policy, task_kind)
+        except UnsupportedCapability as error:
+            if task_kind in {"budget-proposal", "transaction-draft", "receipt-basket-review",
+                             "merchant-classification"} and not any(
+                                 provider.name == "ollama" for provider in providers):
+                raise ProviderUnavailable("No usable text model is installed") from error
+            raise
 
     async def _generate(self, context):
         timeout = min(float(os.getenv("FINANCE_AI_TIMEOUT_SECONDS", "90")), self._active_envelope.remaining_seconds)

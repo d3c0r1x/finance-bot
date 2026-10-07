@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 07:49, Europe/Moscow.
+Updated: 2026-10-07 08:08, Europe/Moscow.
 
 ## Global plan
 
@@ -73,18 +73,20 @@ Updated: 2026-10-07 07:49, Europe/Moscow.
 | F46 | Deliver a completed goal outcome in the weekly Telegram digest | COMPLETE — `9455567`; all local gates passed and commit pushed; GitHub returned no workflow run | F45 lifecycle | 9455567 |
 | F52 | Excel-compatible CSV export, filters, safe text, scoped download | CODE COMPLETE — final local regression passed; SeaweedFS runtime integration NOT_RUN because Docker is unavailable | F51 | 0f50266 (polling-test stabilization); dd0b35f (Task 4); 016a6a0 (Task 3b); 7e2088d (Task 3a); e8ec4af (Task 2b); 62370cd (Task 2a); 66de1a8 (Task 1) |
 | F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | 5adeccf |
-| F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | pending |
+| F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | 2a6cf21 |
+| F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE LOCALLY — ordered installed-model selection, safe unavailable response, operator instructions, and no remote inventory enumeration including health; commit/push pending | F54 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F54 — expose safe local AI, Vision, and OCR availability in the app and provide private diagnostics.
-- Status: GREEN — Python, Core, contracts, Web, and production build gates pass; commit pending.
-- Acceptance: private bounded Ollama/Vision/Tesseract checks; public liveness remains shallow; sanitized membership-authenticated BFF; RU/EN Web status and manual refresh; no provider secrets/URLs/paths/raw errors in response.
-- Evidence: F53 committed/pushed as `5adeccf`; Web 13 files / 87 tests and production build passed. F54 RED recorded for missing private health endpoint, Core client/controller, and Web panel/route. GREEN: combined contracts/migration/intelligence/Telegram suite 282 passed, 1 optional DB skip; Core `:services:core:check --rerun-tasks` passed; Web 14 files / 91 tests and TypeScript/Vite build passed; `git diff --check` passed. Tests use deterministic local fixtures; real Ollama endpoint availability is not asserted. Core returns only allowlisted status/diagnostic codes; detailed provider internals remain private because a platform-operator identity is not implemented yet. Plans: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`, `docs/superpowers/plans/2026-10-07-f54-health-status.md`.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, F54 changes uncommitted.
-- Next: verify final diff, commit/push F54, inspect F55 acceptance, and continue test-first.
-- Updated at: 2026-10-07 07:49 Europe/Moscow.
+- ID and outcome: F55 — safe local model selection, explicit cloud opt-in, no-Ollama usability, and deployment model management.
+- Status: VERIFIED LOCALLY — implementation and complete regression pass; commit/push pending.
+- Acceptance: local self-hosted default; resolve configured model then exact installed preferences only; no remote fallback; deterministic/manual finance flows remain available without Ollama; Vision stays allowlisted; server-side model management is documented.
+- Evidence: plan `docs/superpowers/plans/2026-10-07-f55-local-ai-models.md`; operator guide `docs/AI_MODELS.md`. Test-first RED caught 200 for a missing local model, direct configured embedding selection, repeated outage inventory calls, and remote health enumeration. Fixes use bounded/cached inventory, exact installed preference resolution, safe 503 when no local text provider exists, and health status `REMOTE_MODEL_STATUS_UNCHECKED` without remote requests. `OLLAMA_VISION_MODELS` remains allowlisted; local allowlisted models must be installed. No live cloud requests or model-quality claims.
+- GREEN: Python contracts/migration/intelligence/Telegram 296 passed, 1 optional skip; Core `:services:core:check --rerun-tasks`; Go `test ./... -count=1` and `go vet ./...`; Web 92 tests and TypeScript/Vite production build; `git diff --check`. Go 1.27.1 was downloaded to `%TEMP%`, SHA-256 verified against go.dev, and used without changing system PATH/install.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, current code based on `2a6cf21`.
+- Next: commit/push F55 and progress; inspect GitHub workflow status.
+- Updated at: 2026-10-07 08:08 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -157,6 +159,13 @@ Updated: 2026-10-07 07:49, Europe/Moscow.
 - GREEN: contracts, migration, intelligence, and Telegram suite 282 passed / 1 optional DB skip; Core `:services:core:check --rerun-tasks`; Web 14 files / 91 tests and production build; `git diff --check`.
 - Local provider runtime was not probed against a real Ollama/Tesseract installation; integration behavior is covered with controlled HTTP/filesystem fixtures. Detailed operator-only diagnostics still require the platform-operator authorization model from later SaaS work.
 - Plan: `docs/superpowers/plans/2026-10-07-f54-health-status.md`. Commit/push pending.
+
+## E4.94 F55 local AI and model management plan — 2026-10-07 07:52 Europe/Moscow
+
+- F54 committed/pushed as `2a6cf21`; GitHub reported no workflow run for the SHA.
+- F55 inventory: the Python gateway already rejects remote providers in `local-only`, requires both policy layers for cloud requests, and uses explicit Vision model allowlists. It lacks the legacy installed-model preference resolver for text tasks; deployment docs do not describe safe management in the v2 layout.
+- Wrote `docs/superpowers/plans/2026-10-07-f55-local-ai-models.md` with bounded local inventory, exact tag matching, embeddings exclusion, no remote fallback/inventory scan, manual no-Ollama behavior, and model operations through deployment config/Ollama CLI.
+- No F55 product code changed. Next: tests first and observed RED.
 
 ## E4.81 F45.4 legacy goal history import — 2026-10-07 05:52 MSK
 
@@ -1496,3 +1505,12 @@ Updated: 2026-10-07 07:49, Europe/Moscow.
 - Added the authorized members page, localized role labels, own-profile link, manager-filtered transaction link, and scope-safe member transaction query. Restored a global refresh action and F5 query invalidation, route-aware navigation, and responsive member cards.
 - A full regression caught duplicate accessible names between the global refresh and existing error retry buttons; clarified the global action label. Final GREEN: Web 13 files / 87 tests, TypeScript/Vite production build, `git diff --check`.
 - F53 plan: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`. Commit/push pending.
+
+## E4.95 F55 local model selection and cloud boundaries — 2026-10-07 08:08 MSK
+
+- TDD RED: local empty inventory still returned 200; configured embedding could be selected; Ollama connection failures were retried each request. New tests captured these failures before implementation. A cross-surface RED then caught remote inventory enumeration in private health, rejected its new diagnostic in Core, and missing RU/EN explanation in Web.
+- Implemented bounded 30-second local inventory cache with a 5-second outage cache, configured/exact preference fallback, embedding exclusion, and no local text provider when inventory/configuration is unusable. Text AI now returns safe 503; Tesseract OCR and manual finance paths remain separate. Remote inference remains explicit cloud opt-in; neither provider selection nor health queries remote model inventory.
+- Health reports remote model installation as unchecked. Added its sanitized diagnostic to Core's allowlist and RU/EN Web messages. Health resolves local installed preferences consistently and reports invalid local model config without exposing settings.
+- Operator guide and `.env.example` now document Ollama CLI model lifecycle, exact-tag fallback, cloud key storage, no remote inventory, and no-Ollama behavior. F54/F55 parity entries include tests and evidence.
+- GREEN: Python/contracts/migration/Intelligence/Telegram 296 passed, 1 optional skip; Core complete check passed; Go test and vet passed on checksum-verified portable runtime; Web 92 passed and production build passed; `git diff --check` passed. No billable cloud inference ran.
+- Commit/push and GitHub workflow status pending.
