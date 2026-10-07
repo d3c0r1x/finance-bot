@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 08:37, Europe/Moscow.
+Updated: 2026-10-07 08:44, Europe/Moscow.
 
 ## Global plan
 
@@ -75,20 +75,21 @@ Updated: 2026-10-07 08:37, Europe/Moscow.
 | F53 | Web equivalents for eight desktop tabs, shared refresh, member transaction navigation, profile editing | COMPLETE — member route, own profile link, manager transaction filter, refresh/F5 and active route; Web 87 tests/build green | F52 | 5adeccf |
 | F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | 2a6cf21 |
 | F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE — local gates and all four GitHub workflows GREEN after contract-test correction | F54 | 5df8b06, 0edc20b |
-| F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | ANALYSIS — acceptance and test boundary recorded; implementation not started | F55 | none |
+| F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | IMPLEMENTING — focused tests 11/11; synthetic receipt regression passes | F55 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
 - ID and outcome: F56 — preserve receipt inventory CLI behavior under `tools/evaluation`, verify synthetic and private-sample handling, and keep private receipt data out of CI artifacts.
-- Status: ANALYSIS — acceptance plan written; no F56 code or tests changed.
+- Status: IMPLEMENTING — observed RED; module CLI, compatibility shim, JSON-only output and CI privacy guard implemented; focused tests GREEN.
 - Acceptance: `python -m tools.evaluation.receipt_inventory` and root `python receipt_inventory.py` work; preserve `--vision`, `--strict`, `--json`, `--limit`, `--debug`, and photo arguments; deterministic read-only collection; JSON output parses without human text; strict hard defects exit 1; CI checks private paths are untracked and runs synthetic-only JSON smoke without artifact upload.
-- Evidence: plan `docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md`; global requirement `PLAN.md` F56. Existing root CLI reads explicit paths, ignored `data/receipts`, and local `receipt_samples.json`; `.github/workflows/tests.yml` does not upload artifacts. Existing `--json` currently appends human summary and empty inventory prints prose, so valid JSON contract needs a targeted RED test.
+- Evidence: plan `docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md`; global requirement `PLAN.md` F56. RED was 4 failed/4 passed (missing module, mixed JSON, empty JSON prose, absent CI guard/smoke). Implemented deterministic discovery unchanged, strict JSON stdout (debug to stderr), root wrapper, docs, and workflow tracked-path guard/empty JSON smoke.
 - Ownership: `receipt_inventory.py`, `docs/EVALUATION.md`, and `.github/workflows/tests.yml` are tracked starting points. User-local data `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` remain untracked and out of scope.
 - Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `020bf119d3940ec0c446d6e135222fe0c11edae0`; F55 product and final progress commits pushed.
-- GREEN: F55 local and GitHub gates passed; F56 tests NOT_RUN. Planning checks only: not yet run.
-- Next: add focused F56 tests, run them against current root CLI, and record observed RED before moving code.
-- Updated at: 2026-10-07 08:37 Europe/Moscow.
+- GREEN: `pytest tools/evaluation/tests/test_receipt_inventory.py -q -p no:cacheprovider` — 11 passed; synthetic-only legacy `receipt_test.py` with `samples.load_samples=lambda:{}` — passed; `git diff --check` passed. The first synthetic runner attempt failed only because the Windows console could not encode an emoji; rerun with `PYTHONIOENCODING=utf-8` passed. Workflow CI smoke not run locally because root defaults scan owner `data/receipts`.
+- Privacy note: one accidental local no-argument CLI smoke did scan a photo under ignored `data/receipts`; it changed or copied no files. No receipt manifest was opened or committed. Do not run default local inventory again; use synthetic monkeypatched paths. This is not evidence about owner receipt quality.
+- Next: final diff/path review, commit and push F56, then verify remote CI.
+- Updated at: 2026-10-07 08:44 Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 
@@ -1524,3 +1525,18 @@ Updated: 2026-10-07 08:37, Europe/Moscow.
 - Current CLI implementation lives at root; F56 assigns it to `tools/evaluation`. Preserve root command as shim. Existing workflow has no artifact upload and `.gitignore` excludes owner samples and `data/`.
 - `--json` baseline mixes JSON with human summary; empty inventory emits prose. Plan makes strict JSON-only stdout an explicit acceptance because flag promises machine output.
 - Plan: `docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md`. Next: write synthetic/temp-file tests and observe RED before implementation.
+
+## E4.97 F56 receipt evaluation RED — 2026-10-07
+
+- Added synthetic-only contracts under `tools/evaluation/tests/test_receipt_inventory.py`; no owner photos or sample manifest were opened.
+- Observed RED: 4 failed, 4 passed. Failures: module CLI missing; JSON mode appends human summary; empty JSON emits prose; CI lacks a private-sample tracking guard and module smoke.
+- Existing behavior checks passed for discovery ordering/deduplication, Vision + strict exit, root CLI availability, and ignored/untracked private sample paths.
+- Next: move implementation behind module CLI, keep root compatibility shim, make `--json` stdout strict JSON, document command, add CI privacy guard and empty-inventory smoke.
+
+## E4.98 F56 implementation and local regression — 2026-10-07 08:44 MSK
+
+- Moved the read-only inventory implementation to `tools/evaluation/receipt_inventory.py`; root command is a compatibility wrapper. `--json` now emits only JSON, including `[]`; optional debug diagnostics use stderr. Ordering, per-photo failure isolation, flags, and strict exit policy remain.
+- Added synthetic contracts for exception isolation, strict empty inventory, JSON/debug stream separation, CLI help, ordering/deduplication, Vision selection, wrapper, and privacy workflow. Focused result: 11 passed. Legacy synthetic receipt regression passed with sample loading explicitly disabled; no private manifest/photos were touched by that run.
+- Updated evaluation docs and Actions: tracked-private-path guard, empty JSON module smoke, no artifact upload.
+- `git diff --check` passed. Remote workflow and commit pending.
+- During an earlier default CLI smoke, one ignored local receipt photo was accidentally scanned; no files were modified/copied. Future local invocations use synthetic fixtures only.

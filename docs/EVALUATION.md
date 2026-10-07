@@ -48,12 +48,13 @@ copy receipt_samples.example.json receipt_samples.json
 Когда чеков много и хочется видеть качество чтения на всём наборе, а не на одном удачном:
 
 ```bash
-venv\Scripts\python.exe receipt_inventory.py            # только Tesseract, быстро
-venv\Scripts\python.exe receipt_inventory.py --vision   # с моделью зрения (медленно)
-venv\Scripts\python.exe receipt_inventory.py --strict   # выход 1 при грубых дефектах
+venv\Scripts\python.exe -m tools.evaluation.receipt_inventory            # только Tesseract, быстро
+venv\Scripts\python.exe -m tools.evaluation.receipt_inventory --vision   # с моделью зрения (медленно)
+venv\Scripts\python.exe -m tools.evaluation.receipt_inventory --json     # машинный JSON в stdout
+venv\Scripts\python.exe -m tools.evaluation.receipt_inventory --strict   # выход 1 при грубых дефектах
 ```
 
-Скрипт читает фото из `data/receipts`, ничего не пишет в базу и показывает, где разбор не сошёлся с итогом кассы.
+Команда читает фото из `data/receipts`, ничего не пишет в базу. `--json` выдаёт только JSON (для пустого набора — `[]`); диагностика `--debug` при этом уходит в stderr. Старый `receipt_inventory.py` оставлен как совместимый запуск.
 
 В боте: **⚙️ Настройки → 🩺 Статус сервисов** — доступность Ollama, модель разбора трат, модель зрения для чеков и Tesseract.
 
