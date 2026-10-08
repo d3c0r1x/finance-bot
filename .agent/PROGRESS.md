@@ -76,23 +76,25 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 | F54 | Sanitized AI/Vision/Tesseract capability status | COMPLETE LOCALLY — private bounded health probe, membership-protected BFF, RU/EN Web status; external provider runtime check remains deployment proof | F53 | 2a6cf21 |
 | F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE — local gates and all four GitHub workflows GREEN after contract-test correction | F54 | 5df8b06, 0edc20b |
 | F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | COMPLETE — 11 focused tests, synthetic receipt regression, CI GREEN | F55 | ab4a38d |
-| F57 | Russian formatting, Telegram escaping, fonts, text fallback | LOCAL GREEN — Python/contracts 199; Web 95/build; Android unit 4; Android 8.1 instrumentation 50; APK built/launched; commit/push pending | F56 | pending |
+| F57 | Russian formatting, Telegram escaping, fonts, text fallback | COMPLETE — Python/contracts 199; Web 95/build; Android unit 4; Android 8.1 instrumentation 50; APK built/launched; pushed; no workflow run returned | F56 | c7d7995 |
+| F58 | Safe configuration, cross-platform legacy launchers, docs, MIT notice | LOCAL GREEN — focused tests and script checks pass; Docker unavailable; Compose remains unimplemented per PLAN.md | F57 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F57 — Russian formatting, Telegram escaping, fonts, and text fallback across presentation surfaces.
-- Status: LOCAL GREEN — awaiting F57 commit and remote workflow check.
-- Acceptance: shared Python/Web formatting, localized image/text report, Cyrillic font fallback, semantic Android labels and exact decimal display; keep Core DTO codes locale-neutral.
-- Evidence: `docs/superpowers/plans/2026-10-07-f57-presentation.md`. Initial Python RED 5 failed/2 passed and Web module-missing RED; Web exact-decimal RED captured the absent BigInt arithmetic helpers.
+- ID and outcome: F58 — secure runtime configuration, Windows/Linux developer entrypoints, current documentation, and MIT notice.
+- Status: LOCAL GREEN — focused tests pass; commit/push remains.
+- Acceptance: safe environment template; ignored secret/data files; Docker context excludes secrets; Windows/Linux launcher and documentation; MIT copyright preserved.
+- Evidence: `docs/superpowers/plans/2026-10-08-f58-runtime-config.md`. New acceptance tests were RED (5 failed/1 passed), then GREEN with 13 focused F58/F57 tests.
 - Evidence: F56 feature commit `ab4a38d` is pushed. GitHub run `37577879007` passed all workflow steps, including private-path guard, legacy suites, and empty JSON module smoke.
 - Ownership: `receipt_inventory.py`, `docs/EVALUATION.md`, and `.github/workflows/tests.yml` are tracked starting points. User-local data `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` remain untracked and out of scope.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `0d44dd7351796dc16dc46c935956413388e71ef5`; F56 progress commit pushed, F57 changes remain uncommitted.
-- GREEN: Python/contracts/report/Telegram command suites — 199 passed; Web `pnpm test` — 95 passed; Web `pnpm build` passed. Android `testDebugUnitTest` passed with 4 tests from a temporary ASCII junction after the direct Cyrillic path caused Gradle's test worker to report `ClassNotFoundException`. Android `assembleDebug assembleDebugAndroidTest` passed. Isolated Android 8.1/API 27 emulator reports `OK (50 tests)`; `com.decorix.finance.debug` installed and launched without a fatal crash. APK SHA-256: `5D6D6F12A62697C1A693BFC6F328B98330931002E097307A168A2DA69D285E97`. Rerun `git diff --check` before commit.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `c7d7995` (F57 pushed). F58 changes are uncommitted.
+- F57 GREEN: Python/contracts/report/Telegram command suites — 199 passed; Web `pnpm test` — 95 passed; `pnpm build` passed. Android unit 4 passed, isolated Android 8.1/API 27 instrumentation 50 passed; debug APK installed/launched. SHA-256: `5D6D6F12A62697C1A693BFC6F328B98330931002E097307A168A2DA69D285E97`. `gh run list --commit c7d7995` returned no workflows.
+- F58 GREEN: `.venv\\Scripts\\python.exe -m pytest -p no:cacheprovider tests/test_f58_runtime_config.py tests/test_presentation_formatting.py -q` — 13 passed; `sh -n scripts/dev.sh`, PowerShell help mode, both launcher help outputs, `git diff --check`, and Git ignore probes passed. Docker CLI is unavailable, so no image/build-context runtime check was possible. Compose profiles do not exist yet, as stated in PLAN.md.
 - Privacy note: one accidental local no-argument CLI smoke did scan a photo under ignored `data/receipts`; it changed or copied no files. No receipt manifest was opened or committed. Do not run default local inventory again; use synthetic monkeypatched paths. This is not evidence about owner receipt quality.
 - F56 commit/push: `ab4a38d` (`feat(F56): add receipt evaluation module and privacy gate`); final progress update pending.
-- Next: rerun final diff checks, commit/push F57, inspect triggered GitHub workflows, then start F58.
-- Updated at: 2026-10-07 09:31 Europe/Moscow.
+- Next: review complete F58 diff; commit/push; inspect GitHub workflow result; then continue with remaining V1 delivery gates.
+- Updated at: 2026-10-08, Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07
 

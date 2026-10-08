@@ -62,10 +62,10 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 
 ## Current goal
 
-- ID and outcome: F57 — Russian formatting, Telegram escaping, font portability, text fallback.
-- Status: LOCAL GREEN — F57 implementation and all local gates passed; commit/push and remote workflow check remain. See `.agent/PROGRESS.md` for evidence.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `0d44dd7351796dc16dc46c935956413388e71ef5` plus uncommitted F57 changes.
-- Updated at: 2026-10-07 09:31 Europe/Moscow.
+- ID and outcome: F58 — secure configuration, Windows/Linux launchers, current docs, and MIT notice.
+- Status: LOCAL GREEN — 13 focused F57/F58 tests and launch-script checks pass; commit/push pending. Docker is unavailable. See `.agent/PROGRESS.md` for evidence.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `c7d7995` plus uncommitted F58 changes.
+- Updated at: 2026-10-08 Europe/Moscow.
 
 ## Verification evidence
 
@@ -137,7 +137,7 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 
 ## Next action
 
-- Commit and push F41.3c after staged diff review; confirm GitHub regression, then begin F42.
+- Review, commit, and push F58; inspect GitHub workflows, then continue remaining V1 delivery gates.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 

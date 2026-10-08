@@ -1,237 +1,51 @@
 # Finance Bot
 
-> **Интересный личный проект, над которым я работал длительное время.** Это local-first Telegram-ассистент для учёта личных финансов, в котором я отдельно прорабатывал чтение чеков, валидацию данных, бюджеты, долги, регулярные платежи и общий сервисный слой для Telegram и desktop UI.
->
-> **Status:** active portfolio project.
+Finance Bot is a personal-finance product being migrated from a local Telegram/Desktop application to a multi-service SaaS architecture. The repository contains the legacy Python app and newer Java/Core, React/Web, Android, Python, and Go components. The full SaaS deployment is still in development.
 
-## Идея
+## Current status
 
-Пользователь отправляет фотографию чека.
+- Legacy Telegram bot and desktop panel remain available for local use.
+- SaaS features are implemented incrementally under the approved `PLAN.md` and tracked in `.agent/PROGRESS.md`.
+- Android is a native Kotlin/Compose client; Web is under `apps/web`; the Java business API is under `services/core`.
+- This repository does not yet include the planned all-service Docker Compose stack or a production deployment. A successful local test or Cloudflare build does not mean the SaaS is live.
 
-Вместо одного вызова модели проект использует независимую цепочку:
+## Start the legacy app
 
-```
-Telegram photo
-     ↓
-local Vision model
-     ↓
-Tesseract OCR
-     ↓
-arithmetic validation
-     ↓
-agreed receipt
-     ↓
-expense / category / reports
-```
-
-Если два независимых чтения расходятся по суммам, результат помечается как сомнительный, а не молча исправляется.
-
-## Возможности
-
-- добавление трат;
-- чтение чеков;
-- категории;
-- бюджеты;
-- долги;
-- подписки / регулярные платежи;
-- отчёты;
-- графики;
-- импорт банковских выписок;
-- плановые уведомления;
-- desktop panel на Tkinter;
-- локальная AI-обработка.
-
-## Local-first
-
-После того как Telegram передал фотографию боту, core receipt pipeline не требует стороннего AI API.
-
-Используются:
-
-- Ollama Vision;
-- Tesseract;
-- OpenCV/Pillow;
-- детерминированная арифметическая проверка.
-
-Облачная Ollama также возможна, но это отдельный режим.
-
-## Структура
-
-```
-bot.py                  # Telegram entrypoint
-panel.py                # Tkinter control panel
-config.py               # configuration
-
-ai/
-  llm.py                # parsing / advice
-  vision.py             # Vision model
-  ocr.py                # Tesseract
-  receipts.py           # reconciliation of two readings
-
-database/
-  models.py             # SQLite schema
-  db.py                 # bot CRUD
-  panel_data.py         # panel queries
-
-handlers/
-  ...                   # Telegram scenarios
-
-services/
-  ...                   # budgets, recurring payments,
-                         # price history, shopping list, etc.
-
-samples.py              # local sample receipt data
-
-docs/
-  DEVELOPMENT.md        # full installation / secrets / autostart
-
-tests/
-  ...                   # receipt and business-logic tests
-```
-
-## Быстрый запуск
-
-### Требования
-
-- Python 3.11/3.12;
-- Telegram Bot Token;
-- Ollama — для local Vision/LLM;
-- Tesseract OCR — для независимой проверки.
-
-### Установка
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+See [Development setup](docs/DEVELOPMENT.md) for Windows and Linux requirements, secret setup, service checks, and known runtime limits.
 
 Windows:
 
-```bat
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+```powershell
+.\scripts\dev.ps1 legacy-bot
+.\scripts\dev.ps1 legacy-panel
 ```
 
-### Ollama
+Linux:
 
-Основная модель:
-
-```bash
-ollama pull qwen2.5:7b-instruct
+```sh
+./scripts/dev.sh legacy-bot
+./scripts/dev.sh legacy-panel
 ```
 
-Vision:
+Entrypoints: `scripts/dev.ps1` and `scripts/dev.sh`.
 
-```bash
-ollama pull qwen3-vl:8b-instruct
-```
+The legacy app needs its own Telegram token and user configuration. Infisical is supported. Never put real credentials in tracked files.
 
-Для слабой машины можно использовать меньшие варианты, например `qwen2.5:3b-instruct` и `qwen3-vl:4b-instruct`.
+## Repository map
 
-### Tesseract
+| Path | Purpose |
+|---|---|
+| `services/core` | Java business API and persistence |
+| `services/analytics-go` | Go analytics and projections |
+| `services/python` | Telegram, AI, and import services |
+| `apps/web` | React Web client |
+| `apps/android` | Kotlin Android client |
+| `contracts` | API and event contracts |
+| `PLAN.md` | Approved feature and delivery plan |
+| `.agent/PROGRESS.md` | Execution status and validation evidence |
 
-На Windows нужен Tesseract OCR и русский language data.
+## Configuration and privacy
 
-Проверка:
+`.env.example` contains safe local defaults and placeholders. The legacy Python app reads ignored `.env`; `.env.dev` is reserved for the planned Compose stack. Production credentials belong in a secret manager. See [Security and privacy](docs/SECURITY.md).
 
-```bash
-tesseract --list-langs
-```
-
-В выводе должен присутствовать:
-
-```
-rus
-```
-
-## Секреты
-
-Рекомендуемый способ из документации проекта — Infisical.
-
-Основной Telegram token и другие чувствительные переменные не должны коммититься в Git.
-
-Базовые переменные:
-
-```
-BOT_TOKEN=...
-USER_ID_1=...
-OLLAMA_HOST=http://127.0.0.1:11434
-OLLAMA_MODEL=...
-VISION_ENABLED=1
-VISION_MODEL=...
-```
-
-Полная инструкция по Infisical, Windows, CI/CD и автозапуску находится в [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
-
-## Запуск бота
-
-Прямой запуск:
-
-```bash
-python bot.py
-```
-
-Если используется Infisical:
-
-```bash
-infisical run --env=dev -- python bot.py
-```
-
-Desktop panel:
-
-```bash
-infisical run --env=dev -- python panel.py
-```
-
-В репозитории также есть Windows start scripts.
-
-## Примеры использования
-
-Типичный сценарий:
-
-1. отправить боту фото чека;
-2. дождаться распознавания;
-3. проверить итоговую сумму / позиции;
-4. сохранить расход;
-5. открыть отчёт.
-
-Текстовые сценарии зависят от текущего меню бота; основная обработка находится в `handlers/`.
-
-## Бизнес-логика
-
-Проект не ограничивается OCR.
-
-Например:
-
-- бюджет хранится отдельно от списка расходов;
-- регулярные платежи имеют собственную service logic;
-- суммы и агрегаты рассчитываются детерминированно;
-- рекомендации строятся на уже записанных данных.
-
-Это делает проект ближе к прикладному сервису, чем к простой демонстрации LLM.
-
-## Тесты
-
-```bash
-pytest -q
-```
-
-CI специально отделяет детерминированную часть от зависимости на Ollama и реальные пользовательские фото.
-
-## Ограничения
-
-- плохое фото чека может привести к неопределённому OCR;
-- локальная Vision inference может быть медленной;
-- проект рассчитан на личное / семейное использование, а не на multi-tenant SaaS;
-- рекомендации не гарантируют фактической экономии.
-
-## AI-assisted development
-
-AI использовался для черновой реализации, рутинных handlers, тестовых сценариев и работы с незнакомыми форматами входных данных.
-
-Архитектура, decomposition, интеграции, debugging, validation и итоговое поведение оставались моей задачей.
-
-## Лицензия
-
-MIT.
+MIT licensed. See [LICENSE](LICENSE).

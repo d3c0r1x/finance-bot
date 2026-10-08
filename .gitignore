@@ -1,7 +1,16 @@
 # Секреты и окружение
 .env
-# Локальный бэкап .env перед переходом на Infisical (в нём те же секреты — в git ему нельзя)
-.env.backup
+.env.*
+!.env.example
+.envrc
+.secrets/
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
 .venv/
 venv/
 .gradle/
@@ -17,6 +26,8 @@ __pycache__/
 
 # Данные владельца: база, фото чеков, отчёты
 data/
+var/
+artifacts/private/
 *.db
 *.db-wal
 *.db-shm

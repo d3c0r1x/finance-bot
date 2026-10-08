@@ -1,91 +1,37 @@
-# Безопасность и приватность — Finance Bot
+# Security and privacy
 
-Новый `services/python/intelligence` использует `FINANCE_AI_POLICY=local-only` по
-умолчанию и блокирует удалённый Ollama до отправки prompt или данных. Удалённая
-модель, включая Ollama в другой сети, считается внешней обработкой. Для неё нужен
-осознанный `FINANCE_AI_POLICY=cloud-opt-in`; ключи остаются только на сервере.
-Для чтения чеков отдельный `OLLAMA_VISION_MODELS` задаёт allowlist моделей: если
-список пуст, `receipt-vision` не выбирает VLM. Allowlist не отменяет политику
-выполнения: при `local-only` удалённый `OLLAMA_HOST` по-прежнему блокируется.
-Новые таблицы документов, чеков, чтений и правок защищены forced tenant RLS.
-`storage_key` — внутренняя ссылка, не публичный URL; signed upload/download ещё
-не включены, пока не выбран и не настроен S3-совместимый provider.
+Finance Bot processes receipts, income, debts, and account data. Deployment must protect both service credentials and user financial data. This repository contains legacy local-app code and a SaaS rewrite; their storage and network boundaries differ.
 
-Для SaaS Keycloak OIDC subject связывается со стабильным Finance user ID.
-Telegram привязывается одноразовым кодом из профиля: код содержит 80 бит
-случайности, действует 10 минут, хранится в PostgreSQL только как SHA-256 hash
-и заменяется при повторной выдаче. Выдача ограничена тремя кодами в минуту;
-пять неверных попыток блокируют Telegram ID на 15 минут. Таблица кодов имеет
-forced RLS: владелец видит свои записи, Core service получает доступ только
-после проверки отдельного `FINANCE_TELEGRAM_SERVICE_TOKEN`. Endpoint принимает
-код и Telegram ID отправителя; переданный клиентом `userId` не задаёт владельца.
-Gateway принимает `/link` только в личном чате и не записывает код в логи.
-Service token берётся из secret store, не совпадает с Telegram bot token и
-передаётся только по защищённому внутреннему каналу. После привязки любая
-финансовая операция Telegram должна использовать серверно подтверждённый actor
-context; нельзя выбирать пользователя из текста или Telegram update.
+## Current boundaries
 
-Бот работает с чужими чеками, зарплатой, долгами и подписками. Поэтому
-приватность здесь — не раздел в документации, а ограничение на архитектуру:
-**данные не покидают машину, если владелец сам не подключит облако.**
+- The legacy Python app stores its SQLite database and receipt files locally. Telegram messages and photos pass through Telegram when that integration is used. Ollama cloud is an external processor and must be explicitly configured.
+- The SaaS target uses Java/Core as the business-data writer, PostgreSQL with tenant isolation, and service-to-service credentials. Keycloak provides OIDC identity. The exact deployed topology is not yet shipped as a complete Compose or production stack.
+- The Python intelligence service defaults to `FINANCE_AI_POLICY=local-only`. Remote Ollama requires explicit `cloud-opt-in`; credentials remain server-side.
+- Receipt object storage is private. `storage_key` is an internal reference, not a public URL. Deployments must use authenticated object access and malware scanning.
 
-## 1. Что никуда не уходит
+## Secrets
 
-| Данные | Где обрабатываются |
-|---|---|
-| Фото чеков | локально: Ollama (модель зрения) + Tesseract на этой же машине |
-| Разбор трат, категории, советы | локальная модель Ollama (`OLLAMA_HOST=127.0.0.1`) |
-| База, история, цены, цели | SQLite-файл на диске (`data/finance.db`) |
-| PDF-выписки банка | локальный разбор + локальная модель |
+- Keep bot tokens, OIDC client secrets, database passwords, service tokens, signing keys, and storage credentials in Infisical or another secret manager.
+- `.env.example` contains safe local values and `replace-me` placeholders only. Local `.env*` files other than the example are ignored by Git and Docker build contexts.
+- Do not put credentials in source code, container build arguments, image layers, URLs, logs, screenshots, or test fixtures.
+- Rotate any credential that entered Git history. Removing the file does not remove the secret from history.
+- Use separate credentials for each service and environment. Grant only the permissions each service needs.
 
-Отправка в Telegram идёт только тем, кому бот отвечает, и содержит лишь то, что
-и так должно быть видно в чате. Единственная внешняя точка — сам Telegram Bot
-API.
+## Build and data protection
 
-**Облако — осознанное исключение, а не режим по умолчанию.** Если задать
-`OLLAMA_HOST=https://ollama.com` и ключ, разбор уйдёт на облако Ollama; это
-включается вручную и указано в `.env`.
+`.dockerignore` excludes local environment files, private keys, user data, temporary files, and Git metadata from build contexts. Dockerfiles should copy only explicit source paths. Review context exclusions whenever adding a new local-data directory or secret format.
 
-## 2. Кому бот отвечает
+Git ignores local databases, receipt data, runtime files, environment files, private keys, and generated outputs. Tests must use synthetic fixtures. Never stage `.android-user/`, `data/`, or private samples to make a test pass.
 
-Whitelist по Telegram ID (`USER_ID_1`, `USER_ID_2`) включён на **всех**
-роутерах — незнакомый пользователь не получает ни ответа, ни данных. Каждый
-пользователь видит только свои траты: лимиты, отключённые напоминания, цели и
-списки хранятся под ключами с его ID.
+## SaaS controls
 
-## 3. Секреты
+- Enforce tenant and member authorization in Java/Core for every financial read and write. Do not trust tenant or owner IDs from an untrusted client.
+- Validate issuer, audience, expiry, state, and PKCE for OIDC flows. Keep browser sessions server-side and Android refresh credentials in protected platform storage.
+- Use TLS for external traffic and protected transport for service credentials. Do not expose PostgreSQL, Redis, Kafka, or ClickHouse to public networks.
+- Keep outbox consumers idempotent. Do not use analytics projections as the source of truth for money.
+- Limit receipt upload size and type, scan uploaded objects, and use short-lived authorization for private object access.
+- Configure backups, retention, restore tests, deletion workflows, and monitoring before production use.
 
-- Токен бота и Telegram ID живут в **Infisical**, а не в `.env` на диске:
-  запуск идёт через `infisical run --env=dev`. Инструкция — в
-  [DEVELOPMENT.md](DEVELOPMENT.md).
-- В коде секретов нет: `config.py` читает только `os.getenv`.
-- `.env.backup` (временный файл при проверке) — в `.gitignore`.
-- Значения никогда не печатаются на экран: для проверки наличия секрета
-  сравнивают, например, длину (`infisical secrets get BOT_TOKEN --plain | wc -c`).
+## Incident response
 
-## 4. Что не попадает в репозиторий
-
-`.gitignore` закрывает: `.env`, `data/` (база и фото чеков),
-`receipt_samples.json` (личные образцы чеков), логи, виртуальное окружение и
-`venv/`.
-
-Отдельно про **CI**: в GitHub Actions нет ни Ollama, ни личных образцов —
-тесты обязаны проходить без модели и без данных владельца. Это одновременно
-проверка приватности: если тест начнёт зависеть от фото из `data/receipts`, он
-упадёт в CI, а не молча утащит приватный файл в сборку.
-
-## 5. Если секрет уже попадал в git
-
-История git не забывает ничего. Значение, попавшее в историю, считается
-скомпрометированным и **перевыпускается**, а не просто удаляется из файла:
-токен — у @BotFather, ключ Ollama — в личном кабинете. Проверка репозитория на
-утечки — `infisical scan`.
-
-## 6. Границы доверия к ИИ в этом проекте
-
-Модель зрения — не «источник истины»: её чтение сверяется с независимым
-Tesseract-ом и с арифметикой чека, а в карточке прямо видно, кто читал
-(см. [ARCHITECTURE.md](ARCHITECTURE.md)). Название магазина не выдумывается
-никогда: если его нет в тексте чека, бот так и скажет. Всё, что модель
-предположила, отделено от того, что подтверждено правилом или человеком, — в
-том числе в списках «не брать» и в целях на месяц.
+Revoke leaked credentials first, then replace them in the secret manager and affected services. Preserve relevant audit logs without copying receipt contents or tokens into incident reports. Assess affected tenants and data before restoring service.
