@@ -9,6 +9,22 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class FinanceModelsTest {
+    @Test fun parsesTransactionHistoryWithoutChangingExactMoneyOrVersion() {
+        val transaction = FinanceModels.transaction(JSONObject("""
+            {"id":"tx-1","tenantId":"tenant-1","type":"expense","amount":"2000.00","currency":"RUB",
+             "categoryCode":"transport","subcategoryCode":"taxi","description":"Такси","source":"manual",
+             "occurredAt":"2026-10-08T09:00:00Z","accountId":null,"status":"posted","version":3,
+             "createdAt":"2026-10-08T09:00:00Z","memberName":"User","debtId":null,"ownerUserId":"user-1"}
+        """.trimIndent()))
+
+        assertEquals("2000.00", transaction.amount)
+        assertEquals(3L, transaction.version)
+        assertEquals("posted", transaction.status)
+        assertEquals("user-1", transaction.ownerUserId)
+        assertNull(transaction.accountId)
+        assertNull(transaction.debtId)
+    }
+
     @Test fun parsesServerBudgetAlertsWithoutRecomputingThresholds() {
         val alerts = FinanceModels.budgetAlerts(JSONObject("""
             {"budgetAlerts":[{"budgetKey":"еда","threshold":"near","limit":"5000.00","spent":"4500.00"},

@@ -54,13 +54,30 @@ class FinanceApi(context: Context) {
         }
     }
 
-    fun transactions(tenantId: String): List<String> {
+    fun transactions(tenantId: String): List<FinanceTransaction> {
         val body = JSONObject(execute("/api/v1/tenants/$tenantId/transactions?pageSize=50", "GET"))
         val list = body.getJSONArray("items")
-        return (0 until list.length()).map { index ->
-            val item = list.getJSONObject(index)
-            "${item.getString("occurredAt").take(10)}  ${item.getString("description")}  ${item.getString("amount")} ₽"
-        }
+        return (0 until list.length()).map { index -> FinanceModels.transaction(list.getJSONObject(index)) }
+    }
+
+    fun repeatTransaction(tenantId: String, original: FinanceTransaction, occurredAt: String): FinanceTransaction {
+        require(original.status == "posted" && original.type != "debt_payment") { "Transaction cannot be repeated" }
+        val body = JSONObject().put("type", original.type).put("amount", original.amount)
+            .put("currency", original.currency).put("categoryCode", original.categoryCode)
+            .put("subcategoryCode", original.subcategoryCode ?: JSONObject.NULL)
+            .put("description", original.description).put("source", original.source)
+            .put("occurredAt", occurredAt).toString()
+        return FinanceModels.transaction(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/transactions", "POST", body, UUID.randomUUID().toString(),
+        )))
+    }
+
+    fun voidTransaction(tenantId: String, transaction: FinanceTransaction): FinanceTransaction {
+        require(transaction.status == "posted") { "Transaction is no longer posted" }
+        return FinanceModels.transaction(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/transactions/${transaction.id}/void", "POST", "{}",
+            UUID.randomUUID().toString(), transaction.version,
+        )))
     }
 
     fun budgets(tenantId: String): BudgetOverview = FinanceModels.budgetOverview(

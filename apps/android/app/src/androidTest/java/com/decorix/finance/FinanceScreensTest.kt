@@ -465,6 +465,36 @@ class FinanceScreensTest {
         assertEquals("draft-1" to 4L, cancelled)
     }
 
+    @Test fun postedTransactionHistoryOffersRepeatAndVoidWithExactValues() {
+        val original = transaction()
+        var repeated: FinanceTransaction? = null
+        var voided: Pair<String, Long>? = null
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(original)),
+            onRepeatTransaction = { repeated = it },
+            onVoidTransaction = { item -> voided = item.id to item.version })
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithText("Такси").assertIsDisplayed()
+        compose.onNodeWithText("−2 000,00 ₽", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag("transaction-repeat-tx-1").performClick()
+        assertEquals(original, repeated)
+        compose.onNodeWithTag("transaction-void-tx-1").performClick()
+        assertEquals("tx-1" to 3L, voided)
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Такси").assertIsDisplayed()
+        compose.onNodeWithText("−2,000.00 RUB", substring = true).assertIsDisplayed()
+    }
+
+    @Test fun viewerCannotRepeatOrVoidPostedTransactions() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
+            transactions = listOf(transaction())))
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-repeat-tx-1").assertDoesNotExist()
+        compose.onNodeWithTag("transaction-void-tx-1").assertDoesNotExist()
+    }
+
     private fun show(state: FinanceUiState,
                      onReportLoad: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
                      onCreateTenant: (String, String, String?) -> Unit = { _, _, _ -> },
@@ -478,8 +508,10 @@ class FinanceScreensTest {
                       onShoppingCopy: (String) -> Unit = {},
                       onDoNotBuyDecision: (String, String) -> Unit = { _, _ -> },
                       onPersonalInflationLoad: () -> Unit = {},
-                      onRecurringLoad: () -> Unit = {},
-                      onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> }) {
+                     onRecurringLoad: () -> Unit = {},
+                      onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> },
+                      onRepeatTransaction: (FinanceTransaction) -> Unit = {},
+                      onVoidTransaction: (FinanceTransaction) -> Unit = {}) {
         val language = mutableStateOf("ru")
         compose.setContent {
         MaterialTheme {
@@ -500,12 +532,20 @@ class FinanceScreensTest {
                 onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = {},
                 onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> }, onDebtForecast = {},
                 onReportLoad = onReportLoad,
+                onRepeatTransaction = onRepeatTransaction, onVoidTransaction = onVoidTransaction,
             )
         }
         }
     }
 
     private fun tenant(role: String) = FinanceTenant("tenant-1", "Дом", role, "Europe/Moscow")
+
+    private fun transaction() = FinanceTransaction(
+        id = "tx-1", tenantId = "tenant-1", type = "expense", amount = "2000.00", currency = "RUB",
+        categoryCode = "transport", subcategoryCode = "taxi", description = "Такси", source = "manual",
+        occurredAt = "2026-10-08T09:00:00Z", accountId = null, status = "posted", version = 3,
+        createdAt = "2026-10-08T09:00:00Z", memberName = "User", debtId = null, ownerUserId = "user-1",
+    )
 
     private fun recurring(id: String, key: String, name: String, type: String, amount: String, daysUntil: Int, nextDate: String) =
         FinanceRecurringSeries(id, key, name, if (type == "expense") "bills" else null, type, "RUB", amount,

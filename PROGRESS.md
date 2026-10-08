@@ -63,8 +63,8 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 ## Current goal
 
 - ID and outcome: F59 — Android Kotlin/Compose RU/EN parity for F01–F58, Java API E2E, and installed APK.
-- Status: IN PROGRESS — F59.1 maps all 58 rows: 28 partial, 28 missing, 2 justified N/A. The map tracks gaps; it does not claim parity completion.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `853d42f`.
+- Status: IN PROGRESS — F59.1 maps all 58 rows: now 29 partial, 27 missing, 2 justified N/A. F08 history/repeat/void is implemented and locally verified; live Core E2E and other parity gaps remain.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `1e84116` plus uncommitted F08.
 - Updated at: 2026-10-08 Europe/Moscow.
 
 ## Verification evidence

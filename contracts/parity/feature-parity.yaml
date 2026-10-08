@@ -150,9 +150,12 @@ features:
     evidence:
       - "Core returns the current member's latest posted history, creates an AI-free repeat draft with copied expense fields and idempotent keys, then marks confirmed repeats with source=repeat. Telegram /history exposes repeat and latest-only undo; Core checks id/version against the newest posted row and delegates void compensation. Python command/client tests and live PostgreSQL acceptance pass; full Python/contracts pass 144 with 1 skip and full Java Core check passes 122 tests."
     android:
-      status: missing
-      scenario: "Android counterpart for F08: История последних операций, повтор траты, отмена последней; `main_menu.py`"
-      gap: "No Android user screen or equivalent flow is verified for F08 yet."
+      status: partial
+      scenario: "Compose history shows exact transaction values; owners can repeat an eligible posted transaction or void a posted transaction with its current version; viewers cannot mutate."
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+      gap: "History is limited to the first 50 entries and lacks filters; live authenticated Core repeat/void E2E is still required."
     intentional_differences: []
   - id: F09
     feature: "Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"

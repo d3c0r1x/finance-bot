@@ -97,7 +97,8 @@ class MainActivity : ComponentActivity() {
                         onShoppingLoad = ::loadShoppingCandidates, onShoppingDecision = ::applyShoppingDecision,
                         onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation,
                         onDoNotBuyLoad = ::loadDoNotBuy, onDoNotBuyDecision = ::applyDoNotBuyDecision,
-                        onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision)
+                        onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision,
+                        onRepeatTransaction = ::repeatTransaction, onVoidTransaction = ::voidTransaction)
                 }
             }
         }
@@ -181,6 +182,19 @@ class MainActivity : ComponentActivity() {
     private fun cancelTransactionDraft(id: String, version: Long) = runApi {
         api.cancelTransactionDraft(activeTenantId(), id, version)
         workspaceData(draft = null)
+    }
+
+    private fun repeatTransaction(transaction: FinanceTransaction) = runApi {
+        val tenant = ui.tenants.firstOrNull() ?: error("Create a workspace first")
+        val zone = ZoneId.of(tenant.timezone)
+        val occurredAt = LocalDate.now(zone).atTime(12, 0).atZone(zone).toInstant().toString()
+        api.repeatTransaction(tenant.id, transaction, occurredAt)
+        workspaceData()
+    }
+
+    private fun voidTransaction(transaction: FinanceTransaction) = runApi {
+        api.voidTransaction(activeTenantId(), transaction)
+        workspaceData()
     }
 
     private fun workspaceData(proposal: BudgetProposal? = ui.budgetProposal,
@@ -464,7 +478,7 @@ data class FinanceUiState(
     val busy: Boolean = false,
     val error: String? = null,
     val tenants: List<FinanceTenant> = emptyList(),
-    val transactions: List<String> = emptyList(),
+    val transactions: List<FinanceTransaction> = emptyList(),
     val budgets: BudgetOverview? = null,
     val debts: List<FinanceDebt> = emptyList(),
     val budgetProposal: BudgetProposal? = null,
@@ -493,7 +507,7 @@ data class FinanceUiState(
 
 private data class FinanceWorkspaceSnapshot(
     val tenants: List<FinanceTenant>,
-    val transactions: List<String>,
+    val transactions: List<FinanceTransaction>,
     val budgets: BudgetOverview?,
     val debts: List<FinanceDebt>,
     val proposal: BudgetProposal?,
@@ -533,7 +547,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onDoNotBuyDecision: (String, String) -> Unit = { _, _ -> },
                           onPersonalInflationLoad: () -> Unit = {},
                           onRecurringLoad: () -> Unit = {},
-                          onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> }) {
+                          onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> },
+                          onRepeatTransaction: (FinanceTransaction) -> Unit = {},
+                          onVoidTransaction: (FinanceTransaction) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -671,8 +687,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 Text(if (russian) "Недавние операции" else "Recent transactions",
                                     style = MaterialTheme.typography.titleMedium)
                             }
-                            items(state.transactions) { operation ->
-                                Card(Modifier.fillMaxWidth()) { Text(operation, Modifier.padding(14.dp)) }
+                            items(state.transactions) { transaction ->
+                                TransactionHistoryCard(transaction, language, canWriteTransactions, state.busy,
+                                    onRepeatTransaction, onVoidTransaction)
                             }
                         }
                     }
@@ -681,6 +698,39 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
         }
         if (state.busy) androidx.compose.material3.CircularProgressIndicator()
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun TransactionHistoryCard(transaction: FinanceTransaction, language: String, canWrite: Boolean, busy: Boolean,
+                                   onRepeat: (FinanceTransaction) -> Unit, onVoid: (FinanceTransaction) -> Unit) {
+    val russian = language == "ru"
+    val posted = transaction.status == "posted"
+    val income = transaction.type == "income" || transaction.type == "refund"
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(transaction.description.ifBlank { transaction.categoryCode }, style = MaterialTheme.typography.titleMedium)
+            Text("${transaction.occurredAt.take(10)} · ${if (income) "+" else "−"}${formatMoney(transaction.amount, language, transaction.currency)}")
+            Text(if (russian) {
+                "${transaction.memberName?.let { "$it · " } ?: ""}${transaction.categoryCode} · " +
+                    if (posted) "Проведена" else "Отменена"
+            } else {
+                "${transaction.memberName?.let { "$it · " } ?: ""}${transaction.categoryCode} · " +
+                    if (posted) "Posted" else "Voided"
+            })
+            if (canWrite && posted) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (transaction.type != "debt_payment") TextButton(
+                        modifier = Modifier.testTag("transaction-repeat-${transaction.id}"),
+                        enabled = !busy, onClick = { onRepeat(transaction) },
+                    ) { Text(if (russian) "Повторить" else "Repeat") }
+                    TextButton(
+                        modifier = Modifier.testTag("transaction-void-${transaction.id}"),
+                        enabled = !busy, onClick = { onVoid(transaction) },
+                    ) { Text(if (russian) "Отменить" else "Void") }
+                }
+            }
+        }
     }
 }
 

@@ -19,11 +19,13 @@ Deliver the continuation-plan F59 requirement: Kotlin/Compose Android client wit
 - Prior registry evidence records only 20/20 instrumentation and explicitly says feature-by-feature mapping and live Core/OIDC E2E remain incomplete.
 - First subgoal: add a registry contract test for explicit Android status/scenario/test mapping on every F01–F58 item. Observe RED before editing the registry.
 - F59.1 completed locally: 58 rows mapped as 28 partial, 28 missing, and 2 justified developer/infrastructure N/A. A registry contract test validates each mapping and all referenced Android test paths. The missing list remains active acceptance work.
+- F59.2 F08 transaction history slice: added a typed exact-value Android transaction model; history displays date, amount, member, category, description, and status; owners can repeat eligible posted transactions or void using the current version; viewers cannot mutate. Repeat posts a fresh transaction with a new idempotency key; debt payments cannot be repeated. F08 is now partial because filters/pagination and live Core E2E remain.
+- F08 RED: new Compose acceptance tests initially failed to compile because the transaction model and action callbacks were absent. After implementation, API 27 instrumentation passed `OK (53 tests)`; APK installed and launched on isolated emulator `emulator-5558`, with `MainActivity` resumed (PID 4848). Debug APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`. Python parity-contract tests: 3 passed. Android JVM unit test execution remains blocked by Gradle's `ClassNotFoundException` worker issue despite compiled test classes; it is not reported green.
 
 ## Execution slices
 
 1. **F59.1 Parity inventory:** test and fill the mapping for all 58 feature IDs; distinguish implemented, partial, missing, and justified N/A with concrete evidence.
-2. **F59.2 Core user flows:** close missing transaction, profile, receipt review/upload, and import paths in priority order, keeping all money and authorization rules in Core.
+2. **F59.2 Core user flows:** continue with transaction filters/pagination and profile, receipt review/upload, and import paths in priority order, keeping all money and authorization rules in Core. F08 basic history/repeat/void is partial and locally verified.
 3. **F59.3 Analytics and lifecycle:** close budgets, debts, reports, price/shopping, recurring, waste, advice, goals, digest, export, and settings gaps with RU/EN UI and API tests.
 4. **F59.4 OIDC/Core E2E:** validate PKCE/session lifecycle and a real authorized financial read/write against Java/PostgreSQL.
 5. **F59.5 Release proof:** build APK, install and launch on isolated Android 6–8 emulator, run complete instrumentation, record artifact hash and runtime evidence.

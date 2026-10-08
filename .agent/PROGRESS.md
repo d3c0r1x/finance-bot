@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 08:49, Europe/Moscow.
+Updated: 2026-10-08, Europe/Moscow.
 
 ## Global plan
 
@@ -15,6 +15,14 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 - E1.1 commit: `68b8295f33328871e17f08cb3098bdb1c359c16e`.
 - E1.2 commit: `4f0c5e50efbcc5714d2a14809034bb3dc5a2a924`.
 - Original main and separate existing checkout are preserved.
+
+## Current goal
+
+- F59 Android parity remains IN PROGRESS. F59.1 registry: 29 partial, 27 missing, 2 approved N/A after F08 mapping.
+- F59.2 F08 history/repeat/void locally GREEN: API 27 instrumentation 53/53; APK installed and launched; parity-contract tests 3/3. APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`.
+- Android JVM unit runner still fails with a Gradle worker `ClassNotFoundException`; do not report unit tests green. Live OIDC/Core E2E, filters/pagination, remaining Android parity, and F60/production gates remain.
+- User-owned untracked paths `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` are out of scope and untouched.
+- Next: verify staged F08 diff and commit/push; continue F09 Android transaction filters and paging with RED-first tests.
 
 ## Goals
 

@@ -236,6 +236,26 @@ data class FinanceTransactionDraft(
     val promptVersion: String,
 )
 
+data class FinanceTransaction(
+    val id: String,
+    val tenantId: String,
+    val type: String,
+    val amount: String,
+    val currency: String,
+    val categoryCode: String,
+    val subcategoryCode: String?,
+    val description: String,
+    val source: String,
+    val occurredAt: String,
+    val accountId: String?,
+    val status: String,
+    val version: Long,
+    val createdAt: String,
+    val memberName: String?,
+    val debtId: String?,
+    val ownerUserId: String?,
+)
+
 data class FinanceMemberProfile(
     val displayName: String,
     val plannedIncome: String?,
@@ -275,6 +295,17 @@ data class TransactionDraftEdit(
 )
 
 internal object FinanceModels {
+    fun transaction(json: JSONObject) = FinanceTransaction(
+        id = json.getString("id"), tenantId = json.getString("tenantId"), type = json.getString("type"),
+        amount = json.getString("amount"), currency = json.getString("currency"),
+        categoryCode = json.getString("categoryCode"), subcategoryCode = nullableString(json, "subcategoryCode"),
+        description = json.getString("description"), source = json.getString("source"),
+        occurredAt = json.getString("occurredAt"), accountId = nullableString(json, "accountId"),
+        status = json.getString("status"), version = json.getLong("version"), createdAt = json.getString("createdAt"),
+        memberName = nullableString(json, "memberName"), debtId = nullableString(json, "debtId"),
+        ownerUserId = nullableString(json, "ownerUserId"),
+    )
+
     fun budgetAlerts(json: JSONArray?): List<FinanceBudgetAlert> {
         val alerts = json ?: JSONArray()
         require(alerts.length() <= 2) { "Invalid budget alert count" }
