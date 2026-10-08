@@ -21,9 +21,10 @@ Updated: 2026-10-08, Europe/Moscow.
 - F59 Android parity remains IN PROGRESS. F59.1 registry: 30 partial, 26 missing, 2 approved N/A after F08/F09 mapping.
 - F59.2 F08 history/repeat/void locally GREEN: API 27 instrumentation 53/53; APK installed and launched; parity-contract tests 3/3. APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`.
 - F59.2 F09 basic search/type filters observed RED then GREEN; API 27 full instrumentation 54/54. Updated debug APK SHA-256: `FB008F9E13114578347D653E602C158C3870886AF379263F8124931CBABCC937`; `MainActivity` is resumed on isolated API 27 emulator. Remaining: server-backed date/member filters, cursor paging, transaction editing, and live Core E2E.
-- Android JVM unit runner still fails with a Gradle worker `ClassNotFoundException`; do not report unit tests green. Live OIDC/Core E2E, filters/pagination, remaining Android parity, and F60/production gates remain.
+- F59.2 F03.1 first-time onboarding is locally GREEN; commit/push pending. F03 Android stays PARTIAL because repeat setup from profile is a later slice. Live OIDC/Core E2E, remaining parity, and F60/production gates remain.
 - User-owned untracked paths `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` are out of scope and untouched.
-- Next: commit/push F09; add server-backed transaction query state and pagination with RED-first tests.
+- Latest F03.1 verification: JVM unit suite GREEN; `assembleDebug` and `assembleDebugAndroidTest` GREEN; full API 27 instrumentation 104/104; parity contracts 60/60 via project `.venv`; debug APK installed/launched on isolated `emulator-5558`, PID 10980, SHA-256 `453A36AB1D74D6CC4D88F99DC1EB8F80B081D0FC28169D9086D0A75DE2F11E73`.
+- Next: commit/push F03.1, then continue F59.2 with receipt-review parity.
 
 ## Goals
 
@@ -1644,3 +1645,12 @@ Updated: 2026-10-08, Europe/Moscow.
 - Latest verification after all edits: receipt screens 11/11; complete Android unit suite 8/8; `assembleDebug` and `assembleDebugAndroidTest` successful; full isolated API 27 instrumentation 94/94, zero skipped/failures/errors. Logs: `%TEMP%\f10-uri-generation-policy-green.log`, `%TEMP%\f10-receipt-uri-screens-green.log`, `%TEMP%\f10-uri-final-unit-build.log`, `%TEMP%\f10-uri-final-full-connected.log`.
 - Contracts: `tools/contracts/test_contracts.py` 60 passed. `git diff --check` clean. Latest debug APK SHA256 `8373F7ADF7FEBA6BB943DDDDA48417F8ECBB35B352E2A0DF3A9DB25CF1179D3A`; installed and launched on isolated `emulator-5558` (`com.decorix.finance.debug`, PID 14533).
 - No authenticated Android-to-live-Core E2E was available; F10 remains partial and F10.1 is locally verified. Commit/push: `3b2ac58` (`feat(F10.1): upload receipt photos from Android`); `gh run list --commit 3b2ac58` returned `[]`, so remote CI did not start. Next: select the next approved V1 plan goal.
+
+## E4.105 F03.1 Android first-time onboarding — COMMIT_PENDING
+
+- Selected from F59.2 profile-first priority after F10.1. Scope: welcome → workspace/member identity → optional monthly income → explicit budget proposal decision; back preserves entered values; apply or keep is a separate user choice, and existing authenticated users do not create another tenant.
+- Reuse current Core tenant/profile/budget APIs; no new backend rules or automatic budget application. Refresh tenant membership before retrying ambiguous tenant creation; reuse stable proposal/apply idempotency keys. Repeat setup from an existing profile remains a later F03 slice; F03 Android stays partial.
+- RED evidence: onboarding UI initially lacked welcome and explicit budget choices; 8 expected failures in the 47-test screen baseline. API compile RED exposed missing caller-supplied idempotency keys. Store compile RED exposed missing durable retry-key storage. Error-message tests observed RED for budget `412/409` copy that described transaction edits, then for copy promising a nonexistent refresh action.
+- GREEN evidence: corrected onboarding/retry Compose tests; `BudgetIdempotencyKeyStoreTest` 1/1; `BudgetApplyErrorMessagesTest` 4/4; `FinanceReceiptApiTest` 7/7; `FinanceScreensTest` 48/48; full isolated API 27 instrumentation 104/104; full JVM unit suite passed; `assembleDebug` and `assembleDebugAndroidTest` passed; contract suite 60/60 using project `.venv`; `git diff --check` clean.
+- Runtime proof: installed and launched `com.decorix.finance.debug` on isolated Android 8.1 emulator `emulator-5558`; resumed `MainActivity`, PID 10980. APK SHA-256: `453A36AB1D74D6CC4D88F99DC1EB8F80B081D0FC28169D9086D0A75DE2F11E73`.
+- No live authenticated Android-to-Core OIDC E2E was available. F03 Android remains PARTIAL; repeat setup from profile remains separate. Commit/push pending. Next: F59.2 receipt-review parity.

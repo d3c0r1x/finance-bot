@@ -3,6 +3,7 @@ package com.decorix.finance
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -261,11 +262,129 @@ class FinanceScreensTest {
         show(FinanceUiState(authenticated = true), onCreateTenant = { tenantName, memberName, income ->
             created = Triple(tenantName, memberName, income)
         })
-        compose.onNodeWithText("Название пространства").performTextInput("Дом")
-        compose.onNodeWithText("Ваше имя").performTextInput("Алекс")
-        compose.onNodeWithText("Плановый доход в месяц, ₽").performTextInput("120000,50")
-        compose.onNodeWithText("Создать").performClick()
+        compose.onNodeWithTag("onboarding-start").performClick()
+        compose.onNodeWithTag("onboarding-workspace-name").performTextInput("Дом")
+        compose.onNodeWithTag("onboarding-member-name").performTextInput("Алекс")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-value").performTextInput("120000,50")
+        compose.onNodeWithTag("onboarding-income-next").performClick()
         assertEquals(Triple("Дом", "Алекс", "120000.50"), created)
+    }
+
+    @Test fun authenticatedZeroTenantSeesWelcomeBeforeIdentityAndIncomeSteps() {
+        show(FinanceUiState(authenticated = true))
+
+        compose.onNodeWithTag("onboarding-welcome").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-identity").assertDoesNotExist()
+        compose.onNodeWithTag("onboarding-start").performClick()
+
+        compose.onNodeWithTag("onboarding-identity").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-workspace-name").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-member-name").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-workspace-name").performTextInput("Welcome Family")
+        compose.onNodeWithTag("onboarding-member-name").performTextInput("Taylor Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+
+        compose.onNodeWithTag("onboarding-income").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-income-value").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-income-skip").assertIsDisplayed()
+    }
+
+    @Test fun onboardingBackPreservesWorkspaceAndMemberValues() {
+        show(FinanceUiState(authenticated = true))
+        compose.onNodeWithTag("onboarding-start").performClick()
+        compose.onNodeWithTag("onboarding-workspace-name").performTextInput("Дом синтетический")
+        compose.onNodeWithTag("onboarding-member-name").performTextInput("Taylor Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-value").performTextInput("13500.25")
+        compose.onNodeWithTag("onboarding-income-back").performClick()
+
+        assertEditableText("onboarding-workspace-name", "Дом синтетический")
+        assertEditableText("onboarding-member-name", "Taylor Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        assertEditableText("onboarding-income-value", "13500.25")
+    }
+
+    @Test fun onboardingSkipIncomeSubmitsNullWithPreservedIdentity() {
+        var created: Triple<String, String, String?>? = null
+        show(FinanceUiState(authenticated = true), onCreateTenant = { workspace, member, income ->
+            created = Triple(workspace, member, income)
+        })
+        compose.onNodeWithTag("onboarding-start").performClick()
+        compose.onNodeWithTag("onboarding-workspace-name").performTextInput("Семья тест")
+        compose.onNodeWithTag("onboarding-member-name").performTextInput("Alex Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-value").performTextInput("24000")
+        compose.onNodeWithTag("onboarding-income-skip").performClick()
+        compose.onNodeWithTag("onboarding-income-next").performClick()
+
+        assertEquals(Triple("Семья тест", "Alex Example", null), created)
+    }
+
+    @Test fun failedWorkspaceCreateCanRetryWithIdentityAndIncomePreserved() {
+        val ui = mutableStateOf(FinanceUiState(authenticated = true))
+        val attempts = mutableListOf<Triple<String, String, String?>>()
+        show(ui.value, stateHolder = ui, onCreateTenant = { workspace, member, income ->
+            attempts += Triple(workspace, member, income)
+            if (attempts.size == 1) {
+                ui.value = ui.value.copy(busy = false, error = "temporary create failure")
+            } else {
+                ui.value = ui.value.copy(tenants = listOf(tenant("owner")), error = null)
+            }
+        })
+
+        compose.onNodeWithTag("onboarding-start").performClick()
+        compose.onNodeWithTag("onboarding-workspace-name").performTextInput("Retry Family")
+        compose.onNodeWithTag("onboarding-member-name").performTextInput("Taylor Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-value").performTextInput("72500.25")
+        compose.onNodeWithTag("onboarding-income-next").performClick()
+
+        compose.onNodeWithText("temporary create failure").assertIsDisplayed()
+        assertEditableText("onboarding-income-value", "72500.25")
+        compose.onNodeWithTag("onboarding-income-back").performClick()
+        assertEditableText("onboarding-workspace-name", "Retry Family")
+        assertEditableText("onboarding-member-name", "Taylor Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        assertEditableText("onboarding-income-value", "72500.25")
+        compose.onNodeWithTag("onboarding-income-next").assertIsEnabled()
+        compose.onNodeWithTag("onboarding-income-next").performClick()
+
+        assertEquals(
+            listOf(
+                Triple("Retry Family", "Taylor Example", "72500.25"),
+                Triple("Retry Family", "Taylor Example", "72500.25"),
+            ),
+            attempts,
+        )
+    }
+
+    @Test fun onboardingBudgetProposalShowsExplicitChoicesWithoutAutomaticApply() {
+        var applied = emptyList<String>()
+        reachOnboardingBudgetChoice(applied = { applied = applied + it })
+
+        compose.onNodeWithTag("onboarding-budget-choice").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-budget-proposal-total").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-budget-apply").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-budget-keep").assertIsDisplayed()
+        assertEquals(emptyList<String>(), applied)
+    }
+
+    @Test fun keepingBudgetProposalNeverAppliesItAndApplyRequiresExplicitTap() {
+        var applied = emptyList<String>()
+        reachOnboardingBudgetChoice(applied = { applied = applied + it })
+
+        compose.onNodeWithTag("onboarding-budget-keep").performClick()
+        assertEquals(emptyList<String>(), applied)
+    }
+
+    @Test fun onboardingBudgetProposalAppliesOnlyAfterExplicitApplyTap() {
+        var applied = emptyList<String>()
+        reachOnboardingBudgetChoice(applied = { applied = applied + it })
+
+        assertEquals(emptyList<String>(), applied)
+        compose.onNodeWithTag("onboarding-budget-apply").performClick()
+        assertEquals(listOf("proposal-7"), applied)
     }
 
     @Test fun onboardingCanSkipIncomeAndProfileCanBeChangedLater() {
@@ -286,10 +405,13 @@ class FinanceScreensTest {
                     onDebtAdjust = { _, _, _ -> }, onDebtForecast = {}, onReportLoad = { _, _, _, _, _ -> })
             }
         }
-        compose.onNodeWithText("Название пространства").performTextInput("Дом")
-        compose.onNodeWithText("Ваше имя").performTextInput("Алекс")
-        compose.onNodeWithText("Пропустить доход").assertIsDisplayed()
-        compose.onNodeWithText("Создать").performClick()
+        compose.onNodeWithTag("onboarding-start").performClick()
+        compose.onNodeWithTag("onboarding-workspace-name").performTextInput("Дом")
+        compose.onNodeWithTag("onboarding-member-name").performTextInput("Алекс")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-skip").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-income-skip").performClick()
+        compose.onNodeWithTag("onboarding-income-next").performClick()
         assertEquals(null, createdIncome)
 
         compose.onNodeWithText("Профиль").performScrollTo().performClick()
@@ -750,6 +872,8 @@ class FinanceScreensTest {
     private fun show(state: FinanceUiState,
                      onReportLoad: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
                      onCreateTenant: (String, String, String?) -> Unit = { _, _, _ -> },
+                     onBudgetApply: (String) -> Unit = {},
+                     stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null,
                      onProfileSave: (String, String?) -> Unit = { _, _ -> },
                      onCreateDraft: (String, String) -> Unit = { _, _ -> }, onUpdateDraft: (TransactionDraftEdit) -> Unit = {},
                      onConfirmDraft: (String, Long) -> Unit = { _, _ -> },
@@ -773,7 +897,7 @@ class FinanceScreensTest {
         MaterialTheme {
             androidx.compose.runtime.key(contentKey) {
             FinanceScreen(
-                state = state,
+                state = stateHolder?.value ?: state,
                 language = language.value,
                 onLanguage = { language.value = it }, onLogin = {}, onRefresh = {}, onCreate = onCreateTenant,
                 onProfileSave = onProfileSave, onCreateDraft = onCreateDraft,
@@ -786,7 +910,7 @@ class FinanceScreensTest {
                 onRecurringDecision = onRecurringDecision,
                 onUpdateDraft = onUpdateDraft, onConfirmDraft = onConfirmDraft, onCancelDraft = onCancelDraft,
                 onLogout = {},
-                onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = {},
+                onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = onBudgetApply,
                 onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> }, onDebtForecast = {},
                 onReportLoad = onReportLoad,
                 onRepeatTransaction = onRepeatTransaction, onVoidTransaction = onVoidTransaction,
@@ -796,6 +920,23 @@ class FinanceScreensTest {
             }
         }
         }
+    }
+
+    private fun reachOnboardingBudgetChoice(applied: (String) -> Unit) {
+        val ui = mutableStateOf(FinanceUiState(authenticated = true))
+        show(ui.value, stateHolder = ui, onCreateTenant = { _, _, income ->
+            ui.value = ui.value.copy(
+                tenants = listOf(tenant("owner")),
+                budgetProposal = budgetProposal().copy(monthlyIncome = income ?: "0.00"),
+            )
+        }, onBudgetApply = applied)
+
+        compose.onNodeWithTag("onboarding-start").performClick()
+        compose.onNodeWithTag("onboarding-workspace-name").performTextInput("Синтетический дом")
+        compose.onNodeWithTag("onboarding-member-name").performTextInput("Taylor Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-value").performTextInput("100000")
+        compose.onNodeWithTag("onboarding-income-next").performClick()
     }
 
     private fun assertEditableText(tag: String, expected: String) {
@@ -867,6 +1008,12 @@ class FinanceScreensTest {
             fromDate = "2026-09-25", toDate = "2026-10-01", limit = "1000.00", spent = "350.25", remaining = "649.75",
             limitStatus = "normal", usualWeeklySpend = null, historyWeeks = 0, paceStatus = "insufficient_history", paceShare = null,
         ),
+    )
+
+    private fun budgetProposal() = BudgetProposal(
+        id = "proposal-7", monthlyIncome = "100000.00", totalLimit = "70000.00",
+        limits = mapOf("еда" to "20000.00"), status = "pending", proposalSource = "history",
+        historyDays = 90, modelVersion = null,
     )
 
     private fun debt() = FinanceDebt("debt-1", "tenant-1", "Кредитная карта", "10000.00", "8400.00",

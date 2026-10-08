@@ -99,6 +99,84 @@ class FinanceReceiptApiTest {
         assertEquals(null, receipt.transactionId)
     }
 
+    @Test fun budgetProposalAndApplyReuseCallerSuppliedIdempotencyKeys() {
+        repeat(2) { server.enqueue(MockResponse().setBody(budgetProposalJson())) }
+        repeat(2) { server.enqueue(MockResponse().setBody(budgetOverviewJson())) }
+
+        val api = api()
+        val proposalKey = "budget-proposal-stable-key-0001"
+        val applyKey = "budget-apply-stable-key-0002"
+        repeat(2) { api.proposeBudget("tenant-17", "100000.00", idempotencyKey = proposalKey) }
+        repeat(2) { api.applyBudgetProposal("tenant-17", "proposal-7", idempotencyKey = applyKey) }
+
+        val proposalRequests = listOf(
+            requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)),
+            requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)),
+        )
+        assertTrue(proposalRequests.all { it.method == "POST" })
+        assertTrue(proposalRequests.all { it.path == "/api/v1/tenants/tenant-17/budget-proposals" })
+        assertEquals(listOf(proposalKey, proposalKey), proposalRequests.map { it.getHeader("Idempotency-Key") })
+        assertTrue(proposalRequests.all { it.body.readUtf8() == "{\"monthlyIncome\":\"100000.00\"}" })
+
+        val applyRequests = listOf(
+            requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)),
+            requireNotNull(server.takeRequest(2, TimeUnit.SECONDS)),
+        )
+        assertTrue(applyRequests.all { it.method == "POST" })
+        assertTrue(applyRequests.all {
+            it.path == "/api/v1/tenants/tenant-17/budget-proposals/proposal-7/apply"
+        })
+        assertEquals(listOf(applyKey, applyKey), applyRequests.map { it.getHeader("Idempotency-Key") })
+    }
+
+    @Test fun laterTenantCreateRecoversCommittedTenantBeforePostingAgain() {
+        val listRequests = AtomicInteger()
+        val createRequests = AtomicInteger()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when (request.path) {
+                "/api/v1/me/tenants" -> {
+                    if (listRequests.incrementAndGet() == 1) {
+                        MockResponse().setBody("[]")
+                    } else {
+                        MockResponse().setBody(
+                            """[{"tenantId":"tenant-17","displayName":"Synthetic Family","role":"owner","timezone":"Europe/Moscow"}]""",
+                        )
+                    }
+                }
+                "/api/v1/tenants" -> {
+                    if (createRequests.incrementAndGet() == 1) {
+                        // The test server records the create as committed, then loses the response.
+                        MockResponse().setResponseCode(503).setBody("""{"detail":"temporary failure after commit"}""")
+                    } else {
+                        MockResponse().setResponseCode(201).setBody("{}")
+                    }
+                }
+                else -> MockResponse().setResponseCode(404)
+            }
+        }
+
+        val api = api()
+        val firstFailure = runCatching {
+            api.createTenant("Synthetic Family", "Taylor Example", "100000.00")
+        }.exceptionOrNull()
+        assertNotNull("the first response may be ambiguous after the server committed", firstFailure)
+
+        api.createTenant("Synthetic Family", "Taylor Example", "100000.00")
+
+        val firstListRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        val failedCreateRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        val recoveryListRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", firstListRequest.method)
+        assertEquals("/api/v1/me/tenants", firstListRequest.path)
+        assertEquals("POST", failedCreateRequest.method)
+        assertEquals("/api/v1/tenants", failedCreateRequest.path)
+        assertEquals("GET", recoveryListRequest.method)
+        assertEquals("/api/v1/me/tenants", recoveryListRequest.path)
+        assertEquals(2, listRequests.get())
+        assertEquals("only the ambiguous first create may be posted", 1, createRequests.get())
+        assertEquals(null, server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
     @Test fun concurrentUnauthorizedRequestsRefreshRotatingTokenOnceAndKeepSession() {
         val initialRequests = CountDownLatch(2)
         val releaseUnauthorizedResponses = CountDownLatch(1)
@@ -260,5 +338,25 @@ class FinanceReceiptApiTest {
            "advice":null,"reviewReason":null,"reviewAction":null,"verdictSource":null,"reviewProvider":null,
            "reviewModelVersion":null,"reviewPromptVersion":null,"reviewAlgorithmVersion":null,"version":1}],
          "itemCount":1,"createdAt":"2026-10-08T09:01:00Z"}
+    """.trimIndent()
+
+    private fun budgetProposalJson() = """
+        {"id":"proposal-7","monthlyIncome":"100000.00","totalLimit":"70000.00",
+         "limits":{"food":"20000.00"},"status":"pending","proposalSource":"history",
+         "historyDays":90,"modelVersion":null}
+    """.trimIndent()
+
+    private fun budgetOverviewJson() = """
+        {"currency":"RUB","month":"2026-10","familyLimits":{"food":"20000.00"},
+         "personalOverrides":{},"effectiveLimits":{"food":"20000.00"},"monthlySpent":{"food":"0.00"},
+         "limitStatus":{"food":"normal"},"familyVersions":{"food":1},"personalVersions":{},
+         "familyTotalLimit":"50000.00","personalTotalOverride":null,"effectiveTotalLimit":"50000.00",
+         "totalMonthlySpent":"0.00","totalLimitStatus":"normal","familyTotalVersion":1,
+         "personalTotalVersion":0,"rolling7FoodLimit":"1000.00","personalRolling7FoodOverride":null,
+         "effectiveRolling7FoodLimit":"1000.00","rolling7FoodSpent":"0.00",
+         "rolling7FoodLimitStatus":"normal","familyRolling7FoodVersion":1,"personalRolling7FoodVersion":0,
+         "rolling7FoodStatus":{"fromDate":"2026-09-25","toDate":"2026-10-01","limit":"1000.00",
+           "spent":"0.00","remaining":"1000.00","limitStatus":"normal","usualWeeklySpend":null,
+           "historyWeeks":0,"paceStatus":"insufficient_history","paceShare":null}}
     """.trimIndent()
 }

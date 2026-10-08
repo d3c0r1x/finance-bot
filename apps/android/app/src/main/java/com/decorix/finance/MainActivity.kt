@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var authService: AuthorizationService
     private val api by lazy { FinanceApi(this) }
     private val receiptCheckpointStore by lazy { ReceiptUploadCheckpointStore(this) }
+    private val budgetIdempotencyKeyStore by lazy { BudgetIdempotencyKeyStore(this) }
     private val executor = Executors.newSingleThreadExecutor()
     private val receiptPollExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val receiptPollGeneration = AtomicLong(0L)
@@ -115,6 +116,7 @@ class MainActivity : ComponentActivity() {
                         onRefresh = ::loadTenants, onCreate = ::createTenantAndRefresh,
                         onProfileSave = ::saveMemberProfile, onCreateTelegramLink = ::createTelegramLinkCode,
                         onNotificationPreferencesSave = ::saveNotificationPreferences,
+                        onBudgetKeep = ::keepBudgetProposal,
                         onCreateDraft = ::createTransactionDraft, onUpdateDraft = ::updateTransactionDraft,
                         onConfirmDraft = ::confirmTransactionDraft, onCancelDraft = ::cancelTransactionDraft,
                         onLogout = ::logout, onBudgetUpdate = ::updateBudget, onBudgetReset = ::resetPersonalBudgets,
@@ -777,14 +779,42 @@ class MainActivity : ComponentActivity() {
 
     private fun createBudgetProposal(monthlyIncome: String?) = runApi {
         val tenantId = activeTenantId()
-        val proposal = if (monthlyIncome == null) api.proposeBudgetFromHistory(tenantId)
-        else api.proposeBudget(tenantId, monthlyIncome)
-        workspaceData(proposal)
+        val normalizedIncome = monthlyIncome?.trim()?.replace(',', '.')
+        val operationId = buildString {
+            append(tenantId)
+            append("|budget-proposal|")
+            append(normalizedIncome ?: "history")
+        }
+        val idempotencyKey = budgetIdempotencyKeyStore.keyFor(operationId)
+        val proposal = if (monthlyIncome == null) api.proposeBudgetFromHistory(tenantId, idempotencyKey)
+        else api.proposeBudget(tenantId, normalizedIncome.orEmpty(), idempotencyKey)
+        val snapshot = workspaceData(proposal)
+        check(budgetIdempotencyKeyStore.clear(operationId)) {
+            "Could not clear completed budget proposal key"
+        }
+        snapshot
     }
 
     private fun applyBudgetProposal(proposalId: String) = runApi {
-        api.applyBudgetProposal(activeTenantId(), proposalId)
-        workspaceData(proposal = null)
+        val tenantId = activeTenantId()
+        val operationId = "$tenantId|budget-proposal-apply|$proposalId"
+        val idempotencyKey = budgetIdempotencyKeyStore.keyFor(operationId)
+        try {
+            api.applyBudgetProposal(tenantId, proposalId, idempotencyKey)
+        } catch (failure: ApiFailure) {
+            val message = BudgetApplyErrorMessages.message(failure.status, language)
+                ?: throw failure
+            throw IllegalStateException(message, failure)
+        }
+        val snapshot = workspaceData(proposal = null)
+        check(budgetIdempotencyKeyStore.clear(operationId)) {
+            "Could not clear completed budget apply key"
+        }
+        snapshot
+    }
+
+    private fun keepBudgetProposal() {
+        ui = ui.copy(budgetProposal = null)
     }
 
     private fun createDebt(name: String, openingBalance: String, interestRate: String?, minimumPayment: String) = runApi {
@@ -1099,6 +1129,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onBudgetUpdate: (String, String, String, String, Long) -> Unit,
                           onBudgetReset: () -> Unit, onBudgetProposal: (String?) -> Unit,
                           onBudgetApply: (String) -> Unit,
+                          onBudgetKeep: () -> Unit = {},
                           onDebtCreate: (String, String, String?, String) -> Unit,
                           onDebtPay: (String, String, Long) -> Unit,
                           onDebtAdjust: (String, String, Long) -> Unit,
@@ -1127,6 +1158,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
     var plannedIncome by androidx.compose.runtime.remember { mutableStateOf("") }
+    var onboardingStep by androidx.compose.runtime.remember { mutableStateOf("welcome") }
+    var onboardingCreatePending by androidx.compose.runtime.remember { mutableStateOf(false) }
+    var onboardingIncomeForProposal by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    var onboardingBudgetTenantId by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    var onboardingApplyPending by androidx.compose.runtime.remember { mutableStateOf(false) }
     var transactionText by androidx.compose.runtime.remember { mutableStateOf("") }
     var transactionSearch by androidx.compose.runtime.remember(state.transactionSearch) { mutableStateOf(state.transactionSearch) }
     var transactionTypeFilter by androidx.compose.runtime.remember(state.transactionTypeFilter) {
@@ -1148,6 +1184,30 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     val role = state.tenants.firstOrNull()?.role
     val canManageFamilyTransactions = role == "owner" || role == "admin"
     val currentUserId = state.transactionMembers.singleOrNull()?.userId
+    LaunchedEffect(state.tenants.firstOrNull()?.id, state.budgetProposal?.id, state.busy,
+        onboardingCreatePending, onboardingApplyPending) {
+        val tenant = state.tenants.firstOrNull()
+        if (onboardingCreatePending && tenant != null && !state.busy) {
+            onboardingCreatePending = false
+            onboardingBudgetTenantId = tenant.id
+            val income = onboardingIncomeForProposal
+            if (income != null) {
+                onboardingStep = "budget"
+                if (state.budgetProposal == null) onBudgetProposal(income)
+            } else {
+                onboardingStep = "complete"
+                onboardingBudgetTenantId = null
+            }
+        }
+        if (onboardingCreatePending && tenant == null && !state.busy && state.error != null) {
+            onboardingCreatePending = false
+        }
+        if (onboardingApplyPending && !state.busy && state.budgetProposal == null) {
+            onboardingApplyPending = false
+            onboardingStep = "complete"
+            onboardingBudgetTenantId = null
+        }
+    }
     LaunchedEffect(state.transactionEditSavedToken) {
         if (state.transactionEditSavedToken != null) editingTransaction = null
     }
@@ -1193,22 +1253,90 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 TextButton(onClick = onLogout) { Text(if (russian) "Выйти" else "Sign out") }
             }
             if (state.tenants.isEmpty()) {
-                OutlinedTextField(workspace, { workspace = it }, label = { Text(if (russian) "Название пространства" else "Workspace name") })
-                OutlinedTextField(memberName, { memberName = it }, label = { Text(if (russian) "Ваше имя" else "Your name") })
-                OutlinedTextField(plannedIncome, { plannedIncome = it }, singleLine = true,
-                    label = { Text(if (russian) "Плановый доход в месяц, ₽" else "Planned monthly income, RUB") })
-                TextButton(onClick = { plannedIncome = "" }, enabled = !state.busy) {
-                    Text(if (russian) "Пропустить доход" else "Skip income")
-                }
-                val normalizedIncome = plannedIncome.trim().replace(',', '.')
-                val validIncome = normalizedIncome.isBlank() || Regex("^(?:0\\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\\.[0-9]{1,2})?)$")
-                    .matches(normalizedIncome)
-                Button(onClick = { onCreate(workspace, memberName, normalizedIncomeInput(plannedIncome)) },
-                    enabled = !state.busy && workspace.isNotBlank() && memberName.isNotBlank() && validIncome) {
-                    Text(if (russian) "Создать" else "Create")
+                when (onboardingStep) {
+                    "welcome" -> Column(Modifier.weight(1f).testTag("onboarding-welcome"),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(if (russian) "Добро пожаловать" else "Welcome", style = MaterialTheme.typography.titleLarge)
+                        Text(if (russian) "Сначала создадим личное пространство. Семью можно добавить позже."
+                            else "Start with a personal workspace. You can add family later.")
+                        Button(modifier = Modifier.testTag("onboarding-start"), enabled = !state.busy,
+                            onClick = { onboardingStep = "identity" }) {
+                            Text(if (russian) "Начать настройку" else "Start setup")
+                        }
+                    }
+                    "identity" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState())
+                        .testTag("onboarding-identity"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(if (russian) "Личное пространство" else "Personal workspace",
+                            style = MaterialTheme.typography.titleLarge)
+                        OutlinedTextField(workspace, { workspace = it }, enabled = !state.busy,
+                            modifier = Modifier.fillMaxWidth().testTag("onboarding-workspace-name"),
+                            label = { Text(if (russian) "Название пространства" else "Workspace name") }, singleLine = true)
+                        OutlinedTextField(memberName, { memberName = it }, enabled = !state.busy,
+                            modifier = Modifier.fillMaxWidth().testTag("onboarding-member-name"),
+                            label = { Text(if (russian) "Ваше имя" else "Your name") }, singleLine = true)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(enabled = !state.busy, onClick = { onboardingStep = "welcome" }) {
+                                Text(if (russian) "Назад" else "Back")
+                            }
+                            Button(modifier = Modifier.testTag("onboarding-identity-next"),
+                                enabled = !state.busy && workspace.isNotBlank() && memberName.isNotBlank(),
+                                onClick = { onboardingStep = "income" }) {
+                                Text(if (russian) "Далее" else "Next")
+                            }
+                        }
+                    }
+                    "income" -> {
+                        val normalizedIncome = plannedIncome.trim().replace(',', '.')
+                        val validIncome = normalizedIncome.isBlank() || Regex("^(?:0\\.(?:[0-9]?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\\.[0-9]{1,2})?)$")
+                            .matches(normalizedIncome)
+                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())
+                            .testTag("onboarding-income"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(if (russian) "Плановый доход" else "Planned income",
+                                style = MaterialTheme.typography.titleLarge)
+                            Text(if (russian) "Доход необязателен. Он поможет предложить лимиты, но не изменит их без вашего решения."
+                                else "Income is optional. It can suggest limits, but never changes them without your choice.")
+                            OutlinedTextField(plannedIncome, { plannedIncome = it }, enabled = !state.busy,
+                                modifier = Modifier.fillMaxWidth().testTag("onboarding-income-value"),
+                                singleLine = true, label = { Text(if (russian) "Плановый доход в месяц, ₽"
+                                    else "Planned monthly income, RUB") })
+                            TextButton(modifier = Modifier.testTag("onboarding-income-skip"),
+                                onClick = { plannedIncome = "" }, enabled = !state.busy) {
+                                Text(if (russian) "Пропустить доход" else "Skip income")
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(modifier = Modifier.testTag("onboarding-income-back"),
+                                    onClick = { onboardingStep = "identity" }, enabled = !state.busy) {
+                                    Text(if (russian) "Назад" else "Back")
+                                }
+                                Button(modifier = Modifier.testTag("onboarding-income-next"),
+                                    enabled = !state.busy && !onboardingCreatePending && validIncome,
+                                    onClick = {
+                                        onboardingIncomeForProposal = normalizedIncomeInput(plannedIncome)
+                                        onboardingCreatePending = true
+                                        onCreate(workspace.trim(), memberName.trim(), onboardingIncomeForProposal)
+                                    }) {
+                                    Text(if (russian) "Создать пространство" else "Create workspace")
+                                }
+                            }
+                        }
+                    }
+                    else -> Unit
                 }
             } else {
                 Text(state.tenants.first().name, style = MaterialTheme.typography.headlineSmall)
+                if (onboardingStep == "budget" && onboardingBudgetTenantId == state.tenants.first().id) {
+                    OnboardingBudgetChoiceScreen(language, state.budgetProposal?.takeIf { it.status == "pending" },
+                        state.busy, state.error,
+                        onApply = { proposal ->
+                            onboardingApplyPending = true
+                            onBudgetApply(proposal.id)
+                        },
+                        onKeep = {
+                            onBudgetKeep()
+                            onboardingStep = "complete"
+                            onboardingBudgetTenantId = null
+                        })
+                } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf("overview", "transactions", "receipts", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring", "nobuy").forEach { screen ->
@@ -1402,12 +1530,47 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
             }
         }
+        }
         if (state.busy) androidx.compose.material3.CircularProgressIndicator()
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }
 
 private val LOCAL_RECEIPT_FILE_ERRORS = setOf("file_read", "file_type", "file_size", "file_empty")
+
+@androidx.compose.runtime.Composable
+private fun OnboardingBudgetChoiceScreen(language: String, proposal: BudgetProposal?, pending: Boolean,
+                                         error: String?, onApply: (BudgetProposal) -> Unit,
+                                         onKeep: () -> Unit) {
+    val russian = language == "ru"
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+        .testTag("onboarding-budget-choice"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(if (russian) "03 / 03 · Лимиты" else "03 / 03 · Budget limits",
+            style = MaterialTheme.typography.titleLarge)
+        Text(if (russian) "Предложение не меняет лимиты. Примените его только если суммы вам подходят."
+            else "This suggestion does not change your limits. Apply it only if the amounts work for you.")
+        if (pending && proposal == null) {
+            Text(if (russian) "Готовим предложение…" else "Preparing suggestion…")
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        proposal?.let { current ->
+            Text(if (russian) "Предложенный общий лимит: ${formatMoney(current.totalLimit, language)}"
+                else "Suggested total limit: ${formatMoney(current.totalLimit, language)}",
+                modifier = Modifier.testTag("onboarding-budget-proposal-total"))
+            current.limits.forEach { (category, amount) ->
+                Text("$category · ${formatMoney(amount, language)}")
+            }
+            Button(modifier = Modifier.testTag("onboarding-budget-apply"),
+                enabled = !pending && current.status == "pending", onClick = { onApply(current) }) {
+                Text(if (russian) "Применить лимиты" else "Apply limits")
+            }
+        }
+        TextButton(modifier = Modifier.testTag("onboarding-budget-keep"), enabled = !pending,
+            onClick = onKeep) {
+            Text(if (russian) "Оставить текущие лимиты" else "Keep current limits")
+        }
+    }
+}
 
 @androidx.compose.runtime.Composable
 private fun ReceiptUploadScreen(language: String, canWrite: Boolean, job: FinanceReceiptProcessingJob?,

@@ -178,19 +178,31 @@ class FinanceApi internal constructor(
         "/api/v1/tenants/$tenantId/budgets/personal-overrides", "DELETE", idempotencyKey = UUID.randomUUID().toString(),
     )))
 
-    fun proposeBudget(tenantId: String, monthlyIncome: String): BudgetProposal = FinanceModels.budgetProposal(JSONObject(execute(
-        "/api/v1/tenants/$tenantId/budget-proposals", "POST",
-        JSONObject().put("monthlyIncome", monthlyIncome.trim().replace(',', '.')).toString(), UUID.randomUUID().toString(),
-    )))
+    fun proposeBudget(tenantId: String, monthlyIncome: String,
+                      idempotencyKey: String = UUID.randomUUID().toString()): BudgetProposal {
+        require(idempotencyKey.length in 16..128) { "Invalid idempotency key" }
+        return FinanceModels.budgetProposal(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/budget-proposals", "POST",
+            JSONObject().put("monthlyIncome", monthlyIncome.trim().replace(',', '.')).toString(), idempotencyKey,
+        )))
+    }
 
-    fun proposeBudgetFromHistory(tenantId: String): BudgetProposal = FinanceModels.budgetProposal(JSONObject(execute(
-        "/api/v1/tenants/$tenantId/budget-proposals/history", "POST", idempotencyKey = UUID.randomUUID().toString(),
-    )))
+    fun proposeBudgetFromHistory(tenantId: String,
+                                idempotencyKey: String = UUID.randomUUID().toString()): BudgetProposal {
+        require(idempotencyKey.length in 16..128) { "Invalid idempotency key" }
+        return FinanceModels.budgetProposal(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/budget-proposals/history", "POST", idempotencyKey = idempotencyKey,
+        )))
+    }
 
-    fun applyBudgetProposal(tenantId: String, proposalId: String): BudgetOverview = FinanceModels.budgetOverview(JSONObject(execute(
-        "/api/v1/tenants/$tenantId/budget-proposals/$proposalId/apply", "POST",
-        idempotencyKey = UUID.randomUUID().toString(),
-    )))
+    fun applyBudgetProposal(tenantId: String, proposalId: String,
+                            idempotencyKey: String = UUID.randomUUID().toString()): BudgetOverview {
+        require(idempotencyKey.length in 16..128) { "Invalid idempotency key" }
+        return FinanceModels.budgetOverview(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/budget-proposals/$proposalId/apply", "POST",
+            idempotencyKey = idempotencyKey,
+        )))
+    }
 
     fun debts(tenantId: String): List<FinanceDebt> = FinanceModels.debtPage(
         JSONObject(execute("/api/v1/tenants/$tenantId/debts", "GET")),
@@ -313,6 +325,7 @@ class FinanceApi internal constructor(
         require(name.isNotBlank() && name.trim().length <= 120) { "Enter workspace name" }
         require(memberName.isNotBlank() && memberName.trim().length <= 120) { "Enter your name" }
         val income = normalizeOptionalIncome(plannedIncome)
+        if (tenants().isNotEmpty()) return
         val data = JSONObject().put("displayName", name.trim())
             .put("memberDisplayName", memberName.trim()).put("timezone", TimeZone.getDefault().id)
             .put("plannedIncome", income?.let(::BigDecimal) ?: JSONObject.NULL)
