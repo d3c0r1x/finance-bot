@@ -169,9 +169,11 @@ features:
     evidence:
       - "RU/EN web now creates, edits, repeats and voids all supported transaction types; filters by member, period, type and search; preserves category, subcategory, description, source and member-local date; owner/admin may assign or reassign only active members. Debt-payment edits reverse the prior balance effect and apply the new payment atomically; void compensates it. PostgreSQL acceptance covers family access and assignment permissions, debt compensation and stale versions. Web App tests pass 21/21; TypeScript/Vite build and OpenAPI contract suite pass; full Java Core check passes with PostgreSQL enabled. Live Keycloak browser/API remains tracked under E2/F59."
     android:
-      status: missing
-      scenario: "Android counterpart for F09: Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"
-      gap: "No Android user screen or equivalent flow is verified for F09 yet."
+      status: partial
+      scenario: "Android transaction history can search description/category/member and filter expenses or income in the currently loaded list."
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Search/type filters only cover the first 50 loaded rows; date/member filters, cursor paging, edit, and delete/void parity are incomplete. Core already supports server-side filters and cursor paging."
     intentional_differences: []
   - id: F10
     feature: "Фото чека, прогресс, draft; `expenses.py`"

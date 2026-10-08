@@ -555,6 +555,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
     var plannedIncome by androidx.compose.runtime.remember { mutableStateOf("") }
     var transactionText by androidx.compose.runtime.remember { mutableStateOf("") }
+    var transactionSearch by androidx.compose.runtime.remember { mutableStateOf("") }
+    var transactionTypeFilter by androidx.compose.runtime.remember { mutableStateOf("all") }
     var draftCreateKey by androidx.compose.runtime.remember { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var activeScreen by androidx.compose.runtime.remember { mutableStateOf("overview") }
     val canWriteTransactions = state.tenants.firstOrNull()?.role != "viewer"
@@ -662,7 +664,44 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onNotificationPreferencesSave,
                         onBack = { activeScreen = "overview" })
                     else -> {
+                        val visibleTransactions = state.transactions.filter { transaction ->
+                            val query = transactionSearch.trim()
+                            val matchesSearch = query.isBlank() || listOfNotNull(
+                                transaction.description, transaction.categoryCode, transaction.memberName,
+                            ).any { it.contains(query, ignoreCase = true) }
+                            val matchesType = when (transactionTypeFilter) {
+                                "expense" -> transaction.type == "expense" || transaction.type == "debt_payment"
+                                "income" -> transaction.type == "income" || transaction.type == "refund"
+                                else -> true
+                            }
+                            matchesSearch && matchesType
+                        }
                         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            item {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    OutlinedTextField(
+                                        value = transactionSearch,
+                                        onValueChange = { transactionSearch = it },
+                                        modifier = Modifier.fillMaxWidth().testTag("transaction-search"),
+                                        label = { Text(if (russian) "Поиск операций" else "Search transactions") },
+                                        singleLine = true,
+                                    )
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(modifier = Modifier.testTag("transaction-filter-all"),
+                                            onClick = { transactionTypeFilter = "all" }) {
+                                            Text(if (russian) "Все" else "All")
+                                        }
+                                        TextButton(modifier = Modifier.testTag("transaction-filter-expense"),
+                                            onClick = { transactionTypeFilter = "expense" }) {
+                                            Text(if (russian) "Расходы" else "Expenses")
+                                        }
+                                        TextButton(modifier = Modifier.testTag("transaction-filter-income"),
+                                            onClick = { transactionTypeFilter = "income" }) {
+                                            Text(if (russian) "Доходы" else "Income")
+                                        }
+                                    }
+                                }
+                            }
                             item {
                                 val draft = state.transactionDraft?.takeIf { it.state == "pending" }
                                 Card(Modifier.fillMaxWidth()) {
@@ -687,7 +726,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 Text(if (russian) "Недавние операции" else "Recent transactions",
                                     style = MaterialTheme.typography.titleMedium)
                             }
-                            items(state.transactions) { transaction ->
+                            items(visibleTransactions) { transaction ->
                                 TransactionHistoryCard(transaction, language, canWriteTransactions, state.busy,
                                     onRepeatTransaction, onVoidTransaction)
                             }

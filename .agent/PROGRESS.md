@@ -18,11 +18,12 @@ Updated: 2026-10-08, Europe/Moscow.
 
 ## Current goal
 
-- F59 Android parity remains IN PROGRESS. F59.1 registry: 29 partial, 27 missing, 2 approved N/A after F08 mapping.
+- F59 Android parity remains IN PROGRESS. F59.1 registry: 30 partial, 26 missing, 2 approved N/A after F08/F09 mapping.
 - F59.2 F08 history/repeat/void locally GREEN: API 27 instrumentation 53/53; APK installed and launched; parity-contract tests 3/3. APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`.
+- F59.2 F09 basic search/type filters observed RED then GREEN; API 27 full instrumentation 54/54. Updated debug APK SHA-256: `FB008F9E13114578347D653E602C158C3870886AF379263F8124931CBABCC937`; `MainActivity` is resumed on isolated API 27 emulator. Remaining: server-backed date/member filters, cursor paging, transaction editing, and live Core E2E.
 - Android JVM unit runner still fails with a Gradle worker `ClassNotFoundException`; do not report unit tests green. Live OIDC/Core E2E, filters/pagination, remaining Android parity, and F60/production gates remain.
 - User-owned untracked paths `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` are out of scope and untouched.
-- Next: verify staged F08 diff and commit/push; continue F09 Android transaction filters and paging with RED-first tests.
+- Next: commit/push F09; add server-backed transaction query state and pagination with RED-first tests.
 
 ## Goals
 

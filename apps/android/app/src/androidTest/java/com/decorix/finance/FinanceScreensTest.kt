@@ -475,11 +475,11 @@ class FinanceScreensTest {
             onVoidTransaction = { item -> voided = item.id to item.version })
 
         compose.onNodeWithText("Операции").performClick()
-        compose.onNodeWithText("Такси").assertIsDisplayed()
-        compose.onNodeWithText("−2 000,00 ₽", substring = true).assertIsDisplayed()
-        compose.onNodeWithTag("transaction-repeat-tx-1").performClick()
+        compose.onNodeWithText("Такси").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("−2 000,00 ₽", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("transaction-repeat-tx-1").performScrollTo().performClick()
         assertEquals(original, repeated)
-        compose.onNodeWithTag("transaction-void-tx-1").performClick()
+        compose.onNodeWithTag("transaction-void-tx-1").performScrollTo().performClick()
         assertEquals("tx-1" to 3L, voided)
 
         compose.onNodeWithText("EN").performClick()
@@ -493,6 +493,23 @@ class FinanceScreensTest {
         compose.onNodeWithText("Операции").performClick()
         compose.onNodeWithTag("transaction-repeat-tx-1").assertDoesNotExist()
         compose.onNodeWithTag("transaction-void-tx-1").assertDoesNotExist()
+    }
+
+    @Test fun transactionHistorySearchAndTypeFilterNarrowVisibleRows() {
+        val grocery = transaction().copy(description = "Продукты")
+        val salary = transaction().copy(id = "tx-2", type = "income", description = "Зарплата")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(grocery, salary)))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-search").performTextInput("зарп")
+        compose.onNodeWithText("Зарплата").assertIsDisplayed()
+        compose.onNodeWithText("Продукты").assertDoesNotExist()
+
+        compose.onNodeWithTag("transaction-search").performTextReplacement("")
+        compose.onNodeWithTag("transaction-filter-expense").performClick()
+        compose.onNodeWithText("Продукты").assertIsDisplayed()
+        compose.onNodeWithText("Зарплата").assertDoesNotExist()
     }
 
     private fun show(state: FinanceUiState,
