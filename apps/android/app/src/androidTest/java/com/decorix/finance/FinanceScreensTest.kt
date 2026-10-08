@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.text.AnnotatedString
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -494,12 +495,113 @@ class FinanceScreensTest {
         compose.onNodeWithText("−2,000.00 RUB", substring = true).assertIsDisplayed()
     }
 
+    @Test fun ownerCanOpenEditorForPostedTransactionWithoutChangingExactHistoryValues() {
+        val original = transaction()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(original)))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithText("Такси").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("−2 000,00 ₽", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("transaction-edit-${original.id}").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun ownerCanSaveExactVersionedTransactionEdits() {
+        val original = transaction()
+        var saved: FinanceTransactionEdit? = null
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(original)), onUpdateTransaction = { saved = it })
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithTag("transaction-edit-${original.id}").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-edit-form").performScrollTo()
+        assertEditableText("transaction-edit-amount", "2000.00")
+        assertEditableText("transaction-edit-category", "transport")
+        assertEditableText("transaction-edit-subcategory", "taxi")
+        assertEditableText("transaction-edit-description", "Такси")
+        assertEditableText("transaction-edit-source", "manual")
+        assertEditableText("transaction-edit-date", "2026-10-08")
+
+        compose.onNodeWithTag("transaction-edit-type").performClick()
+        compose.onNodeWithText("income").performClick()
+        compose.onNodeWithTag("transaction-edit-amount").performTextReplacement("2750.50")
+        compose.onNodeWithTag("transaction-edit-category").performTextReplacement("salary")
+        compose.onNodeWithTag("transaction-edit-subcategory").performTextReplacement("bonus")
+        compose.onNodeWithTag("transaction-edit-description").performTextReplacement("Зарплата")
+        compose.onNodeWithTag("transaction-edit-date").performTextReplacement("2026-10-07")
+        compose.onNodeWithTag("transaction-edit-save").performScrollTo().performClick()
+
+        assertEquals(FinanceTransactionEdit(
+            id = "tx-1", version = 3L, type = "income", amount = "2750.50", currency = "RUB",
+            categoryCode = "salary", subcategoryCode = "bonus", description = "Зарплата", source = "manual",
+            occurredAt = "2026-10-07T09:00:00Z", debtId = null, ownerUserId = "user-1", accountId = null,
+        ), saved)
+    }
+
+    @Test fun memberCanEditOwnPostedTransactionButNotAnotherMembersTransaction() {
+        val own = transaction()
+        val anotherMember = transaction().copy(id = "tx-other", description = "Other", ownerUserId = "user-2")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("member")),
+            transactions = listOf(own, anotherMember),
+            transactionMembers = listOf(FinanceTenantMember("user-1", "User", "member"))))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithTag("transaction-edit-tx-1").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(4)
+        compose.onNodeWithTag("transaction-edit-tx-other").assertDoesNotExist()
+    }
+
+    @Test fun transactionEditorUsesTenantLocalDateAcrossUtcBoundary() {
+        val lateUtc = transaction().copy(occurredAt = "2026-10-07T21:30:00Z")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(lateUtc)))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithTag("transaction-edit-tx-1").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-edit-form").performScrollTo()
+
+        assertEditableText("transaction-edit-date", "2026-10-08")
+    }
+
+    @Test fun transactionEditorDisablesSaveForCoreFieldLengthLimits() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(transaction())))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithTag("transaction-edit-tx-1").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-edit-form").performScrollTo()
+
+        val category = compose.onNodeWithTag("transaction-edit-category")
+        category.performTextReplacement("c".repeat(65))
+        compose.onNodeWithTag("transaction-edit-save").assertIsNotEnabled()
+        category.performTextReplacement("transport")
+
+        val subcategory = compose.onNodeWithTag("transaction-edit-subcategory")
+        subcategory.performTextReplacement("s".repeat(65))
+        compose.onNodeWithTag("transaction-edit-save").assertIsNotEnabled()
+        subcategory.performTextReplacement("taxi")
+
+        val source = compose.onNodeWithTag("transaction-edit-source")
+        source.performTextReplacement("s".repeat(65))
+        compose.onNodeWithTag("transaction-edit-save").assertIsNotEnabled()
+        source.performTextReplacement("manual")
+
+        compose.onNodeWithTag("transaction-edit-description").performTextReplacement("d".repeat(501))
+        compose.onNodeWithTag("transaction-edit-save").assertIsNotEnabled()
+    }
+
     @Test fun viewerCannotRepeatOrVoidPostedTransactions() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
             transactions = listOf(transaction())))
         compose.onNodeWithText("Операции").performClick()
         compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
         compose.onNodeWithTag("transaction-repeat-tx-1").assertDoesNotExist()
+        compose.onNodeWithTag("transaction-edit-tx-1").assertDoesNotExist()
         compose.onNodeWithTag("transaction-void-tx-1").assertDoesNotExist()
     }
 
@@ -638,7 +740,8 @@ class FinanceScreensTest {
                      onRepeatTransaction: (FinanceTransaction) -> Unit = {},
                       onVoidTransaction: (FinanceTransaction) -> Unit = {},
                       onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
-                      onTransactionLoadMore: () -> Unit = {}) {
+                      onTransactionLoadMore: () -> Unit = {},
+                      onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {}) {
         val language = mutableStateOf("ru")
         val contentKey = Any()
         compose.setContent {
@@ -663,10 +766,16 @@ class FinanceScreensTest {
                 onReportLoad = onReportLoad,
                 onRepeatTransaction = onRepeatTransaction, onVoidTransaction = onVoidTransaction,
                 onTransactionFilter = onTransactionFilter, onTransactionLoadMore = onTransactionLoadMore,
+                onUpdateTransaction = onUpdateTransaction,
             )
             }
         }
         }
+    }
+
+    private fun assertEditableText(tag: String, expected: String) {
+        compose.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(
+            SemanticsProperties.EditableText, AnnotatedString(expected)))
     }
 
     private fun tenant(role: String) = FinanceTenant("tenant-1", "Дом", role, "Europe/Moscow")

@@ -256,6 +256,22 @@ data class FinanceTransaction(
     val ownerUserId: String?,
 )
 
+data class FinanceTransactionEdit(
+    val id: String,
+    val version: Long,
+    val type: String,
+    val amount: String,
+    val currency: String,
+    val categoryCode: String,
+    val subcategoryCode: String?,
+    val description: String,
+    val source: String,
+    val occurredAt: String,
+    val debtId: String?,
+    val ownerUserId: String?,
+    val accountId: String? = null,
+)
+
 data class FinanceMemberProfile(
     val displayName: String,
     val plannedIncome: String?,

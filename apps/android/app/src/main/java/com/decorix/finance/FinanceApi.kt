@@ -66,6 +66,23 @@ class FinanceApi(context: Context) {
         ))
     }
 
+    fun updateTransaction(tenantId: String, edit: FinanceTransactionEdit,
+                          idempotencyKey: String = UUID.randomUUID().toString()): FinanceTransaction {
+        require(edit.version > 0) { "Invalid transaction version" }
+        require(idempotencyKey.length in 16..128) { "Invalid idempotency key" }
+        val body = JSONObject().put("type", edit.type).put("amount", edit.amount)
+            .put("currency", edit.currency).put("categoryCode", edit.categoryCode)
+            .put("subcategoryCode", edit.subcategoryCode ?: JSONObject.NULL)
+            .put("description", edit.description).put("source", edit.source)
+            .put("occurredAt", edit.occurredAt).put("accountId", edit.accountId ?: JSONObject.NULL)
+            .put("debtId", edit.debtId ?: JSONObject.NULL)
+            .put("ownerUserId", edit.ownerUserId ?: JSONObject.NULL).toString()
+        return FinanceModels.transaction(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/transactions/${edit.id}", "PATCH", body,
+            idempotencyKey, edit.version,
+        )))
+    }
+
     fun repeatTransaction(tenantId: String, original: FinanceTransaction, occurredAt: String): FinanceTransaction {
         require(original.status == "posted" && original.type != "debt_payment") { "Transaction cannot be repeated" }
         val body = JSONObject().put("type", original.type).put("amount", original.amount)

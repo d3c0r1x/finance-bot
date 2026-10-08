@@ -66,6 +66,8 @@ class MainActivity : ComponentActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
+    private var pendingTransactionEdit: FinanceTransactionEdit? = null
+    private var pendingTransactionEditKey: String? = null
     private val loginResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val response = net.openid.appauth.AuthorizationResponse.fromIntent(result.data ?: Intent())
         val error = net.openid.appauth.AuthorizationException.fromIntent(result.data ?: Intent())
@@ -101,7 +103,8 @@ class MainActivity : ComponentActivity() {
                         onDoNotBuyLoad = ::loadDoNotBuy, onDoNotBuyDecision = ::applyDoNotBuyDecision,
                         onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision,
                         onRepeatTransaction = ::repeatTransaction, onVoidTransaction = ::voidTransaction,
-                        onTransactionFilter = ::filterTransactions, onTransactionLoadMore = ::loadMoreTransactions)
+                        onTransactionFilter = ::filterTransactions, onTransactionLoadMore = ::loadMoreTransactions,
+                        onUpdateTransaction = ::updateTransaction)
                 }
             }
         }
@@ -200,6 +203,15 @@ class MainActivity : ComponentActivity() {
         workspaceData()
     }
 
+    private fun updateTransaction(edit: FinanceTransactionEdit) = runApi {
+        if (pendingTransactionEdit != edit || pendingTransactionEditKey == null) {
+            pendingTransactionEdit = edit
+            pendingTransactionEditKey = java.util.UUID.randomUUID().toString()
+        }
+        api.updateTransaction(activeTenantId(), edit, pendingTransactionEditKey!!)
+        workspaceData(transactionEditSavedToken = java.util.UUID.randomUUID().toString())
+    }
+
     private fun filterTransactions(search: String, type: String, from: String, to: String, memberId: String) = runApi {
         workspaceData(transactionSearch = search, transactionType = type,
             transactionFrom = from, transactionTo = to, transactionMemberId = memberId)
@@ -221,12 +233,13 @@ class MainActivity : ComponentActivity() {
                               transactionTo: String = ui.transactionTo,
                               transactionMemberId: String = ui.transactionMemberId,
                               transactionCursor: String? = null,
-                              appendTransactions: Boolean = false): FinanceWorkspaceSnapshot {
+                              appendTransactions: Boolean = false,
+                              transactionEditSavedToken: String? = null): FinanceWorkspaceSnapshot {
         val tenants = api.tenants()
         val tenant = tenants.firstOrNull()
         return if (tenant == null) FinanceWorkspaceSnapshot(tenants, emptyList(), emptyList(), null, transactionSearch,
             transactionType, transactionFrom, transactionTo, transactionMemberId, null, emptyList(), proposal,
-            null, null, draft, null, null, budgetAlerts)
+            null, null, draft, null, null, budgetAlerts, transactionEditSavedToken)
         else {
             val month = YearMonth.now(ZoneId.of(tenant.timezone)).toString()
             val members = api.members(tenant.id)
@@ -239,7 +252,8 @@ class MainActivity : ComponentActivity() {
                 api.budgets(tenant.id), api.debts(tenant.id),
                 proposal, api.dashboardSummary(tenant.id), api.report(tenant.id, "month", "personal", month, "", ""),
                 draft, memberProfile ?: api.memberProfile(tenant.id),
-                notificationPreferences ?: api.notificationPreferences(tenant.id), budgetAlerts)
+                notificationPreferences ?: api.notificationPreferences(tenant.id), budgetAlerts,
+                transactionEditSavedToken)
         }
     }
 
@@ -247,6 +261,10 @@ class MainActivity : ComponentActivity() {
         ui = ui.copy(busy = true, error = null)
         executor.execute {
             runCatching(action).onSuccess { snapshot ->
+                if (snapshot.transactionEditSavedToken != null) {
+                    pendingTransactionEdit = null
+                    pendingTransactionEditKey = null
+                }
                 val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
                 ui = ui.copy(busy = false, tenants = snapshot.tenants,
                     transactions = snapshot.transactions, transactionNextCursor = snapshot.transactionNextCursor,
@@ -258,7 +276,8 @@ class MainActivity : ComponentActivity() {
                     budgetProposal = snapshot.proposal, dashboardSummary = snapshot.dashboardSummary,
                     report = snapshot.report, transactionDraft = snapshot.transactionDraft,
                     memberProfile = snapshot.memberProfile, notificationPreferences = snapshot.notificationPreferences,
-                    budgetAlerts = snapshot.budgetAlerts, error = null,
+                    budgetAlerts = snapshot.budgetAlerts, transactionEditSavedToken = snapshot.transactionEditSavedToken,
+                    error = null,
                     doNotBuy = ui.doNotBuy.takeIf { sameTenant },
                     productDecisions = ui.productDecisions.takeIf { sameTenant },
                     doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
@@ -266,8 +285,20 @@ class MainActivity : ComponentActivity() {
             }
                 .onFailure { error ->
                     if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
-                    else ui = ui.copy(busy = false, error = error.message ?: "Request failed")
+                    else ui = ui.copy(busy = false, error = apiErrorMessage(error))
                 }
+        }
+    }
+
+    private fun apiErrorMessage(error: Throwable): String {
+        return when ((error as? ApiFailure)?.status) {
+            412 -> if (language == "ru") "Операция уже изменилась. Обновите список и откройте её снова."
+                else "This transaction changed. Refresh the list and open it again."
+            409 -> if (language == "ru") "Не удалось повторить изменение. Обновите список и попробуйте снова."
+                else "The update could not be retried. Refresh the list and try again."
+            403 -> if (language == "ru") "Нет прав на изменение этой операции."
+                else "You cannot edit this transaction."
+            else -> error.message ?: "Request failed"
         }
     }
 
@@ -543,6 +574,7 @@ data class FinanceUiState(
     val recurringProjection: FinanceRecurringProjection? = null,
     val recurringLoading: Boolean = false,
     val recurringError: String? = null,
+    val transactionEditSavedToken: String? = null,
 )
 
 private data class FinanceWorkspaceSnapshot(
@@ -564,6 +596,7 @@ private data class FinanceWorkspaceSnapshot(
     val memberProfile: FinanceMemberProfile?,
     val notificationPreferences: FinanceNotificationPreferences?,
     val budgetAlerts: List<FinanceBudgetAlert>,
+    val transactionEditSavedToken: String? = null,
 )
 
 data class FinanceTenant(val id: String, val name: String, val role: String, val timezone: String)
@@ -598,7 +631,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onRepeatTransaction: (FinanceTransaction) -> Unit = {},
                           onVoidTransaction: (FinanceTransaction) -> Unit = {},
                           onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
-                          onTransactionLoadMore: () -> Unit = {}) {
+                          onTransactionLoadMore: () -> Unit = {},
+                          onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -614,12 +648,19 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
         mutableStateOf(state.transactionMemberId)
     }
     var transactionMemberPickerExpanded by androidx.compose.runtime.remember { mutableStateOf(false) }
+    var editingTransaction by androidx.compose.runtime.remember { mutableStateOf<FinanceTransaction?>(null) }
     var validateTransactionDates by androidx.compose.runtime.remember { mutableStateOf(false) }
     val transactionDateError = if (validateTransactionDates)
         transactionDateValidationError(transactionFrom, transactionTo, russian) else null
     var draftCreateKey by androidx.compose.runtime.remember { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var activeScreen by androidx.compose.runtime.remember { mutableStateOf("overview") }
     val canWriteTransactions = state.tenants.firstOrNull()?.role != "viewer"
+    val role = state.tenants.firstOrNull()?.role
+    val canManageFamilyTransactions = role == "owner" || role == "admin"
+    val currentUserId = state.transactionMembers.singleOrNull()?.userId
+    LaunchedEffect(state.transactionEditSavedToken) {
+        if (state.transactionEditSavedToken != null) editingTransaction = null
+    }
     var previousDraftId by androidx.compose.runtime.remember { mutableStateOf(state.transactionDraft?.id) }
     LaunchedEffect(state.transactionDraft?.id) {
         if (previousDraftId != null && state.transactionDraft == null) {
@@ -810,6 +851,13 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                     }
                                 }
                             }
+                            editingTransaction?.let { transaction ->
+                                item(key = "transaction-edit-${transaction.id}") {
+                                    TransactionEditEditor(transaction, state.debts, state.tenants.first().timezone,
+                                        language, state.busy, onSave = onUpdateTransaction,
+                                        onCancel = { editingTransaction = null })
+                                }
+                            }
                             item {
                                 val draft = state.transactionDraft?.takeIf { it.state == "pending" }
                                 Card(Modifier.fillMaxWidth()) {
@@ -839,8 +887,12 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                     else "No transactions match these filters")
                             }
                             items(state.transactions) { transaction ->
+                                val canEditThisTransaction = canWriteTransactions && transaction.status == "posted" &&
+                                    (canManageFamilyTransactions || transaction.ownerUserId == currentUserId)
                                 TransactionHistoryCard(transaction, language, canWriteTransactions, state.busy,
-                                    onRepeatTransaction, onVoidTransaction)
+                                    canEditThisTransaction,
+                                    onEdit = { editingTransaction = it },
+                                    onRepeat = onRepeatTransaction, onVoid = onVoidTransaction)
                             }
                             if (state.transactionNextCursor != null) item {
                                 Button(modifier = Modifier.testTag("transaction-load-more"), enabled = !state.busy,
@@ -859,7 +911,113 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
 }
 
 @androidx.compose.runtime.Composable
+private fun TransactionEditEditor(transaction: FinanceTransaction, debts: List<FinanceDebt>, timezone: String,
+                                 language: String, busy: Boolean, onSave: (FinanceTransactionEdit) -> Unit,
+                                 onCancel: () -> Unit) {
+    val russian = language == "ru"
+    var type by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.type) }
+    var amount by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.amount) }
+    var category by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.categoryCode) }
+    var subcategory by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.subcategoryCode.orEmpty()) }
+    var description by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.description) }
+    var source by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.source) }
+    var date by androidx.compose.runtime.remember(transaction.id, timezone) {
+        mutableStateOf(runCatching {
+            java.time.Instant.parse(transaction.occurredAt).atZone(ZoneId.of(timezone)).toLocalDate().toString()
+        }.getOrDefault(transaction.occurredAt.take(10)))
+    }
+    var debtId by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.debtId) }
+    var typeMenuExpanded by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(false) }
+    var debtMenuExpanded by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(false) }
+    val occurredAt = runCatching {
+        LocalDate.parse(date).atTime(12, 0).atZone(ZoneId.of(timezone)).toInstant().toString()
+    }.getOrNull()
+    val validAmount = Regex("^(?:0\\.(?:0?[1-9]|[1-9][0-9])|[1-9][0-9]{0,17}(?:\\.[0-9]{1,2})?)$")
+        .matches(amount.trim().replace(',', '.'))
+    val categoryValue = category.trim()
+    val subcategoryValue = subcategory.trim()
+    val descriptionValue = description.trim()
+    val sourceValue = source.trim()
+    val valid = validAmount && categoryValue.length in 1..64 && subcategoryValue.length <= 64
+        && descriptionValue.length in 1..500 && sourceValue.length in 1..64 && occurredAt != null
+        && (type != "debt_payment" || debtId != null)
+    Card(Modifier.fillMaxWidth().testTag("transaction-edit-form")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (russian) "Изменить операцию" else "Edit transaction", style = MaterialTheme.typography.titleMedium)
+            Box {
+                TextButton(modifier = Modifier.testTag("transaction-edit-type"), onClick = { typeMenuExpanded = true }) {
+                    Text(if (russian) "Тип: $type" else "Type: $type")
+                }
+                DropdownMenu(expanded = typeMenuExpanded, onDismissRequest = { typeMenuExpanded = false }) {
+                    listOf("expense", "income", "refund", "transfer", "debt_payment").forEach { option ->
+                        DropdownMenuItem(text = { Text(option) }, onClick = {
+                            type = option
+                            typeMenuExpanded = false
+                        })
+                    }
+                }
+            }
+            OutlinedTextField(value = amount, onValueChange = { amount = it }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().testTag("transaction-edit-amount"),
+                label = { Text(if (russian) "Сумма, ₽" else "Amount, RUB") }, singleLine = true)
+            OutlinedTextField(value = category, onValueChange = { category = it }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().testTag("transaction-edit-category"),
+                label = { Text(if (russian) "Категория" else "Category") }, singleLine = true)
+            OutlinedTextField(value = subcategory, onValueChange = { subcategory = it }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().testTag("transaction-edit-subcategory"),
+                label = { Text(if (russian) "Подкатегория" else "Subcategory") }, singleLine = true)
+            OutlinedTextField(value = description, onValueChange = { description = it }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().testTag("transaction-edit-description"),
+                label = { Text(if (russian) "Описание" else "Description") }, singleLine = true)
+            OutlinedTextField(value = source, onValueChange = { source = it }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().testTag("transaction-edit-source"),
+                label = { Text(if (russian) "Источник" else "Source") }, singleLine = true)
+            OutlinedTextField(value = date, onValueChange = { date = it }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth().testTag("transaction-edit-date"),
+                label = { Text(if (russian) "Дата (ГГГГ-ММ-ДД)" else "Date (YYYY-MM-DD)") }, singleLine = true)
+            if (!valid) Text(if (russian)
+                "Проверьте сумму и поля: категория и источник обязательны (до 64 символов), подкатегория — до 64, описание — до 500."
+            else "Check amount and fields: category and source are required (up to 64 characters), subcategory up to 64, description up to 500.",
+                color = MaterialTheme.colorScheme.error)
+            if (type == "debt_payment") {
+                Box {
+                    TextButton(modifier = Modifier.testTag("transaction-edit-debt"),
+                        onClick = { debtMenuExpanded = true }) {
+                        Text(debts.firstOrNull { it.id == debtId }?.name
+                            ?: if (russian) "Выберите долг" else "Select debt")
+                    }
+                    DropdownMenu(expanded = debtMenuExpanded, onDismissRequest = { debtMenuExpanded = false }) {
+                        debts.filter { it.status == "open" || it.id == transaction.debtId }.forEach { debt ->
+                            DropdownMenuItem(text = { Text(debt.name) }, onClick = {
+                                debtId = debt.id
+                                debtMenuExpanded = false
+                            })
+                        }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(modifier = Modifier.testTag("transaction-edit-save"), enabled = !busy && valid,
+                    onClick = {
+                        val instant = occurredAt ?: return@Button
+                        onSave(FinanceTransactionEdit(
+                            id = transaction.id, version = transaction.version, type = type,
+                            amount = amount.trim().replace(',', '.'), currency = transaction.currency,
+                            categoryCode = categoryValue, subcategoryCode = subcategoryValue.takeIf(String::isNotEmpty),
+                            description = descriptionValue, source = sourceValue, occurredAt = instant,
+                            debtId = debtId, ownerUserId = transaction.ownerUserId, accountId = transaction.accountId,
+                        ))
+                    }) { Text(if (russian) "Сохранить" else "Save") }
+                TextButton(modifier = Modifier.testTag("transaction-edit-cancel"), enabled = !busy,
+                    onClick = onCancel) { Text(if (russian) "Закрыть" else "Cancel") }
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
 private fun TransactionHistoryCard(transaction: FinanceTransaction, language: String, canWrite: Boolean, busy: Boolean,
+                                   canEdit: Boolean, onEdit: (FinanceTransaction) -> Unit,
                                    onRepeat: (FinanceTransaction) -> Unit, onVoid: (FinanceTransaction) -> Unit) {
     val russian = language == "ru"
     val posted = transaction.status == "posted"
@@ -875,8 +1033,12 @@ private fun TransactionHistoryCard(transaction: FinanceTransaction, language: St
                 "${transaction.memberName?.let { "$it · " } ?: ""}${transaction.categoryCode} · " +
                     if (posted) "Posted" else "Voided"
             })
-            if (canWrite && posted) {
+            if ((canWrite || canEdit) && posted) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (canEdit) TextButton(
+                        modifier = Modifier.testTag("transaction-edit-${transaction.id}"),
+                        enabled = !busy, onClick = { onEdit(transaction) },
+                    ) { Text(if (russian) "Изменить" else "Edit") }
                     if (transaction.type != "debt_payment") TextButton(
                         modifier = Modifier.testTag("transaction-repeat-${transaction.id}"),
                         enabled = !busy, onClick = { onRepeat(transaction) },
