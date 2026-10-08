@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -52,6 +53,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
 import java.util.Base64
 import java.security.MessageDigest
@@ -59,24 +61,45 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.LocalDate
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : ComponentActivity() {
     private lateinit var authService: AuthorizationService
     private val api by lazy { FinanceApi(this) }
+    private val receiptCheckpointStore by lazy { ReceiptUploadCheckpointStore(this) }
     private val executor = Executors.newSingleThreadExecutor()
+    private val receiptPollExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+    private val receiptPollGeneration = AtomicLong(0L)
+    @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
     private var pendingTransactionEdit: FinanceTransactionEdit? = null
     private var pendingTransactionEditKey: String? = null
+    private var pendingReceiptUri: Uri? = null
+    private var pendingReceiptKey: String? = null
+    private var receiptRestoreInProgressTenantId: String? = null
+    private var receiptPickerOperationToken: Long? = null
     private val loginResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val response = net.openid.appauth.AuthorizationResponse.fromIntent(result.data ?: Intent())
         val error = net.openid.appauth.AuthorizationException.fromIntent(result.data ?: Intent())
         if (error != null) ui = ui.copy(error = error.errorDescription ?: "Sign in cancelled")
         else if (response != null) exchangeCode(response)
     }
+    private val receiptPhotoPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val operationToken = receiptPickerOperationToken
+        receiptPickerOperationToken = null
+        if (uri != null && operationToken != null && ReceiptOperationGeneration.isCurrent(operationToken)) {
+            acceptReceiptPhoto(uri, operationToken)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val startupCheckpoint = runCatching { receiptCheckpointStore.load() }.getOrNull()
+        reconcilePersistedReceiptUriGrants(startupCheckpoint)
         val connectionBuilder = if (BuildConfig.DEBUG) DevelopmentConnectionBuilder
             else DefaultConnectionBuilder.INSTANCE
         authService = AuthorizationService(this,
@@ -104,7 +127,11 @@ class MainActivity : ComponentActivity() {
                         onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision,
                         onRepeatTransaction = ::repeatTransaction, onVoidTransaction = ::voidTransaction,
                         onTransactionFilter = ::filterTransactions, onTransactionLoadMore = ::loadMoreTransactions,
-                        onUpdateTransaction = ::updateTransaction)
+                        onUpdateTransaction = ::updateTransaction,
+                        onReceiptPick = ::launchReceiptPhotoPicker,
+                        onReceiptRefresh = ::refreshReceiptJob,
+                        onReceiptRetry = ::retryReceiptPhotoUpload,
+                        onReceiptDiscard = ::discardPendingReceiptPhoto)
                 }
             }
         }
@@ -147,7 +174,423 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loadTenants() = runApi { workspaceData() }
+    private fun launchReceiptPhotoPicker() {
+        if (ui.tenants.firstOrNull()?.role == "viewer" || hasUnresolvedReceiptCheckpoint()) return
+        val operationToken = ReceiptOperationGeneration.capture()
+        receiptPickerOperationToken = operationToken
+        receiptPhotoPicker.launch(arrayOf("image/jpeg", "image/png"))
+    }
+
+    private fun acceptReceiptPhoto(uri: Uri, operationToken: Long) {
+        if (!ReceiptOperationGeneration.isCurrent(operationToken)) return
+        if (ui.tenants.firstOrNull()?.role == "viewer" || hasUnresolvedReceiptCheckpoint()) return
+        ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            invalidateReceiptPoll()
+            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            pendingReceiptUri = uri
+            pendingReceiptKey = java.util.UUID.randomUUID().toString()
+            ui = ui.copy(receiptJob = null, receiptDraft = null, receiptUploadError = null,
+                receiptCanRetryUpload = true, receiptCheckpointUnresolved = true)
+        } ?: return
+        uploadSelectedReceiptPhoto(operationToken)
+    }
+
+    private fun retryReceiptPhotoUpload() {
+        if (pendingReceiptUri != null && pendingReceiptKey != null) uploadSelectedReceiptPhoto()
+    }
+
+    private fun discardPendingReceiptPhoto() {
+        val operationToken = ReceiptOperationGeneration.capture()
+        val uri = pendingReceiptUri ?: return
+        val uploadError = ui.receiptUploadError ?: return
+        if (pendingReceiptKey == null || !ui.receiptCanRetryUpload || ui.receiptJob != null ||
+            uploadError !in LOCAL_RECEIPT_FILE_ERRORS) return
+        ReceiptOperationGeneration.runIfCurrent(operationToken) { ui = ui.copy(busy = true) } ?: return
+        executor.execute {
+            if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+            val cleared = ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                runCatching { receiptCheckpointStore.clear() }.getOrDefault(false)
+            } ?: return@execute
+            if (!cleared) {
+                ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    ui = ui.copy(busy = false, receiptUploadError = "checkpoint",
+                        receiptCheckpointUnresolved = true)
+                }
+                return@execute
+            }
+            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                runCatching { contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                pendingReceiptUri = null
+                pendingReceiptKey = null
+                receiptRestoreInProgressTenantId = null
+                ui = ui.copy(busy = false, receiptJob = null, receiptDraft = null,
+                    receiptUploadInProgress = false, receiptUploadError = null, receiptCanRetryUpload = false,
+                    receiptCheckpointUnresolved = false)
+            } ?: return@execute
+            runOnUiThread {
+                if (ReceiptOperationGeneration.isCurrent(operationToken)) launchReceiptPhotoPicker()
+            }
+        }
+    }
+
+    private fun uploadSelectedReceiptPhoto(operationToken: Long = ReceiptOperationGeneration.capture()) {
+        if (!ReceiptOperationGeneration.isCurrent(operationToken)) return
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (tenant.role == "viewer") return
+        val uri = pendingReceiptUri ?: return
+        val key = pendingReceiptKey ?: return
+        ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            ui = ui.copy(busy = true, error = null, receiptUploadInProgress = true,
+                receiptUploadError = null, receiptJob = null, receiptDraft = null,
+                receiptCheckpointUnresolved = true)
+        } ?: return
+        executor.execute {
+            if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+            try {
+                val pendingSaved = ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    runCatching { receiptCheckpointStore.savePending(tenant.id, uri.toString(), key) }
+                        .getOrDefault(false)
+                } ?: return@execute
+                if (!pendingSaved) error("checkpoint")
+                val contentType = receiptContentType(uri)
+                val fileName = receiptFileName(uri, contentType)
+                val bytes = readReceiptPhoto(uri)
+                if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                val job = api.uploadReceiptPhoto(tenant.id, bytes, fileName, contentType, key)
+                if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                val jobSaved = ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    runCatching { receiptCheckpointStore.saveJob(tenant.id, job.id) }.getOrDefault(false)
+                } ?: return@execute
+                if (!jobSaved) error("checkpoint")
+                ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    runCatching {
+                        contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    pendingReceiptUri = null
+                    pendingReceiptKey = null
+                    ui = ui.copy(receiptJob = job, receiptCanRetryUpload = false,
+                        receiptCheckpointUnresolved = true)
+                } ?: return@execute
+                pollReceiptJob(tenant.id, job, operationToken)
+            } catch (failure: Throwable) {
+                ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    ui = ui.copy(busy = false, receiptUploadInProgress = false,
+                        receiptUploadError = receiptUploadErrorCode(failure),
+                        receiptCanRetryUpload = pendingReceiptUri != null && pendingReceiptKey != null)
+                }
+            }
+        }
+    }
+
+    private fun refreshReceiptJob() {
+        val operationToken = ReceiptOperationGeneration.capture()
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (pendingReceiptUri != null && pendingReceiptKey != null) {
+            uploadSelectedReceiptPhoto(operationToken)
+            return
+        }
+        ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            invalidateReceiptPoll()
+            ui = ui.copy(busy = true, receiptUploadInProgress = true, receiptUploadError = null)
+        } ?: return
+        executor.execute {
+            if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+            val checkpointResult = ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                runCatching { receiptCheckpointStore.load() }
+            } ?: return@execute
+            val checkpoint = checkpointResult.getOrElse { failure ->
+                ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    ui = ui.copy(busy = false, receiptUploadInProgress = false,
+                        receiptUploadError = receiptUploadErrorCode(failure), receiptCheckpointUnresolved = true)
+                }
+                return@execute
+            }
+            if (checkpoint?.tenantId == tenantId && checkpoint.photoUri != null &&
+                checkpoint.idempotencyKey != null) {
+                ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    pendingReceiptUri = Uri.parse(checkpoint.photoUri)
+                    pendingReceiptKey = checkpoint.idempotencyKey
+                    ui = ui.copy(busy = false, receiptUploadInProgress = false,
+                        receiptCanRetryUpload = true, receiptCheckpointUnresolved = true)
+                } ?: return@execute
+                uploadSelectedReceiptPhoto(operationToken)
+                return@execute
+            }
+            runCatching {
+                if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                val jobId = ui.receiptJob?.id
+                    ?: checkpoint?.takeIf { it.tenantId == tenantId }?.jobId
+                    ?: error("checkpoint")
+                val job = api.receiptJob(tenantId, jobId)
+                if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                ReceiptOperationGeneration.runIfCurrent(operationToken) { ui = ui.copy(receiptJob = job) }
+                    ?: return@execute
+                pollReceiptJob(tenantId, job, operationToken)
+            }.onFailure { failure ->
+                ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    ui = ui.copy(busy = false, receiptUploadInProgress = false,
+                        receiptUploadError = receiptUploadErrorCode(failure))
+                }
+            }
+        }
+    }
+
+    private fun restoreReceiptCheckpointForTenant(tenantId: String?, operationToken: Long = ReceiptOperationGeneration.capture()) {
+        if (!ReceiptOperationGeneration.isCurrent(operationToken)) return
+        val checkpointResult = ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            runCatching { receiptCheckpointStore.load() }
+        } ?: return
+        val checkpoint = checkpointResult.getOrElse {
+            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                ui = ui.copy(receiptUploadError = "checkpoint", receiptCheckpointUnresolved = true)
+            }
+            return
+        }
+        ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            reconcilePersistedReceiptUriGrants(checkpoint)
+        } ?: return
+        if (checkpoint == null) {
+            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                if (ui.receiptJob == null) ui = ui.copy(receiptCheckpointUnresolved = false)
+            }
+            return
+        }
+
+        ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            ui = ui.copy(receiptCheckpointUnresolved = true)
+        } ?: return
+        if (tenantId == null || checkpoint.tenantId != tenantId) {
+            ReceiptOperationGeneration.runIfCurrent(operationToken) { ui = ui.copy(receiptUploadError = "checkpoint_workspace") }
+            return
+        }
+
+        val jobId = checkpoint.jobId
+        if (jobId != null) {
+            if (ui.receiptJob?.id == jobId || receiptRestoreInProgressTenantId == tenantId) return
+            ReceiptOperationGeneration.runIfCurrent(operationToken) { receiptRestoreInProgressTenantId = tenantId }
+                ?: return
+            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                ui = ui.copy(busy = true, receiptUploadInProgress = false, receiptUploadError = null)
+            } ?: return
+            executor.execute {
+                if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                runCatching {
+                    if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                    api.receiptJob(tenantId, jobId)
+                }
+                    .onSuccess { job ->
+                        if (ReceiptOperationGeneration.isCurrent(operationToken) && ui.authenticated &&
+                            ui.tenants.firstOrNull()?.id == tenantId && ui.receiptCheckpointUnresolved) {
+                            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                                ui = ui.copy(receiptJob = job, receiptDraft = null, receiptCanRetryUpload = false)
+                            } ?: return@onSuccess
+                            pollReceiptJob(tenantId, job, operationToken)
+                        }
+                    }
+                    .onFailure { failure ->
+                        if (ReceiptOperationGeneration.isCurrent(operationToken) && ui.authenticated && ui.tenants.firstOrNull()?.id == tenantId) {
+                            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                                ui = ui.copy(busy = false, receiptUploadInProgress = false,
+                                    receiptUploadError = receiptUploadErrorCode(failure),
+                                    receiptCheckpointUnresolved = true)
+                            }
+                        }
+                    }
+                ReceiptOperationGeneration.runIfCurrent(operationToken) { receiptRestoreInProgressTenantId = null }
+            }
+            return
+        }
+
+        val photoUri = checkpoint.photoUri
+        val idempotencyKey = checkpoint.idempotencyKey
+        if (photoUri != null && idempotencyKey != null) {
+            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                pendingReceiptUri = Uri.parse(photoUri)
+                pendingReceiptKey = idempotencyKey
+                ui = ui.copy(receiptJob = null, receiptDraft = null, receiptUploadError = null,
+                    receiptCanRetryUpload = true)
+            } ?: return
+            uploadSelectedReceiptPhoto(operationToken)
+        }
+    }
+
+    private fun pollReceiptJob(tenantId: String, initial: FinanceReceiptProcessingJob,
+                               operationToken: Long = ReceiptOperationGeneration.capture()) {
+        if (!ReceiptOperationGeneration.isCurrent(operationToken)) return
+        val generation = ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            val pollGeneration = invalidateReceiptPoll()
+            ui = ui.copy(busy = false, receiptJob = initial)
+            pollGeneration
+        } ?: return
+        scheduleReceiptPoll(tenantId, initial, 0, generation, operationToken)
+    }
+
+    private fun scheduleReceiptPoll(tenantId: String, job: FinanceReceiptProcessingJob, attempt: Int,
+                                    generation: Long, operationToken: Long) {
+        if (!ReceiptOperationGeneration.isCurrent(operationToken) || receiptPollGeneration.get() != generation ||
+            !isCurrentReceiptJob(tenantId, job.id)) return
+        when (job.state) {
+            "completed" -> {
+                receiptPollExecutor.execute {
+                    if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                    runCatching {
+                        val receiptId = job.receiptId ?: error("receipt_missing")
+                        if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@execute
+                        api.receipt(tenantId, receiptId)
+                    }.onSuccess { receipt ->
+                        ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                            if (receiptPollGeneration.get() == generation && isCurrentReceiptJob(tenantId, job.id)) {
+                                val cleared = clearReceiptCheckpoint()
+                                ui = ui.copy(busy = false, receiptUploadInProgress = false, receiptJob = job,
+                                    receiptDraft = receipt, receiptUploadError = if (cleared) null else "checkpoint",
+                                    receiptCanRetryUpload = false, receiptCheckpointUnresolved = !cleared)
+                            }
+                        }
+                    }.onFailure { failure ->
+                        if (ReceiptOperationGeneration.isCurrent(operationToken) && receiptPollGeneration.get() == generation && isCurrentReceiptJob(tenantId, job.id)) {
+                            ui = ui.copy(busy = false, receiptUploadInProgress = false,
+                                receiptUploadError = receiptUploadErrorCode(failure), receiptCheckpointUnresolved = true)
+                        }
+                    }
+                }
+                return
+            }
+            "rejected" -> {
+                ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                    if (receiptPollGeneration.get() == generation && isCurrentReceiptJob(tenantId, job.id)) {
+                        val cleared = clearReceiptCheckpoint()
+                        ui = ui.copy(busy = false, receiptUploadInProgress = false, receiptJob = job,
+                            receiptUploadError = if (cleared) "rejected" else "checkpoint",
+                            receiptCheckpointUnresolved = !cleared)
+                    }
+                }
+                return
+            }
+        }
+
+        val delayMillis = receiptPollDelayMillis(job.state, attempt)
+        if (delayMillis == null) {
+            ReceiptOperationGeneration.runIfCurrent(operationToken) {
+                ui = ui.copy(busy = false, receiptUploadInProgress = false, receiptJob = job,
+                    receiptUploadError = "timeout", receiptCanRetryUpload = false,
+                    receiptCheckpointUnresolved = true)
+            }
+            return
+        }
+        ReceiptOperationGeneration.runIfCurrent(operationToken) {
+            ui = ui.copy(receiptJob = job, receiptUploadError = if (job.state == "retryable") "retryable" else null)
+        } ?: return
+        val future = receiptPollExecutor.schedule({
+            if (!ReceiptOperationGeneration.isCurrent(operationToken) || receiptPollGeneration.get() != generation ||
+                !isCurrentReceiptJob(tenantId, job.id)) return@schedule
+            if (receiptPollGeneration.get() == generation) receiptPollTask = null
+            runCatching {
+                if (!ReceiptOperationGeneration.isCurrent(operationToken)) return@schedule
+                api.receiptJob(tenantId, job.id)
+            }
+                .onSuccess { updated ->
+                    if (ReceiptOperationGeneration.isCurrent(operationToken) && receiptPollGeneration.get() == generation && isCurrentReceiptJob(tenantId, job.id)) {
+                        scheduleReceiptPoll(tenantId, updated, attempt + 1, generation, operationToken)
+                    }
+                }
+                .onFailure { failure ->
+                    if (ReceiptOperationGeneration.isCurrent(operationToken) &&
+                        receiptPollGeneration.get() == generation && isCurrentReceiptJob(tenantId, job.id)) {
+                        ui = ui.copy(busy = false, receiptUploadInProgress = false,
+                            receiptUploadError = receiptUploadErrorCode(failure),
+                            receiptCheckpointUnresolved = true)
+                    }
+                }
+        }, delayMillis, TimeUnit.MILLISECONDS)
+        if (receiptPollGeneration.get() == generation) receiptPollTask = future else future.cancel(false)
+    }
+
+    @Synchronized
+    private fun invalidateReceiptPoll(): Long {
+        val generation = receiptPollGeneration.incrementAndGet()
+        receiptPollTask?.cancel(false)
+        receiptPollTask = null
+        return generation
+    }
+
+    private fun isCurrentReceiptJob(tenantId: String, jobId: String): Boolean =
+        ui.tenants.firstOrNull()?.id == tenantId && ui.receiptJob?.id == jobId
+
+    private fun hasUnresolvedReceiptCheckpoint(): Boolean = ui.receiptCheckpointUnresolved ||
+        ui.receiptJob?.state in setOf<String?>("queued", "running", "retryable") ||
+        (ui.receiptJob?.state == "completed" && ui.receiptDraft == null)
+
+    private fun clearReceiptCheckpoint(): Boolean =
+        runCatching { receiptCheckpointStore.clear() }.getOrDefault(false)
+
+    private fun reconcilePersistedReceiptUriGrants(
+        checkpoint: ReceiptUploadCheckpoint?,
+        additionalUris: List<Uri> = emptyList(),
+    ) {
+        // Persisted document grants are used only by the receipt photo picker in this app.
+        val persistedUris = runCatching {
+            contentResolver.persistedUriPermissions
+                .filter { it.isReadPermission }
+                .map { it.uri.toString() }
+        }.getOrDefault(emptyList())
+        val toRelease = ReceiptUriCleanupPolicy.urisToRelease(persistedUris, checkpoint).toMutableSet()
+        additionalUris.mapTo(toRelease) { it.toString() }
+        toRelease.forEach { value ->
+            runCatching {
+                contentResolver.releasePersistableUriPermission(
+                    Uri.parse(value),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+    }
+
+    private fun receiptContentType(uri: Uri): String {
+        val mime = contentResolver.getType(uri)?.lowercase()
+        val type = when (mime) {
+            "image/jpeg", "image/jpg" -> "image/jpeg"
+            "image/png" -> "image/png"
+            else -> error("file_type")
+        }
+        return type
+    }
+
+    private fun receiptFileName(uri: Uri, contentType: String): String {
+        val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+        return name?.takeIf(String::isNotBlank)
+            ?: if (contentType == "image/png") "receipt.png" else "receipt.jpg"
+    }
+
+    private fun readReceiptPhoto(uri: Uri): ByteArray {
+        val input = contentResolver.openInputStream(uri) ?: error("file_read")
+        input.use { stream ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(8 * 1024)
+            var total = 0
+            while (true) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                total += read
+                if (total > 10 * 1024 * 1024) error("file_size")
+                output.write(buffer, 0, read)
+            }
+            if (total == 0) error("file_empty")
+            return output.toByteArray()
+        }
+    }
+
+    private fun receiptUploadErrorCode(failure: Throwable): String = when {
+        failure.message in setOf("file_type", "file_size", "file_empty", "file_read", "receipt_missing",
+            "checkpoint", "checkpoint_workspace") -> failure.message!!
+        failure is ApiFailure && failure.status == 401 -> "unauthorized"
+        failure is ApiFailure && failure.status == 403 -> "forbidden"
+        failure is ApiFailure && failure.status == 413 -> "file_size"
+        else -> "request"
+    }
+
+    private fun loadTenants() = runApi(restoreReceiptCheckpoint = true) { workspaceData() }
     private fun createTenantAndRefresh(name: String, memberName: String, plannedIncome: String?) = runApi {
         api.createTenant(name, memberName, plannedIncome)
         workspaceData()
@@ -257,35 +700,52 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun runApi(action: () -> FinanceWorkspaceSnapshot) {
+    private fun runApi(restoreReceiptCheckpoint: Boolean = false,
+                       action: () -> FinanceWorkspaceSnapshot) {
+        val receiptOperationToken = if (restoreReceiptCheckpoint) ReceiptOperationGeneration.capture() else null
         ui = ui.copy(busy = true, error = null)
         executor.execute {
+            if (receiptOperationToken != null && !ReceiptOperationGeneration.isCurrent(receiptOperationToken)) {
+                return@execute
+            }
             runCatching(action).onSuccess { snapshot ->
-                if (snapshot.transactionEditSavedToken != null) {
-                    pendingTransactionEdit = null
-                    pendingTransactionEditKey = null
+                val publishSnapshot = {
+                    if (snapshot.transactionEditSavedToken != null) {
+                        pendingTransactionEdit = null
+                        pendingTransactionEditKey = null
+                    }
+                    val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
+                    ui = ui.copy(busy = false, tenants = snapshot.tenants,
+                        transactions = snapshot.transactions, transactionNextCursor = snapshot.transactionNextCursor,
+                        transactionMembers = snapshot.transactionMembers,
+                        transactionSearch = snapshot.transactionSearch, transactionTypeFilter = snapshot.transactionTypeFilter,
+                        transactionFrom = snapshot.transactionFrom, transactionTo = snapshot.transactionTo,
+                        transactionMemberId = snapshot.transactionMemberId,
+                        budgets = snapshot.budgets, debts = snapshot.debts,
+                        budgetProposal = snapshot.proposal, dashboardSummary = snapshot.dashboardSummary,
+                        report = snapshot.report, transactionDraft = snapshot.transactionDraft,
+                        memberProfile = snapshot.memberProfile, notificationPreferences = snapshot.notificationPreferences,
+                        budgetAlerts = snapshot.budgetAlerts, transactionEditSavedToken = snapshot.transactionEditSavedToken,
+                        error = null,
+                        doNotBuy = ui.doNotBuy.takeIf { sameTenant },
+                        productDecisions = ui.productDecisions.takeIf { sameTenant },
+                        doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
+                        doNotBuyLoading = ui.doNotBuyLoading && sameTenant)
+                    if (restoreReceiptCheckpoint) {
+                        restoreReceiptCheckpointForTenant(snapshot.tenants.firstOrNull()?.id, receiptOperationToken!!)
+                    }
                 }
-                val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
-                ui = ui.copy(busy = false, tenants = snapshot.tenants,
-                    transactions = snapshot.transactions, transactionNextCursor = snapshot.transactionNextCursor,
-                    transactionMembers = snapshot.transactionMembers,
-                    transactionSearch = snapshot.transactionSearch, transactionTypeFilter = snapshot.transactionTypeFilter,
-                    transactionFrom = snapshot.transactionFrom, transactionTo = snapshot.transactionTo,
-                    transactionMemberId = snapshot.transactionMemberId,
-                    budgets = snapshot.budgets, debts = snapshot.debts,
-                    budgetProposal = snapshot.proposal, dashboardSummary = snapshot.dashboardSummary,
-                    report = snapshot.report, transactionDraft = snapshot.transactionDraft,
-                    memberProfile = snapshot.memberProfile, notificationPreferences = snapshot.notificationPreferences,
-                    budgetAlerts = snapshot.budgetAlerts, transactionEditSavedToken = snapshot.transactionEditSavedToken,
-                    error = null,
-                    doNotBuy = ui.doNotBuy.takeIf { sameTenant },
-                    productDecisions = ui.productDecisions.takeIf { sameTenant },
-                    doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
-                    doNotBuyLoading = ui.doNotBuyLoading && sameTenant)
+                if (receiptOperationToken == null) publishSnapshot()
+                else ReceiptOperationGeneration.runIfCurrent(receiptOperationToken, publishSnapshot)
+                    ?: return@onSuccess
             }
                 .onFailure { error ->
-                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
-                    else ui = ui.copy(busy = false, error = apiErrorMessage(error))
+                    val publishError = {
+                        if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                        else ui = ui.copy(busy = false, error = apiErrorMessage(error))
+                    }
+                    if (receiptOperationToken == null) publishError()
+                    else ReceiptOperationGeneration.runIfCurrent(receiptOperationToken, publishError)
                 }
         }
     }
@@ -523,16 +983,36 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
+        ReceiptOperationGeneration.invalidate()
+        receiptPickerOperationToken = null
+        invalidateReceiptPoll()
         ui = ui.copy(busy = true, error = null)
         executor.execute {
+            val storedCheckpoint = runCatching { receiptCheckpointStore.load() }.getOrNull()
+            val inMemoryUri = pendingReceiptUri
             runCatching { api.logout() }
-            runOnUiThread { ui = FinanceUiState() }
+            val checkpointCleared = clearReceiptCheckpoint()
+            val urisToRelease = listOfNotNull(
+                storedCheckpoint?.photoUri?.let { value -> runCatching { Uri.parse(value) }.getOrNull() },
+                inMemoryUri,
+            ).distinct()
+            reconcilePersistedReceiptUriGrants(checkpoint = null, additionalUris = urisToRelease)
+            pendingReceiptUri = null
+            pendingReceiptKey = null
+            receiptRestoreInProgressTenantId = null
+            runOnUiThread {
+                ui = FinanceUiState(error = if (checkpointCleared) null else
+                    if (language == "ru") "Не удалось очистить сохранённую загрузку чека."
+                    else "Could not clear the saved receipt upload.")
+            }
         }
     }
 
     override fun onDestroy() {
         authService.dispose()
+        invalidateReceiptPoll()
         executor.shutdownNow()
+        receiptPollExecutor.shutdownNow()
         super.onDestroy()
     }
 }
@@ -575,6 +1055,12 @@ data class FinanceUiState(
     val recurringLoading: Boolean = false,
     val recurringError: String? = null,
     val transactionEditSavedToken: String? = null,
+    val receiptJob: FinanceReceiptProcessingJob? = null,
+    val receiptDraft: FinanceReceipt? = null,
+    val receiptUploadInProgress: Boolean = false,
+    val receiptUploadError: String? = null,
+    val receiptCanRetryUpload: Boolean = false,
+    val receiptCheckpointUnresolved: Boolean = false,
 )
 
 private data class FinanceWorkspaceSnapshot(
@@ -632,7 +1118,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onVoidTransaction: (FinanceTransaction) -> Unit = {},
                           onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
                           onTransactionLoadMore: () -> Unit = {},
-                          onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {}) {
+                           onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {},
+                           onReceiptPick: () -> Unit = {},
+                           onReceiptRefresh: () -> Unit = {},
+                           onReceiptRetry: () -> Unit = {},
+                           onReceiptDiscard: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -721,7 +1211,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 Text(state.tenants.first().name, style = MaterialTheme.typography.headlineSmall)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring", "nobuy").forEach { screen ->
+                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring", "nobuy").forEach { screen ->
                         TextButton(onClick = {
                             activeScreen = screen
                             if (screen == "shopping" && state.shoppingList == null && !state.shoppingLoading) onShoppingLoad()
@@ -735,6 +1225,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         }) {
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
+                                "receipts" -> if (russian) "Чеки" else "Receipts"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
                                 "nobuy" -> if (russian) "Не брать" else "Do not buy"
                                 "inflation" -> if (russian) "Динамика цен" else "Price trend"
@@ -750,6 +1241,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
+                    "receipts" -> ReceiptUploadScreen(language, state.tenants.firstOrNull()?.role != "viewer",
+                        state.receiptJob, state.receiptDraft, state.receiptUploadInProgress,
+                        state.receiptUploadError, state.receiptCanRetryUpload, state.busy,
+                        state.receiptCheckpointUnresolved,
+                        onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -909,6 +1405,156 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
         if (state.busy) androidx.compose.material3.CircularProgressIndicator()
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
+}
+
+private val LOCAL_RECEIPT_FILE_ERRORS = setOf("file_read", "file_type", "file_size", "file_empty")
+
+@androidx.compose.runtime.Composable
+private fun ReceiptUploadScreen(language: String, canWrite: Boolean, job: FinanceReceiptProcessingJob?,
+                                receipt: FinanceReceipt?, uploading: Boolean, errorCode: String?,
+                                canRetryUpload: Boolean, busy: Boolean, checkpointUnresolved: Boolean,
+                                onPick: () -> Unit,
+                                onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit) {
+    val russian = language == "ru"
+    val activeJob = job?.state in setOf<String?>("queued", "running", "retryable") ||
+        (job?.state == "completed" && receipt == null && errorCode != null)
+    Card(Modifier.fillMaxWidth().testTag("receipt-upload-screen")) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(if (russian) "Чеки" else "Receipts", style = MaterialTheme.typography.titleMedium)
+            if (canWrite) {
+                Text(if (russian) "Добавьте фото чека для распознавания. Операция не будет создана автоматически."
+                    else "Add a receipt photo for recognition. No transaction will be created automatically.")
+                Button(modifier = Modifier.testTag("receipt-open-document"),
+                    enabled = !busy && !checkpointUnresolved && !activeJob, onClick = onPick) {
+                    Text(if (russian) "Загрузить фото чека" else "Upload receipt photo")
+                }
+                if (uploading && job == null) {
+                    Card(Modifier.fillMaxWidth().testTag("receipt-upload-progress")) {
+                        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            androidx.compose.material3.CircularProgressIndicator()
+                            Text(if (russian) "Загружаем фото…" else "Uploading photo…")
+                        }
+                    }
+                }
+                job?.takeIf { it.state == "queued" || it.state == "running" }?.let { current ->
+                    val stage = receiptStageLabel(current.stage, language)
+                    Card(Modifier.fillMaxWidth().testTag("receipt-upload-progress")) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("${current.progressPercent}% · $stage")
+                            LinearProgressIndicator(progress = { (current.progressPercent.coerceIn(0, 100) / 100f) },
+                                modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+                errorCode?.let { code ->
+                    Text(receiptUploadErrorMessage(code, language), color = MaterialTheme.colorScheme.error)
+                    if (canRetryUpload) Button(enabled = !busy, onClick = onRetry) {
+                        Text(if (russian) "Повторить загрузку" else "Retry upload")
+                    }
+                    if (canRetryUpload && job == null && code in LOCAL_RECEIPT_FILE_ERRORS) {
+                        TextButton(modifier = Modifier.testTag("receipt-discard-upload"),
+                            enabled = !busy, onClick = onDiscard) {
+                            Text(if (russian) "Выбрать другое фото" else "Discard and choose another photo")
+                        }
+                    }
+                }
+                val canRefreshJob = job?.let {
+                    it.state == "queued" || it.state == "running" || it.state == "retryable" ||
+                        (it.state == "completed" && errorCode != null) ||
+                        (it.state == "rejected" && errorCode == "checkpoint") || errorCode == "timeout"
+                } == true
+                if (canRefreshJob || (job == null && checkpointUnresolved && !canRetryUpload)) {
+                    TextButton(modifier = Modifier.testTag("receipt-refresh-status"),
+                        enabled = !busy || job?.state == "retryable", onClick = onRefresh) {
+                        Text(if (russian) "Обновить статус" else "Refresh status")
+                    }
+                }
+                receipt?.let { draft ->
+                    Card(Modifier.fillMaxWidth().testTag("receipt-draft")) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(if (draft.state == "draft" || draft.state == "review_required")
+                                if (russian) "Черновик · проверьте данные" else "Draft · review details"
+                            else if (russian) "Чек" else "Receipt", style = MaterialTheme.typography.titleSmall)
+                            draft.merchant?.let { Text(it) }
+                            draft.receiptDate?.let { Text(it) }
+                            draft.cashTotal?.let { Text(formatMoney(it, language, draft.currency)) }
+                            Text(if (russian) "Позиций: ${draft.itemCount}" else "Items: ${draft.itemCount}")
+                            draft.items.forEach { item -> Text(item.name) }
+                        }
+                    }
+                }
+            } else {
+                Text(if (russian) "Загрузка чеков недоступна для просмотра."
+                    else "Receipt upload is unavailable in read-only mode.")
+                receipt?.let { draft ->
+                    Card(Modifier.fillMaxWidth().testTag("receipt-draft")) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(if (russian) "Чек" else "Receipt", style = MaterialTheme.typography.titleSmall)
+                            draft.merchant?.let { Text(it) }
+                            draft.receiptDate?.let { Text(it) }
+                            draft.cashTotal?.let { Text(formatMoney(it, language, draft.currency)) }
+                            draft.items.forEach { Text(it.name) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal fun receiptPollDelayMillis(state: String, attempt: Int): Long? {
+    if (attempt >= 60) return null
+    return when (state) {
+        "queued", "running" -> 1_000L
+        "retryable" -> 5_000L
+        else -> null
+    }
+}
+
+private fun receiptStageLabel(stage: String, language: String): String = if (language == "ru") when (stage) {
+    "queued" -> "В очереди"
+    "scanning" -> "Проверка файла"
+    "vision" -> "Проверка изображения"
+    "ocr" -> "Распознавание чека"
+    "draft" -> "Подготовка черновика"
+    "complete" -> "Готово"
+    else -> "Обработка чека"
+} else when (stage) {
+    "queued" -> "Queued"
+    "scanning" -> "File scan"
+    "vision" -> "Image analysis"
+    "ocr" -> "Receipt recognition"
+    "draft" -> "Preparing draft"
+    "complete" -> "Complete"
+    else -> "Processing receipt"
+}
+
+private fun receiptUploadErrorMessage(code: String, language: String): String = if (language == "ru") when (code) {
+    "file_type" -> "Выберите изображение JPEG или PNG."
+    "file_size" -> "Размер фото не должен превышать 10 МиБ."
+    "file_empty", "file_read" -> "Не удалось прочитать фото. Выберите файл ещё раз."
+    "forbidden" -> "Нет прав на загрузку чека."
+    "unauthorized" -> "Войдите снова, чтобы продолжить."
+    "rejected" -> "Фото не прошло проверку. Выберите другой файл."
+    "retryable" -> "Обработка временно не завершена. Обновите статус позже."
+    "timeout" -> "Обработка ещё идёт. Обновите статус позже."
+    "receipt_missing" -> "Черновик чека пока недоступен. Обновите статус."
+    "checkpoint" -> "Не удалось сохранить состояние загрузки. Повторите действие позже."
+    "checkpoint_workspace" -> "Незавершённая загрузка относится к другому пространству. Сначала переключитесь на него."
+    else -> "Не удалось обработать фото. Проверьте соединение и повторите."
+} else when (code) {
+    "file_type" -> "Choose a JPEG or PNG image."
+    "file_size" -> "Photo must be 10 MiB or smaller."
+    "file_empty", "file_read" -> "Could not read photo. Choose the file again."
+    "forbidden" -> "You do not have permission to upload receipts."
+    "unauthorized" -> "Sign in again to continue."
+    "rejected" -> "Photo failed validation. Choose another file."
+    "retryable" -> "Processing has not finished. Refresh status later."
+    "timeout" -> "Processing is still running. Refresh status later."
+    "receipt_missing" -> "Receipt draft is not ready. Refresh status."
+    "checkpoint" -> "Could not save upload state. Try again later."
+    "checkpoint_workspace" -> "Pending upload belongs to another workspace. Switch to that workspace first."
+    else -> "Could not process photo. Check connection and retry."
 }
 
 @androidx.compose.runtime.Composable

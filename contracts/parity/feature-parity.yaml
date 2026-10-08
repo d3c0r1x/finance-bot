@@ -194,9 +194,13 @@ features:
     evidence:
       - "Core validates JPEG/PNG uploads, stores private quarantine objects, scans with ClamAV, runs a durable leased OCR job, saves one owner-scoped review draft and OCR evidence, and never posts a transaction. RU/EN Web tests cover upload, bounded progress polling and opening OCR review. Full local checks pass: Core 177 tests (0 failures, 2 container-gated skips), Python/contracts 211 passed/3 skipped, Web 34/34 plus production build, legacy smoke/handler/receipt scripts pass. GitHub run 37406496544 passed the authenticated SeaweedFS S3 operations and real ClamAV malware-scanning integration on commit 68253b7; F10 is complete."
     android:
-      status: missing
-      scenario: "Android counterpart for F10: Фото чека, прогресс, draft; `expenses.py`"
-      gap: "No Android user screen or equivalent flow is verified for F10 yet."
+      status: partial
+      scenario: "Android opens the API-23-compatible system document picker for JPEG/PNG, uploads through authenticated Core photo-job API with idempotency, shows bounded OCR progress, and opens the returned receipt draft without posting a transaction."
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptPollingPolicyTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt"
+      gap: "Upload, progress, and draft display are the first Android slice; receipt item editing, duplicate decisions, and confirmation remain in F15-F18 slices. Real authenticated Android-to-Core upload remains required."
     intentional_differences: []
   - id: F11
     feature: "Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"

@@ -256,6 +256,69 @@ data class FinanceTransaction(
     val ownerUserId: String?,
 )
 
+data class FinanceReceiptProcessingJob(
+    val id: String,
+    val tenantId: String,
+    val documentId: String,
+    val state: String,
+    val stage: String,
+    val progressPercent: Int,
+    val attemptCount: Int,
+    val retryable: Boolean,
+    val errorCode: String?,
+    val receiptId: String?,
+    val createdAt: String,
+    val updatedAt: String,
+)
+
+data class FinanceReceipt(
+    val id: String,
+    val tenantId: String,
+    val documentId: String?,
+    val state: String,
+    val version: Long,
+    val transactionId: String?,
+    val currency: String,
+    val cashTotal: String?,
+    val itemsTotal: String?,
+    val merchant: String?,
+    val receiptDate: String?,
+    val selectedReader: String?,
+    val categoryCode: String?,
+    val categorySource: String,
+    val categoryAlgorithmVersion: String,
+    val alcoholShare: String?,
+    val leisureShare: String?,
+    val leisure: Boolean,
+    val duplicateDecision: String,
+    val duplicateOfReceiptId: String?,
+    val items: List<FinanceReceiptItem>,
+    val itemCount: Int,
+    val createdAt: String,
+)
+
+data class FinanceReceiptItem(
+    val id: String,
+    val name: String,
+    val quantity: String?,
+    val unitPrice: String?,
+    val lineSum: String?,
+    val productKey: String?,
+    val provenance: String?,
+    val confidence: Double?,
+    val categoryCode: String?,
+    val verdict: String?,
+    val advice: String?,
+    val reviewReason: String?,
+    val reviewAction: String?,
+    val verdictSource: String?,
+    val reviewProvider: String?,
+    val reviewModelVersion: String?,
+    val reviewPromptVersion: String?,
+    val reviewAlgorithmVersion: String?,
+    val version: Long,
+)
+
 data class FinanceTransactionEdit(
     val id: String,
     val version: Long,
@@ -348,6 +411,73 @@ internal object FinanceModels {
         status = json.getString("status"), version = json.getLong("version"), createdAt = json.getString("createdAt"),
         memberName = nullableString(json, "memberName"), debtId = nullableString(json, "debtId"),
         ownerUserId = nullableString(json, "ownerUserId"),
+    )
+
+    fun receiptProcessingJob(json: JSONObject) = FinanceReceiptProcessingJob(
+        id = json.getString("id"),
+        tenantId = json.getString("tenantId"),
+        documentId = json.getString("documentId"),
+        state = json.getString("state"),
+        stage = json.getString("stage"),
+        progressPercent = json.getInt("progressPercent"),
+        attemptCount = json.getInt("attemptCount"),
+        retryable = json.getBoolean("retryable"),
+        errorCode = nullableString(json, "errorCode"),
+        receiptId = nullableString(json, "receiptId"),
+        createdAt = json.getString("createdAt"),
+        updatedAt = json.getString("updatedAt"),
+    )
+
+    fun receipt(json: JSONObject): FinanceReceipt {
+        val rows = json.getJSONArray("items")
+        val items = (0 until rows.length()).map { index -> receiptItem(rows.getJSONObject(index)) }
+        return FinanceReceipt(
+            id = json.getString("id"),
+            tenantId = json.getString("tenantId"),
+            documentId = nullableString(json, "documentId"),
+            state = json.getString("state"),
+            version = json.getLong("version"),
+            transactionId = nullableString(json, "transactionId"),
+            currency = json.getString("currency"),
+            cashTotal = nullableString(json, "cashTotal"),
+            itemsTotal = nullableString(json, "itemsTotal"),
+            merchant = nullableString(json, "merchant"),
+            receiptDate = nullableString(json, "receiptDate"),
+            selectedReader = nullableString(json, "selectedReader"),
+            categoryCode = nullableString(json, "categoryCode"),
+            categorySource = json.getString("categorySource"),
+            categoryAlgorithmVersion = json.getString("categoryAlgorithmVersion"),
+            alcoholShare = nullableString(json, "alcoholShare"),
+            leisureShare = nullableString(json, "leisureShare"),
+            leisure = json.getBoolean("leisure"),
+            duplicateDecision = json.getString("duplicateDecision"),
+            duplicateOfReceiptId = nullableString(json, "duplicateOfReceiptId"),
+            items = items,
+            itemCount = json.getInt("itemCount"),
+            createdAt = json.getString("createdAt"),
+        )
+    }
+
+    private fun receiptItem(json: JSONObject) = FinanceReceiptItem(
+        id = json.getString("id"),
+        name = json.getString("name"),
+        quantity = nullableString(json, "quantity"),
+        unitPrice = nullableString(json, "unitPrice"),
+        lineSum = nullableString(json, "lineSum"),
+        productKey = nullableString(json, "productKey"),
+        provenance = nullableString(json, "provenance"),
+        confidence = if (json.has("confidence") && !json.isNull("confidence")) json.getDouble("confidence") else null,
+        categoryCode = nullableString(json, "categoryCode"),
+        verdict = nullableString(json, "verdict"),
+        advice = nullableString(json, "advice"),
+        reviewReason = nullableString(json, "reviewReason"),
+        reviewAction = nullableString(json, "reviewAction"),
+        verdictSource = nullableString(json, "verdictSource"),
+        reviewProvider = nullableString(json, "reviewProvider"),
+        reviewModelVersion = nullableString(json, "reviewModelVersion"),
+        reviewPromptVersion = nullableString(json, "reviewPromptVersion"),
+        reviewAlgorithmVersion = nullableString(json, "reviewAlgorithmVersion"),
+        version = json.getLong("version"),
     )
 
     fun budgetAlerts(json: JSONArray?): List<FinanceBudgetAlert> {

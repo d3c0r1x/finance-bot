@@ -27,6 +27,14 @@ import org.junit.runner.RunWith
 class FinanceScreensTest {
     @get:Rule val compose = createComposeRule()
 
+    @Test fun authenticatedWriterCanNavigateToReceiptPhotoUpload() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))))
+
+        compose.onNodeWithText("Чеки").assertIsDisplayed()
+        compose.onNodeWithText("Чеки").performClick()
+        compose.onNodeWithText("Загрузить фото чека").assertIsDisplayed()
+    }
+
     @Test fun budgetThresholdAlertIsLocalizedAndUsesCoreAmounts() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgetAlerts = listOf(
             FinanceBudgetAlert("еда", "near", "5000.00", "4500.00"),
@@ -48,7 +56,7 @@ class FinanceScreensTest {
         compose.onNodeWithText("Лимиты · 2026-10").assertIsDisplayed()
         compose.onNodeWithText("Расход еды за 7 дней: 350,25 ₽ / 1 000,00 ₽ · Недостаточно истории").assertIsDisplayed()
 
-        compose.onNodeWithText("Долги").performClick()
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
         compose.onNodeWithText("Кредитная карта").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Записать платёж").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Прогноз выплаты").performScrollTo().assertIsDisplayed()

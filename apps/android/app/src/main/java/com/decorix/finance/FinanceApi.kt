@@ -4,7 +4,9 @@ import android.content.Context
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
+import okhttp3.MultipartBody
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
@@ -14,10 +16,21 @@ import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-class FinanceApi(context: Context) {
+internal data class FinanceApiEndpoints(val apiBaseUrl: String, val oidcRealmUrl: String)
+
+class FinanceApi internal constructor(
+    context: Context,
+    private val endpoints: FinanceApiEndpoints,
+    private val client: OkHttpClient,
+) {
+    constructor(context: Context) : this(
+        context,
+        FinanceApiEndpoints(BuildConfig.API_BASE_URL, BuildConfig.OIDC_REALM_URL),
+        OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build(),
+    )
+
     private val tokens = TokenVault(context)
-    private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS).build()
+    private val tokenRefreshLock = Any()
 
     fun hasSession(): Boolean = tokens.read()?.optString("accessToken")?.isNotBlank() == true
 
@@ -27,20 +40,20 @@ class FinanceApi(context: Context) {
             .put("expiresAtMillis", expiresAtMillis).put("idToken", idToken))
     }
 
-    fun clearSession() = tokens.clear()
+    fun clearSession() = synchronized(tokenRefreshLock) { tokens.clear() }
 
-    fun logout() {
+    fun logout() = synchronized(tokenRefreshLock) {
         val session = tokens.read()
         try {
             val refresh = session?.optString("refreshToken").orEmpty()
             if (refresh.isNotBlank()) {
-                val request = Request.Builder().url("${BuildConfig.OIDC_REALM_URL}/protocol/openid-connect/revoke")
+                val request = Request.Builder().url("${endpoints.oidcRealmUrl}/protocol/openid-connect/revoke")
                     .post(FormBody.Builder().add("client_id", BuildConfig.OIDC_CLIENT_ID)
                         .add("token", refresh).add("token_type_hint", "refresh_token").build()).build()
                 client.newCall(request).execute().use { }
             }
         } finally {
-            clearSession()
+            tokens.clear()
         }
     }
 
@@ -56,6 +69,31 @@ class FinanceApi(context: Context) {
 
     fun members(tenantId: String): List<FinanceTenantMember> =
         FinanceModels.tenantMembers(org.json.JSONArray(execute("/api/v1/tenants/$tenantId/members", "GET")))
+
+    fun uploadReceiptPhoto(tenantId: String, bytes: ByteArray, fileName: String, contentType: String,
+                           idempotencyKey: String): FinanceReceiptProcessingJob {
+        require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Receipt image size is invalid" }
+        require(contentType == "image/jpeg" || contentType == "image/png") { "Receipt image type is unsupported" }
+        require(idempotencyKey.length in 16..128 && idempotencyKey.none(Char::isISOControl)) {
+            "Invalid idempotency key"
+        }
+        val safeName = fileName.replace('\\', '/').substringAfterLast('/')
+            .filterNot(Char::isISOControl).take(245).ifBlank { if (contentType == "image/png") "receipt.png" else "receipt.jpg" }
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("file", safeName, bytes.toRequestBody(contentType.toMediaType()))
+            .build()
+        return FinanceModels.receiptProcessingJob(JSONObject(executeRequest(
+            "/api/v1/tenants/$tenantId/receipts/photo-jobs", "POST", multipart, idempotencyKey,
+        )))
+    }
+
+    fun receiptJob(tenantId: String, jobId: String): FinanceReceiptProcessingJob = FinanceModels.receiptProcessingJob(
+        JSONObject(execute("/api/v1/tenants/$tenantId/receipt-jobs/$jobId", "GET")),
+    )
+
+    fun receipt(tenantId: String, receiptId: String): FinanceReceipt = FinanceModels.receipt(
+        JSONObject(execute("/api/v1/tenants/$tenantId/receipts/$receiptId", "GET")),
+    )
 
     fun transactions(tenantId: String, search: String = "", type: String = "all", cursor: String? = null,
                      from: String? = null, to: String? = null, memberId: String? = null): FinanceTransactionPage {
@@ -325,17 +363,23 @@ class FinanceApi(context: Context) {
 
     private fun execute(path: String, method: String, body: String? = null, idempotencyKey: String? = null,
                         ifMatchVersion: Long? = null): String {
+        val requestBody = body?.toRequestBody("application/json".toMediaType())
+        return executeRequest(path, method, requestBody, idempotencyKey, ifMatchVersion)
+    }
+
+    private fun executeRequest(path: String, method: String, requestBody: RequestBody?,
+                               idempotencyKey: String? = null, ifMatchVersion: Long? = null): String {
         val original = tokens.read()
         var accessToken = original?.optString("accessToken")?.takeIf(String::isNotBlank)
         val expiresAt = original?.optLong("expiresAtMillis", 0L) ?: 0L
         if (accessToken != null && expiresAt > 0 && expiresAt <= System.currentTimeMillis() + 30_000) {
-            accessToken = refresh(original ?: throw ApiFailure(401, "sign_in_required"))
+            accessToken = refresh(accessToken)
         }
-        var response = perform(path, method, body, idempotencyKey, ifMatchVersion, accessToken)
+        var response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
         if (response.code == 401 && accessToken != null) {
             response.close()
-            accessToken = refresh(tokens.read() ?: throw ApiFailure(401, "sign_in_required"))
-            response = perform(path, method, body, idempotencyKey, ifMatchVersion, accessToken)
+            accessToken = refresh(accessToken)
+            response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
         }
         response.use {
             val text = it.body?.string().orEmpty()
@@ -349,10 +393,18 @@ class FinanceApi(context: Context) {
         }
     }
 
-    private fun refresh(session: JSONObject): String {
-        val refreshToken = session.optString("refreshToken").takeIf(String::isNotBlank)
+    private fun refresh(staleAccessToken: String?): String = synchronized(tokenRefreshLock) {
+        val current = tokens.read() ?: throw ApiFailure(401, "sign_in_required")
+        val currentAccessToken = current.optString("accessToken").takeIf(String::isNotBlank)
+        val currentExpiresAt = current.optLong("expiresAtMillis", 0L)
+        if (currentAccessToken != null && currentAccessToken != staleAccessToken && currentExpiresAt > 0
+            && currentExpiresAt > System.currentTimeMillis() + 30_000) {
+            return@synchronized currentAccessToken
+        }
+
+        val refreshToken = current.optString("refreshToken").takeIf(String::isNotBlank)
             ?: throw ApiFailure(401, "sign_in_required")
-        val request = Request.Builder().url("${BuildConfig.OIDC_REALM_URL}/protocol/openid-connect/token")
+        val request = Request.Builder().url("${endpoints.oidcRealmUrl}/protocol/openid-connect/token")
             .post(FormBody.Builder().add("grant_type", "refresh_token")
                 .add("client_id", BuildConfig.OIDC_CLIENT_ID).add("refresh_token", refreshToken).build()).build()
         client.newCall(request).execute().use { response ->
@@ -366,20 +418,20 @@ class FinanceApi(context: Context) {
                 throw ApiFailure(response.code, "Identity provider unavailable (${response.code})")
             }
             val result = JSONObject(body)
-            val nextAccess = result.getString("access_token")
+            val nextAccess = result.optString("access_token").takeIf(String::isNotBlank)
+                ?: throw ApiFailure(502, "Identity provider returned no access token")
             val nextRefresh = result.optString("refresh_token").ifBlank { refreshToken }
-            val nextId = result.optString("id_token").ifBlank { session.optString("idToken") }
+            val nextId = result.optString("id_token").ifBlank { current.optString("idToken") }
             val expiry = System.currentTimeMillis() + result.optLong("expires_in", 300L) * 1000L
             tokens.save(JSONObject().put("accessToken", nextAccess).put("refreshToken", nextRefresh)
                 .put("idToken", nextId).put("expiresAtMillis", expiry))
-            return nextAccess
+            nextAccess
         }
     }
 
-    private fun perform(path: String, method: String, body: String?, idempotencyKey: String?,
+    private fun perform(path: String, method: String, requestBody: RequestBody?, idempotencyKey: String?,
                         ifMatchVersion: Long?, accessToken: String?) = run {
-        val builder = Request.Builder().url(BuildConfig.API_BASE_URL + path)
-        val requestBody = body?.toRequestBody("application/json".toMediaType())
+        val builder = Request.Builder().url(endpoints.apiBaseUrl + path)
         when (method) {
             "POST" -> builder.post(requestBody ?: "{}".toRequestBody("application/json".toMediaType()))
             "PATCH" -> builder.patch(requestBody ?: "{}".toRequestBody("application/json".toMediaType()))
