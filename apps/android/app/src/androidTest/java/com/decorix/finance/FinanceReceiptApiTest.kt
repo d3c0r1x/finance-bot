@@ -99,6 +99,89 @@ class FinanceReceiptApiTest {
         assertEquals(null, receipt.transactionId)
     }
 
+    @Test fun receiptReadingFetchesOwnerScopedEvidenceAndParsesCoordinatesAndProvenance() {
+        server.enqueue(MockResponse().setBody(receiptReadingJson()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val reading = api.receiptReading("tenant-17", "receipt-42")
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/readings", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("TEST MARKET TOTAL 120.00", reading.text)
+        assertEquals("tesseract", reading.provider)
+        assertEquals("tesseract-5.3.0", reading.modelVersion)
+        assertEquals("tesseract-ocr.v2", reading.promptVersion)
+        assertEquals("120.00", reading.ocrTotal)
+        assertEquals("Bread", reading.ocrItems.single().name)
+        assertEquals("120.00", reading.ocrItems.single().lineSum)
+        val box = reading.words.single()["box"] as Map<*, *>
+        assertEquals(31, (box["x"] as Number).toInt())
+        assertEquals(17, (box["y"] as Number).toInt())
+        assertEquals(52, (box["width"] as Number).toInt())
+        assertEquals("review_required", reading.reconciliation.decision)
+        assertEquals("ocr", reading.reconciliation.selectedReader)
+        assertEquals("120.00", reading.reconciliation.ocrItemsTotal)
+        assertEquals("900.00", reading.reconciliation.visionItemsTotal)
+        assertEquals("corroborated", reading.reconciliation.itemEvidence.single().status)
+        assertEquals("Synthetic Vision Mart", reading.vision?.store)
+        assertEquals("2026-10-04", reading.vision?.date)
+        assertEquals("900.00", reading.vision?.total)
+        assertEquals("synthetic-vision-v1", reading.vision?.modelVersion)
+        assertEquals("vision-prompt-v1", reading.vision?.promptVersion)
+        assertEquals("Model Bread", reading.vision?.items?.single()?.get("name"))
+    }
+
+    @Test fun receiptReadingPreservesNullableVisionValuesAndEmptyEvidence() {
+        server.enqueue(MockResponse().setBody(receiptReadingJson(
+            text = "",
+            words = "[]",
+            ocrTotal = "null",
+            ocrItems = "[]",
+            vision = """{"store":null,"date":null,"total":null,"items":[],"provider":"synthetic-vision",
+                "modelVersion":"vision-v1","promptVersion":"vision-prompt-v1","fallbackReason":null}""",
+            reconciliation = """{"algorithmVersion":"receipt-reconciliation.v1","decision":"review_required",
+                "selectedReader":null,"mismatchFields":[],"ocrItemsTotal":null,"visionItemsTotal":null,
+                "allowedDifference":"0.02","ocrItemsReconciled":false,"visionItemsReconciled":false,
+                "itemEvidence":[],"suggestedTopUps":[]}""",
+        )))
+
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+        val reading = api.receiptReading("tenant-17", "receipt-42")
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/readings", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("", reading.text)
+        assertEquals(emptyList<Any>(), reading.words)
+        assertEquals(null, reading.ocrTotal)
+        assertEquals(emptyList<Any>(), reading.ocrItems)
+        assertEquals(null, reading.vision?.store)
+        assertEquals(null, reading.vision?.date)
+        assertEquals(null, reading.vision?.total)
+        assertEquals(emptyList<Any>(), reading.vision?.items)
+        assertEquals(null, reading.reconciliation.selectedReader)
+        assertEquals(null, reading.reconciliation.ocrItemsTotal)
+        assertEquals(null, reading.reconciliation.visionItemsTotal)
+    }
+
+    @Test fun missingOwnerScopedReceiptReadingReturnsNotFoundWithoutInventingEvidence() {
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"detail":"not found"}"""))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val failure = runCatching { api.receiptReading("tenant-17", "receipt-42") }.exceptionOrNull()
+
+        assertTrue(failure is ApiFailure)
+        assertEquals(404, (failure as ApiFailure).status)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/readings", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+    }
+
     @Test fun budgetProposalAndApplyReuseCallerSuppliedIdempotencyKeys() {
         repeat(2) { server.enqueue(MockResponse().setBody(budgetProposalJson())) }
         repeat(2) { server.enqueue(MockResponse().setBody(budgetOverviewJson())) }
@@ -338,6 +421,27 @@ class FinanceReceiptApiTest {
            "advice":null,"reviewReason":null,"reviewAction":null,"verdictSource":null,"reviewProvider":null,
            "reviewModelVersion":null,"reviewPromptVersion":null,"reviewAlgorithmVersion":null,"version":1}],
          "itemCount":1,"createdAt":"2026-10-08T09:01:00Z"}
+    """.trimIndent()
+
+    private fun receiptReadingJson(
+        text: String = "TEST MARKET TOTAL 120.00",
+        words: String = """[{"text":"TOTAL","confidence":96.0,"box":{"x":31,"y":17,"width":52,"height":10}}]""",
+        ocrTotal: String = "\"120.00\"",
+        ocrItems: String = """[{"name":"Bread","quantity":"1","unitPrice":"120.00","lineSum":"120.00"}]""",
+        vision: String = """{"store":"Synthetic Vision Mart","date":"2026-10-04","total":"900.00",
+            "items":[{"name":"Model Bread","quantity":"1","unitPrice":"900.00","lineSum":"900.00"}],
+            "provider":"synthetic-vision","modelVersion":"synthetic-vision-v1",
+            "promptVersion":"vision-prompt-v1","fallbackReason":null}""",
+        reconciliation: String = """{"algorithmVersion":"receipt-reconciliation.v1","decision":"review_required",
+            "selectedReader":"ocr","mismatchFields":["total"],"ocrItemsTotal":"120.00",
+            "visionItemsTotal":"900.00","allowedDifference":"0.02","ocrItemsReconciled":true,
+            "visionItemsReconciled":false,"itemEvidence":[{"visionOrdinal":1,"ocrOrdinal":1,
+            "status":"corroborated"}],"suggestedTopUps":[]}""",
+    ) = """
+        {"text":${org.json.JSONObject.quote(text)},"words":$words,"provider":"tesseract",
+         "modelVersion":"tesseract-5.3.0","promptVersion":"tesseract-ocr.v2","confidence":0.9600,
+         "ocrTotal":$ocrTotal,"ocrItems":$ocrItems,"reconciliation":$reconciliation,
+         "visionFallbackReason":null,"ocrFallbackReason":null,"vision":$vision}
     """.trimIndent()
 
     private fun budgetProposalJson() = """

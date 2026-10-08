@@ -19,6 +19,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val receiptPollExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val receiptPollGeneration = AtomicLong(0L)
+    private val receiptReadingGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -133,7 +135,8 @@ class MainActivity : ComponentActivity() {
                         onReceiptPick = ::launchReceiptPhotoPicker,
                         onReceiptRefresh = ::refreshReceiptJob,
                         onReceiptRetry = ::retryReceiptPhotoUpload,
-                        onReceiptDiscard = ::discardPendingReceiptPhoto)
+                        onReceiptDiscard = ::discardPendingReceiptPhoto,
+                        onReceiptReading = ::loadReceiptReading)
                 }
             }
         }
@@ -188,10 +191,13 @@ class MainActivity : ComponentActivity() {
         if (ui.tenants.firstOrNull()?.role == "viewer" || hasUnresolvedReceiptCheckpoint()) return
         ReceiptOperationGeneration.runIfCurrent(operationToken) {
             invalidateReceiptPoll()
+            receiptReadingGeneration.incrementAndGet()
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             pendingReceiptUri = uri
             pendingReceiptKey = java.util.UUID.randomUUID().toString()
             ui = ui.copy(receiptJob = null, receiptDraft = null, receiptUploadError = null,
+                receiptReading = null, receiptReadingReceiptId = null, receiptReadingLoading = false,
+                receiptReadingError = null,
                 receiptCanRetryUpload = true, receiptCheckpointUnresolved = true)
         } ?: return
         uploadSelectedReceiptPhoto(operationToken)
@@ -334,6 +340,33 @@ class MainActivity : ComponentActivity() {
                         receiptUploadError = receiptUploadErrorCode(failure))
                 }
             }
+        }
+    }
+
+    private fun loadReceiptReading(receiptId: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        if (receipt.documentId == null || receipt.selectedReader == "manual") return
+        val generation = receiptReadingGeneration.incrementAndGet()
+        ui = ui.copy(receiptReading = null, receiptReadingReceiptId = receiptId,
+            receiptReadingLoading = true, receiptReadingError = null)
+        executor.execute {
+            if (receiptReadingGeneration.get() != generation) return@execute
+            runCatching { api.receiptReading(tenantId, receiptId) }
+                .onSuccess { reading ->
+                    if (receiptReadingGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptReading = reading, receiptReadingLoading = false,
+                            receiptReadingError = null)
+                    }
+                }
+                .onFailure {
+                    if (receiptReadingGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptReading = null, receiptReadingLoading = false,
+                            receiptReadingError = "unavailable")
+                    }
+                }
         }
     }
 
@@ -1014,6 +1047,7 @@ class MainActivity : ComponentActivity() {
 
     private fun logout() {
         ReceiptOperationGeneration.invalidate()
+        receiptReadingGeneration.incrementAndGet()
         receiptPickerOperationToken = null
         invalidateReceiptPoll()
         ui = ui.copy(busy = true, error = null)
@@ -1087,6 +1121,10 @@ data class FinanceUiState(
     val transactionEditSavedToken: String? = null,
     val receiptJob: FinanceReceiptProcessingJob? = null,
     val receiptDraft: FinanceReceipt? = null,
+    val receiptReading: FinanceReceiptReading? = null,
+    val receiptReadingReceiptId: String? = null,
+    val receiptReadingLoading: Boolean = false,
+    val receiptReadingError: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
@@ -1150,10 +1188,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
                           onTransactionLoadMore: () -> Unit = {},
                            onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {},
-                           onReceiptPick: () -> Unit = {},
-                           onReceiptRefresh: () -> Unit = {},
-                           onReceiptRetry: () -> Unit = {},
-                           onReceiptDiscard: () -> Unit = {}) {
+                          onReceiptPick: () -> Unit = {},
+                          onReceiptRefresh: () -> Unit = {},
+                          onReceiptRetry: () -> Unit = {},
+                          onReceiptDiscard: () -> Unit = {},
+                          onReceiptReading: (String) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -1210,6 +1249,14 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     }
     LaunchedEffect(state.transactionEditSavedToken) {
         if (state.transactionEditSavedToken != null) editingTransaction = null
+    }
+    LaunchedEffect(state.receiptDraft?.id, state.receiptDraft?.documentId, state.receiptDraft?.selectedReader,
+        state.receiptReadingReceiptId, state.receiptReadingLoading) {
+        val receipt = state.receiptDraft
+        if (receipt?.documentId != null && receipt.selectedReader != "manual" &&
+            state.receiptReadingReceiptId != receipt.id) {
+            onReceiptReading(receipt.id)
+        }
     }
     var previousDraftId by androidx.compose.runtime.remember { mutableStateOf(state.transactionDraft?.id) }
     LaunchedEffect(state.transactionDraft?.id) {
@@ -1369,11 +1416,13 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
-                    "receipts" -> ReceiptUploadScreen(language, state.tenants.firstOrNull()?.role != "viewer",
+                    "receipts" -> ReceiptUploadScreen(Modifier.weight(1f), language,
+                        state.tenants.firstOrNull()?.role != "viewer",
                         state.receiptJob, state.receiptDraft, state.receiptUploadInProgress,
                         state.receiptUploadError, state.receiptCanRetryUpload, state.busy,
-                        state.receiptCheckpointUnresolved,
-                        onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard)
+                        state.receiptCheckpointUnresolved, state.receiptReading,
+                        state.receiptReadingReceiptId, state.receiptReadingLoading, state.receiptReadingError,
+                        onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -1573,16 +1622,20 @@ private fun OnboardingBudgetChoiceScreen(language: String, proposal: BudgetPropo
 }
 
 @androidx.compose.runtime.Composable
-private fun ReceiptUploadScreen(language: String, canWrite: Boolean, job: FinanceReceiptProcessingJob?,
+private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: Boolean, job: FinanceReceiptProcessingJob?,
                                 receipt: FinanceReceipt?, uploading: Boolean, errorCode: String?,
                                 canRetryUpload: Boolean, busy: Boolean, checkpointUnresolved: Boolean,
+                                reading: FinanceReceiptReading?, readingReceiptId: String?, readingLoading: Boolean,
+                                readingError: String?,
                                 onPick: () -> Unit,
-                                onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit) {
+                                onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
+                                onLoadReading: (String) -> Unit) {
     val russian = language == "ru"
     val activeJob = job?.state in setOf<String?>("queued", "running", "retryable") ||
         (job?.state == "completed" && receipt == null && errorCode != null)
-    Card(Modifier.fillMaxWidth().testTag("receipt-upload-screen")) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card(modifier.fillMaxWidth().testTag("receipt-upload-screen")) {
+        Column(Modifier.fillMaxWidth().padding(16.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(if (russian) "Чеки" else "Receipts", style = MaterialTheme.typography.titleMedium)
             if (canWrite) {
                 Text(if (russian) "Добавьте фото чека для распознавания. Операция не будет создана автоматически."
@@ -1661,6 +1714,98 @@ private fun ReceiptUploadScreen(language: String, canWrite: Boolean, job: Financ
                     }
                 }
             }
+            receipt?.let { draft ->
+                val currentReading = reading.takeIf { readingReceiptId == null || readingReceiptId == draft.id }
+                val sourceLabel = when (draft.categorySource) {
+                    "human" -> if (russian) "вручную" else "manual"
+                    "rule" -> if (russian) "правило" else "rule"
+                    "model" -> if (russian) "модель" else "model"
+                    "default" -> if (russian) "по умолчанию" else "default"
+                    else -> if (russian) "не определён" else "unknown"
+                }
+                if (draft.categoryCode == null || draft.categorySource == "unknown") {
+                    Text(if (russian) "Категория не определена · источник: $sourceLabel · ${draft.categoryAlgorithmVersion}"
+                        else "Category unknown · source: $sourceLabel · ${draft.categoryAlgorithmVersion}",
+                        modifier = Modifier.testTag("receipt-reading-category-unknown"))
+                } else {
+                    Text(if (russian) "Категория: ${draft.categoryCode} · источник: $sourceLabel · ${draft.categoryAlgorithmVersion}"
+                        else "Category: ${draft.categoryCode} · source: $sourceLabel · ${draft.categoryAlgorithmVersion}")
+                }
+
+                if (draft.documentId != null && draft.selectedReader != "manual") {
+                    when {
+                        currentReading != null -> {
+                            Card(Modifier.fillMaxWidth().testTag("receipt-reading")) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(if (russian) "Исходное чтение" else "Original reading",
+                                        style = MaterialTheme.typography.titleSmall)
+                                    Text("OCR · ${currentReading.provider ?: "—"} · ${currentReading.modelVersion ?: "—"} · ${currentReading.promptVersion ?: "—"}")
+                                    currentReading.confidence?.let { Text(if (russian) "Уверенность чтения: $it" else "Reading confidence: $it") }
+                                    currentReading.visionFallbackReason?.let {
+                                        Text(if (russian) "Резерв Vision: ${localizedReceiptFallbackReason(it, "vision", language)}"
+                                            else "Vision fallback: ${localizedReceiptFallbackReason(it, "vision", language)}")
+                                    }
+                                    currentReading.ocrFallbackReason?.let {
+                                        Text(if (russian) "Резерв OCR: ${localizedReceiptFallbackReason(it, "ocr", language)}"
+                                            else "OCR fallback: ${localizedReceiptFallbackReason(it, "ocr", language)}")
+                                    }
+                                    Text(currentReading.text.ifBlank { "—" }, modifier = Modifier
+                                        .fillMaxWidth().heightIn(max = 220.dp).verticalScroll(rememberScrollState())
+                                        .testTag("receipt-reading-ocr-text"))
+                                    if (currentReading.words.isNotEmpty()) {
+                                        Column(Modifier.fillMaxWidth().heightIn(max = 160.dp)
+                                            .verticalScroll(rememberScrollState())) {
+                                            currentReading.words.forEach { word ->
+                                                val box = word["box"] as? Map<*, *>
+                                                val text = word["text"]?.toString().orEmpty()
+                                                val confidence = word["confidence"]?.toString()
+                                                val coordinates = box?.let {
+                                                    "${it["x"]}, ${it["y"]}, ${it["width"]}, ${it["height"]}"
+                                                }
+                                                if (text.isNotBlank()) Text("$text · ${confidence ?: "—"}% · (${coordinates ?: "—"})")
+                                            }
+                                        }
+                                    }
+                                    currentReading.vision?.let { vision ->
+                                        Text(if (russian) "Непроверенное чтение Vision" else "Unverified Vision reading",
+                                            style = MaterialTheme.typography.titleSmall)
+                                        Text(if (russian) "Эти значения не подтверждены и не заменяют данные чека."
+                                            else "These values are unverified and do not replace receipt fields.")
+                                        Text(if (russian) "Магазин в чтении" else "Vision store")
+                                        Text(vision.store ?: "—", modifier = Modifier.testTag("receipt-reading-vision-store"))
+                                        Text(if (russian) "Дата в чтении" else "Vision date")
+                                        Text(vision.date ?: "—", modifier = Modifier.testTag("receipt-reading-vision-date"))
+                                        Text(if (russian) "Сумма в чтении" else "Vision total")
+                                        Text(vision.total ?: "—", modifier = Modifier.testTag("receipt-reading-vision-total"))
+                                        Text(if (russian) "Источник Vision: ${vision.provider ?: "—"} · ${vision.modelVersion ?: "—"} · ${vision.promptVersion ?: "—"}"
+                                            else "Vision source: ${vision.provider ?: "—"} · ${vision.modelVersion ?: "—"} · ${vision.promptVersion ?: "—"}")
+                                        vision.fallbackReason?.let {
+                                            Text(if (russian) "Резерв модели Vision: ${localizedReceiptFallbackReason(it, "vision_model", language)}"
+                                                else "Vision model fallback: ${localizedReceiptFallbackReason(it, "vision_model", language)}")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                                readingLoading && (readingReceiptId == null || readingReceiptId == draft.id) -> {
+                            Text(if (russian) "Загружаем исходное чтение…" else "Loading original reading…",
+                                modifier = Modifier.testTag("receipt-reading-loading"))
+                        }
+                        readingError != null && (readingReceiptId == null || readingReceiptId == draft.id) -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(if (russian) "Исходное чтение недоступно. Данные чека остались без изменений."
+                                    else "Original reading is unavailable. Receipt fields were left unchanged.",
+                                    modifier = Modifier.testTag("receipt-reading-unavailable"),
+                                    color = MaterialTheme.colorScheme.error)
+                                TextButton(modifier = Modifier.testTag("receipt-reading-retry"),
+                                    enabled = !readingLoading, onClick = { onLoadReading(draft.id) }) {
+                                    Text(if (russian) "Повторить загрузку чтения" else "Retry loading reading")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1690,6 +1835,35 @@ private fun receiptStageLabel(stage: String, language: String): String = if (lan
     "draft" -> "Preparing draft"
     "complete" -> "Complete"
     else -> "Processing receipt"
+}
+
+private fun localizedReceiptFallbackReason(code: String, source: String, language: String): String {
+    val normalized = code.uppercase()
+    val russian = language == "ru"
+    return when (source to normalized) {
+        "vision" to "VISION_UNAVAILABLE", "vision" to "UNAVAILABLE" ->
+            if (russian) "распознавание Vision временно недоступно" else "Vision recognition is temporarily unavailable"
+        "vision" to "VISION_NOT_CONFIGURED" ->
+            if (russian) "распознавание Vision не настроено" else "Vision recognition is not configured"
+        "vision" to "VISION_RESPONSE_TOO_LARGE" ->
+            if (russian) "ответ Vision слишком велик для обработки" else "Vision response is too large to process"
+        "vision" to "VISION_UNSUPPORTED" ->
+            if (russian) "распознавание Vision не поддерживается" else "Vision recognition is unsupported"
+        "vision" to "VISION_INVALID_RESPONSE" ->
+            if (russian) "Vision вернул некорректный результат" else "Vision returned an invalid result"
+        "vision" to "VISION_TIMEOUT" ->
+            if (russian) "время распознавания Vision истекло" else "Vision recognition timed out"
+        "vision" to "VISION_INTERRUPTED" ->
+            if (russian) "распознавание Vision было прервано" else "Vision recognition was interrupted"
+        "vision_model" to "VISION_MODEL_UNAVAILABLE" ->
+            if (russian) "выбранная модель Vision недоступна" else "selected Vision model is unavailable"
+        "ocr" to "OCR_INVALID_RESPONSE" ->
+            if (russian) "OCR не смог обработать изображение" else "OCR could not process the image"
+        "ocr" to "OCR_UNAVAILABLE", "ocr" to "UNAVAILABLE" ->
+            if (russian) "OCR временно недоступен" else "OCR is temporarily unavailable"
+        else -> if (russian) "Дополнительная информация о распознавании недоступна"
+            else "Additional recognition details are unavailable"
+    }
 }
 
 private fun receiptUploadErrorMessage(code: String, language: String): String = if (language == "ru") when (code) {

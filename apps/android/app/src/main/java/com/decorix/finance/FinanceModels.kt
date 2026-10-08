@@ -319,6 +319,65 @@ data class FinanceReceiptItem(
     val version: Long,
 )
 
+data class FinanceReceiptReading(
+    val text: String,
+    val words: List<Map<String, Any?>>,
+    val provider: String?,
+    val modelVersion: String?,
+    val promptVersion: String?,
+    val confidence: Double?,
+    val ocrTotal: String?,
+    val ocrItems: List<FinanceReceiptLineItem>,
+    val reconciliation: FinanceReceiptReconciliation,
+    val visionFallbackReason: String?,
+    val ocrFallbackReason: String?,
+    val vision: FinanceReceiptVisionReading?,
+)
+
+data class FinanceReceiptLineItem(
+    val name: String,
+    val quantity: String?,
+    val unitPrice: String?,
+    val lineSum: String?,
+)
+
+data class FinanceReceiptReconciliation(
+    val algorithmVersion: String,
+    val decision: String,
+    val selectedReader: String?,
+    val mismatchFields: List<String>,
+    val ocrItemsTotal: String?,
+    val visionItemsTotal: String?,
+    val allowedDifference: String?,
+    val ocrItemsReconciled: Boolean,
+    val visionItemsReconciled: Boolean,
+    val itemEvidence: List<FinanceReceiptItemEvidence>,
+    val suggestedTopUps: List<FinanceReceiptTopUpSuggestion>,
+)
+
+data class FinanceReceiptItemEvidence(
+    val visionOrdinal: Int,
+    val ocrOrdinal: Int?,
+    val status: String,
+)
+
+data class FinanceReceiptTopUpSuggestion(
+    val ocrOrdinal: Int,
+    val name: String,
+    val lineSum: String,
+)
+
+data class FinanceReceiptVisionReading(
+    val store: String?,
+    val date: String?,
+    val total: String?,
+    val items: List<Map<String, Any?>>,
+    val provider: String?,
+    val modelVersion: String?,
+    val promptVersion: String?,
+    val fallbackReason: String?,
+)
+
 data class FinanceTransactionEdit(
     val id: String,
     val version: Long,
@@ -456,6 +515,93 @@ internal object FinanceModels {
             itemCount = json.getInt("itemCount"),
             createdAt = json.getString("createdAt"),
         )
+    }
+
+    fun receiptReading(json: JSONObject): FinanceReceiptReading {
+        val reconciliationJson = json.getJSONObject("reconciliation")
+        val words = json.getJSONArray("words").objectMaps()
+        val ocrItemsJson = json.getJSONArray("ocrItems")
+        val evidenceJson = reconciliationJson.getJSONArray("itemEvidence")
+        val topUpsJson = reconciliationJson.getJSONArray("suggestedTopUps")
+        val visionJson = json.optJSONObject("vision")
+        val ocrItems = (0 until ocrItemsJson.length()).map { index ->
+            val item = ocrItemsJson.getJSONObject(index)
+            FinanceReceiptLineItem(
+                name = item.getString("name"),
+                quantity = nullableString(item, "quantity"),
+                unitPrice = nullableString(item, "unitPrice"),
+                lineSum = nullableString(item, "lineSum"),
+            )
+        }
+        val reconciliation = FinanceReceiptReconciliation(
+            algorithmVersion = reconciliationJson.getString("algorithmVersion"),
+            decision = reconciliationJson.getString("decision"),
+            selectedReader = nullableString(reconciliationJson, "selectedReader"),
+            mismatchFields = reconciliationJson.getJSONArray("mismatchFields").stringValues(),
+            ocrItemsTotal = nullableString(reconciliationJson, "ocrItemsTotal"),
+            visionItemsTotal = nullableString(reconciliationJson, "visionItemsTotal"),
+            allowedDifference = nullableString(reconciliationJson, "allowedDifference"),
+            ocrItemsReconciled = reconciliationJson.getBoolean("ocrItemsReconciled"),
+            visionItemsReconciled = reconciliationJson.getBoolean("visionItemsReconciled"),
+            itemEvidence = (0 until evidenceJson.length()).map { index ->
+                val item = evidenceJson.getJSONObject(index)
+                FinanceReceiptItemEvidence(
+                    visionOrdinal = item.getInt("visionOrdinal"),
+                    ocrOrdinal = nullableInt(item, "ocrOrdinal"),
+                    status = item.getString("status"),
+                )
+            },
+            suggestedTopUps = (0 until topUpsJson.length()).map { index ->
+                val item = topUpsJson.getJSONObject(index)
+                FinanceReceiptTopUpSuggestion(
+                    ocrOrdinal = item.getInt("ocrOrdinal"),
+                    name = item.getString("name"),
+                    lineSum = item.getString("lineSum"),
+                )
+            },
+        )
+        val vision = visionJson?.let { value ->
+            FinanceReceiptVisionReading(
+                store = nullableString(value, "store"),
+                date = nullableString(value, "date"),
+                total = nullableString(value, "total"),
+                items = value.getJSONArray("items").objectMaps(),
+                provider = nullableString(value, "provider"),
+                modelVersion = nullableString(value, "modelVersion"),
+                promptVersion = nullableString(value, "promptVersion"),
+                fallbackReason = nullableString(value, "fallbackReason"),
+            )
+        }
+        return FinanceReceiptReading(
+            text = json.getString("text"),
+            words = words,
+            provider = nullableString(json, "provider"),
+            modelVersion = nullableString(json, "modelVersion"),
+            promptVersion = nullableString(json, "promptVersion"),
+            confidence = nullableDouble(json, "confidence"),
+            ocrTotal = nullableString(json, "ocrTotal"),
+            ocrItems = ocrItems,
+            reconciliation = reconciliation,
+            visionFallbackReason = nullableString(json, "visionFallbackReason"),
+            ocrFallbackReason = nullableString(json, "ocrFallbackReason"),
+            vision = vision,
+        )
+    }
+
+    private fun JSONArray.stringValues(): List<String> =
+        (0 until length()).map { index -> getString(index) }
+
+    private fun JSONArray.objectMaps(): List<Map<String, Any?>> =
+        (0 until length()).map { index -> jsonObjectMap(getJSONObject(index)) }
+
+    private fun jsonObjectMap(json: JSONObject): Map<String, Any?> =
+        json.keys().asSequence().associateWith { key -> jsonValue(json.get(key)) }
+
+    private fun jsonValue(value: Any): Any? = when (value) {
+        JSONObject.NULL -> null
+        is JSONObject -> jsonObjectMap(value)
+        is JSONArray -> (0 until value.length()).map { index -> jsonValue(value.get(index)) }
+        else -> value
     }
 
     private fun receiptItem(json: JSONObject) = FinanceReceiptItem(
@@ -1046,4 +1192,7 @@ internal object FinanceModels {
 
     private fun nullableInt(json: JSONObject, key: String): Int? =
         if (!json.has(key) || json.isNull(key)) null else json.getInt(key)
+
+    private fun nullableDouble(json: JSONObject, key: String): Double? =
+        if (!json.has(key) || json.isNull(key)) null else json.getDouble(key)
 }

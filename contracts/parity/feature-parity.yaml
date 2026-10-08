@@ -269,9 +269,10 @@ features:
     evidence:
       - "Vision store/date/total remain unverified reading evidence; the OCR text and reading provenance stay owner-visible. PostgreSQL acceptance supplies non-null Vision claims while proving draft merchant/date/cash total and category remain unknown until user verification. The RU/EN review labels Vision fields unverified and shows its date; absent category evidence stays null/unknown and missing item amounts do not trigger a rule. Full Core, Python/contracts, Web and production build pass."
     android:
-      status: missing
-      scenario: "Android counterpart for F14: Защита магазина/даты от выдумывания, fallback категории"
-      gap: "No Android user screen or equivalent flow is verified for F14 yet."
+      status: partial
+      scenario: "Android provides an authenticated, scrollable read-only view of OCR/Vision evidence and provenance; Vision values remain explicitly unverified and missing category stays unknown."
+      gap: "F14.1 receipt evidence review is implemented and tested locally. Receipt edits, reconciliation/confirmation flows and live authenticated Android-to-Core E2E remain open in later F15-F18 slices."
+      evidence: "Android API 27 tests cover typed reading parsing, exact decimal strings, provenance/coordinates, nullable Vision and authenticated GET; Compose tests cover RU/EN unverified values, unknown category, unavailable reading, no transaction mutation, scroll access, and localized known/unknown fallback reasons."
     intentional_differences: []
   - id: F15
     feature: "Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"

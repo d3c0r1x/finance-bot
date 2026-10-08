@@ -4,7 +4,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -13,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -66,6 +66,163 @@ class FinanceReceiptScreensTest {
         compose.onNodeWithText("Черновик · проверьте данные").assertIsDisplayed()
         assertEquals(emptyList<String>(), created)
         assertEquals(emptyList<String>(), confirmed)
+    }
+
+    @Test fun visionReadingStaysUnverifiedAndUnknownDraftFieldsStayNullInRussianAndEnglish() {
+        val draft = receiptDraft().copy(merchant = null, receiptDate = null, cashTotal = null,
+            categoryCode = null, categorySource = "unknown")
+        val created = mutableListOf<String>()
+        val confirmed = mutableListOf<String>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = draft, receiptReading = receiptReading()),
+            onCreate = { type, amount, _ -> created += "$type:$amount" },
+            onConfirmDraft = { id, _ -> confirmed += id })
+
+        compose.onNodeWithTag("receipt-reading").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Непроверенное чтение Vision").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-vision-store").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Synthetic Vision Mart").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-vision-date").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("2026-10-04").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-vision-total").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("900.00").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-ocr-text").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("OCR ORIGINAL: TOTAL 120.00").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-category-unknown").performScrollTo().assertIsDisplayed()
+
+        assertNull(draft.merchant)
+        assertNull(draft.receiptDate)
+        assertNull(draft.cashTotal)
+        assertNull(draft.categoryCode)
+        assertEquals("unknown", draft.categorySource)
+        assertEquals(emptyList<String>(), created)
+        assertEquals(emptyList<String>(), confirmed)
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Unverified Vision reading").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-vision-store").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-vision-date").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-vision-total").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-category-unknown").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-draft").performScrollTo().assertIsDisplayed()
+        assertEquals(emptyList<String>(), created)
+        assertEquals(emptyList<String>(), confirmed)
+    }
+
+    @Test fun missingReceiptReadingShowsUnavailableStateWithoutFillingVerifiedFields() {
+        val draft = receiptDraft().copy(merchant = null, receiptDate = null, cashTotal = null,
+            categoryCode = null, categorySource = "unknown")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = draft, receiptReadingError = "not_found"))
+
+        compose.onNodeWithTag("receipt-reading-unavailable").assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading").assertDoesNotExist()
+        assertNull(draft.merchant)
+        assertNull(draft.receiptDate)
+        assertNull(draft.cashTotal)
+        assertNull(draft.categoryCode)
+        assertEquals("unknown", draft.categorySource)
+    }
+
+    @Test fun receiptFallbackReasonsUseLocalizedMessagesWithoutMachineCodes() {
+        val reading = receiptReading().copy(
+            visionFallbackReason = "VISION_UNAVAILABLE",
+            ocrFallbackReason = "OCR_INVALID_RESPONSE",
+            vision = requireNotNull(receiptReading().vision).copy(fallbackReason = "vision_model_unavailable"),
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptReading = reading))
+
+        val missing = mutableListOf<String>()
+        expectReceiptText(missing, "Резерв Vision: распознавание Vision временно недоступно")
+        expectReceiptText(missing, "Резерв OCR: OCR не смог обработать изображение")
+        expectReceiptText(missing, "Резерв модели Vision: выбранная модель Vision недоступна")
+        collectReceiptMachineCodes(missing)
+
+        compose.onNodeWithText("EN").performClick()
+        expectReceiptText(missing, "Vision fallback: Vision recognition is temporarily unavailable")
+        expectReceiptText(missing, "OCR fallback: OCR could not process the image")
+        expectReceiptText(missing, "Vision model fallback: selected Vision model is unavailable")
+        collectReceiptMachineCodes(missing)
+        assertEquals("Missing localized fallback text or exposed machine codes: ${missing.joinToString()}", emptyList<String>(), missing)
+    }
+
+    @Test fun unknownReceiptFallbackReasonUsesGenericLocalizedText() {
+        val reading = receiptReading().copy(ocrFallbackReason = "UNRECOGNIZED_FUTURE_CODE")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptReading = reading))
+
+        val missing = mutableListOf<String>()
+        expectReceiptText(missing, "Резерв OCR: Дополнительная информация о распознавании недоступна")
+        collectReceiptMachineCodes(missing)
+
+        compose.onNodeWithText("EN").performClick()
+        expectReceiptText(missing, "OCR fallback: Additional recognition details are unavailable")
+        collectReceiptMachineCodes(missing)
+        assertEquals("Missing generic fallback text or exposed machine code: ${missing.joinToString()}", emptyList<String>(), missing)
+    }
+
+    @Test fun coreReceiptFallbackCodesUseLocalizedExplanationsWithoutRawCodes() {
+        val visionCases = listOf(
+            Triple("VISION_RESPONSE_TOO_LARGE", "ответ Vision слишком велик для обработки", "Vision response is too large to process"),
+            Triple("VISION_UNSUPPORTED", "распознавание Vision не поддерживается", "Vision recognition is unsupported"),
+            Triple("VISION_INVALID_RESPONSE", "Vision вернул некорректный результат", "Vision returned an invalid result"),
+            Triple("VISION_TIMEOUT", "время распознавания Vision истекло", "Vision recognition timed out"),
+            Triple("VISION_INTERRUPTED", "распознавание Vision было прервано", "Vision recognition was interrupted"),
+            Triple("VISION_NOT_CONFIGURED", "распознавание Vision не настроено", "Vision recognition is not configured"),
+        )
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptReading = receiptReading()))
+        show(state.value, stateHolder = state)
+        val missing = mutableListOf<String>()
+
+        visionCases.forEach { (code, ru, _) ->
+            state.value = state.value.copy(receiptReading = receiptReading().copy(visionFallbackReason = code))
+            compose.waitForIdle()
+            expectReceiptText(missing, "Резерв Vision: $ru")
+            expectReceiptCodeAbsent(missing, code)
+        }
+        state.value = state.value.copy(receiptReading = receiptReading().copy(ocrFallbackReason = "OCR_UNAVAILABLE"))
+        compose.waitForIdle()
+        expectReceiptText(missing, "Резерв OCR: OCR временно недоступен")
+        expectReceiptCodeAbsent(missing, "OCR_UNAVAILABLE")
+
+        compose.onNodeWithText("EN").performClick()
+        visionCases.forEach { (code, _, en) ->
+            state.value = state.value.copy(receiptReading = receiptReading().copy(visionFallbackReason = code))
+            compose.waitForIdle()
+            expectReceiptText(missing, "Vision fallback: $en")
+            expectReceiptCodeAbsent(missing, code)
+        }
+        state.value = state.value.copy(receiptReading = receiptReading().copy(ocrFallbackReason = "OCR_UNAVAILABLE"))
+        compose.waitForIdle()
+        expectReceiptText(missing, "OCR fallback: OCR is temporarily unavailable")
+        expectReceiptCodeAbsent(missing, "OCR_UNAVAILABLE")
+
+        assertEquals("Missing mapped fallback text or exposed machine codes: ${missing.joinToString()}", emptyList<String>(), missing)
+    }
+
+    private fun expectReceiptText(missing: MutableList<String>, expected: String) {
+        try {
+            compose.onNodeWithText(expected).performScrollTo().assertIsDisplayed()
+        } catch (_: AssertionError) {
+            missing += expected
+        }
+    }
+
+    private fun collectReceiptMachineCodes(missing: MutableList<String>) {
+        listOf("VISION_RESPONSE_TOO_LARGE", "VISION_UNSUPPORTED", "VISION_INVALID_RESPONSE",
+            "VISION_TIMEOUT", "VISION_INTERRUPTED", "VISION_NOT_CONFIGURED", "VISION_UNAVAILABLE",
+            "OCR_UNAVAILABLE", "OCR_INVALID_RESPONSE", "vision_model_unavailable",
+            "UNRECOGNIZED_FUTURE_CODE").forEach { expectReceiptCodeAbsent(missing, it) }
+    }
+
+    private fun expectReceiptCodeAbsent(missing: MutableList<String>, code: String) {
+        try {
+            compose.onNodeWithText(code, substring = true).assertDoesNotExist()
+        } catch (_: AssertionError) {
+            missing += "raw code: $code"
+        }
     }
 
     @Test fun retryableJobKeepsStatusRefreshAvailable() {
@@ -175,6 +332,24 @@ class FinanceReceiptScreensTest {
             null, null, null, null, null, null, null, null, null, null, 1)),
         itemCount = 1, createdAt = "2026-10-08T09:01:00Z",
     )
+
+    private fun receiptReading() = FinanceModels.receiptReading(org.json.JSONObject("""
+        {"text":"OCR ORIGINAL: TOTAL 120.00",
+         "words":[{"text":"TOTAL","confidence":96.0,"box":{"x":31,"y":17,"width":52,"height":10}}],
+         "provider":"tesseract","modelVersion":"tesseract-5.3.0","promptVersion":"tesseract-ocr.v2",
+         "confidence":0.9600,"ocrTotal":"120.00",
+         "ocrItems":[{"name":"Bread","quantity":"1","unitPrice":"120.00","lineSum":"120.00"}],
+         "reconciliation":{"algorithmVersion":"receipt-reconciliation.v1","decision":"review_required",
+           "selectedReader":"ocr","mismatchFields":["total"],"ocrItemsTotal":"120.00",
+           "visionItemsTotal":"900.00","allowedDifference":"0.02","ocrItemsReconciled":true,
+           "visionItemsReconciled":false,"itemEvidence":[{"visionOrdinal":1,"ocrOrdinal":1,
+             "status":"corroborated"}],"suggestedTopUps":[]},
+         "visionFallbackReason":null,"ocrFallbackReason":null,
+         "vision":{"store":"Synthetic Vision Mart","date":"2026-10-04","total":"900.00",
+           "items":[{"name":"Model Bread","quantity":"1","unitPrice":"900.00","lineSum":"900.00"}],
+           "provider":"synthetic-vision","modelVersion":"synthetic-vision-v1",
+           "promptVersion":"vision-prompt-v1","fallbackReason":null}}
+    """))
 
     private fun show(state: FinanceUiState, onReceiptPick: () -> Unit = {},
                      onCreate: (String, String, String?) -> Unit = { _, _, _ -> },
