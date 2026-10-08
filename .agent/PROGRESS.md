@@ -77,23 +77,26 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 | F55 | Local AI, explicit cloud opt-in, no-Ollama fallback, model management | COMPLETE — local gates and all four GitHub workflows GREEN after contract-test correction | F54 | 5df8b06, 0edc20b |
 | F56 | Receipt inventory CLI, synthetic/private sample checks, CI privacy | COMPLETE — 11 focused tests, synthetic receipt regression, CI GREEN | F55 | ab4a38d |
 | F57 | Russian formatting, Telegram escaping, fonts, text fallback | COMPLETE — Python/contracts 199; Web 95/build; Android unit 4; Android 8.1 instrumentation 50; APK built/launched; pushed; no workflow run returned | F56 | c7d7995 |
-| F58 | Safe configuration, cross-platform legacy launchers, docs, MIT notice | LOCAL GREEN — focused tests and script checks pass; Docker unavailable; Compose remains unimplemented per PLAN.md | F57 | pending |
+| F58 | Safe configuration, cross-platform legacy launchers, docs, MIT notice | COMPLETE LOCALLY — focused tests and script checks pass; pushed; no workflow run returned. Docker unavailable; Compose remains unimplemented per PLAN.md | F57 | 853d42f |
+| F59.1 | Explicit Android parity map for every F01–F58 registry row | COMPLETE — registry test confirms 58 mappings: 28 partial, 28 missing, 2 justified N/A | F59 | pending |
+| F59 | Android RU/EN parity for F01–F58, Java API E2E, installed emulator APK | IN PROGRESS — inventory complete; screens and 50-test emulator suite exist; missing flows and live Core/OIDC E2E remain | F01–F58 | pending |
 | F10 | Private receipt storage and malware scan | COMPLETE — authenticated SeaweedFS S3 + real ClamAV integration passed in CI | F11 | 68253b7 |
 
 ## Current goal
 
-- ID and outcome: F58 — secure runtime configuration, Windows/Linux developer entrypoints, current documentation, and MIT notice.
-- Status: LOCAL GREEN — focused tests pass; commit/push remains.
-- Acceptance: safe environment template; ignored secret/data files; Docker context excludes secrets; Windows/Linux launcher and documentation; MIT copyright preserved.
-- Evidence: `docs/superpowers/plans/2026-10-08-f58-runtime-config.md`. New acceptance tests were RED (5 failed/1 passed), then GREEN with 13 focused F58/F57 tests.
+- ID and outcome: F59 — Android Kotlin/Compose RU/EN feature parity for F01–F58, shared Java API, installed APK, and E2E.
+- Status: IN PROGRESS — F59.1 maps all 58 rows: 28 partial, 28 missing, 2 justified N/A. Existing UI includes onboarding, transactions, budgets, debts, reports, shopping, inflation, recurring items, and product decisions.
+- Acceptance: map every F01–F58 to Android behavior or justified platform-specific N/A; implement missing user flows; run installed APK on Android 6–8 emulator; prove authenticated live Java/Core/OIDC flow.
+- Evidence: `tests/test_f59_android_parity.py` and F59 `android` mappings in `contracts/parity/feature-parity.yaml`. Initial RED: 3 failed because Android mappings were absent/stale. GREEN: 4 parity/registry contract checks passed. Registry marks all unresolved flows explicitly; this inventory does not claim feature completion.
 - Evidence: F56 feature commit `ab4a38d` is pushed. GitHub run `37577879007` passed all workflow steps, including private-path guard, legacy suites, and empty JSON module smoke.
 - Ownership: `receipt_inventory.py`, `docs/EVALUATION.md`, and `.github/workflows/tests.yml` are tracked starting points. User-local data `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` remain untracked and out of scope.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `c7d7995` (F57 pushed). F58 changes are uncommitted.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `853d42f` (F58 pushed). User-owned untracked paths remain untouched.
 - F57 GREEN: Python/contracts/report/Telegram command suites — 199 passed; Web `pnpm test` — 95 passed; `pnpm build` passed. Android unit 4 passed, isolated Android 8.1/API 27 instrumentation 50 passed; debug APK installed/launched. SHA-256: `5D6D6F12A62697C1A693BFC6F328B98330931002E097307A168A2DA69D285E97`. `gh run list --commit c7d7995` returned no workflows.
 - F58 GREEN: `.venv\\Scripts\\python.exe -m pytest -p no:cacheprovider tests/test_f58_runtime_config.py tests/test_presentation_formatting.py -q` — 13 passed; `sh -n scripts/dev.sh`, PowerShell help mode, both launcher help outputs, `git diff --check`, and Git ignore probes passed. Docker CLI is unavailable, so no image/build-context runtime check was possible. Compose profiles do not exist yet, as stated in PLAN.md.
 - Privacy note: one accidental local no-argument CLI smoke did scan a photo under ignored `data/receipts`; it changed or copied no files. No receipt manifest was opened or committed. Do not run default local inventory again; use synthetic monkeypatched paths. This is not evidence about owner receipt quality.
 - F56 commit/push: `ab4a38d` (`feat(F56): add receipt evaluation module and privacy gate`); final progress update pending.
-- Next: review complete F58 diff; commit/push; inspect GitHub workflow result; then continue with remaining V1 delivery gates.
+- F58 commit/push: `853d42f`; `gh run list --commit 853d42f` returned no workflows.
+- Next: commit/push F59.1 map, inspect CI; then add a RED Android acceptance test for transaction repeat/undo (F08) and implement the smallest complete mobile flow.
 - Updated at: 2026-10-08, Europe/Moscow.
 
 ## E4.86 F52 Task 2a Core export request/status — 2026-10-07

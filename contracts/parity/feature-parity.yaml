@@ -12,6 +12,12 @@ features:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
     evidence:
       - "F01 command/menu acceptance is complete: /start, /menu, /help and the persistent Меню button return the keyboard; registered /link, /add, /history and /report flows are covered by the gateway command suite. Successful operation keyboards remain usable, while Core-bound actions require a selected actor context. Full Python/services/contracts, Web UI and Java Core checks pass. Live Telegram/Redis/TLS deployment remains a separate operational gate."
+    android:
+      status: partial
+      scenario: "Android counterpart for F01: Запуск, меню, `/start`, `/menu`, `/help`; `bot.py`, `handlers/main_menu.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F01 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F02
     feature: "Whitelist и роли из `config.py`, `utils/filters.py`"
@@ -27,6 +33,13 @@ features:
       - services/python/telegram_gateway/tests/test_commands.py
     evidence:
       - "F02 acceptance is complete: one-time OIDC link codes are hashed, short-lived, single-use, rate-limited, and redeemed only for the authenticated user chosen by Core. Actor tokens are stored as hashes and every action rechecks Telegram binding, active user, active tenant membership, current role, and permission; unknown and cross-tenant Telegram IDs are denied. Owner retains shared-write permissions; legacy partner maps to member/own-write permissions. PostgreSQL acceptance now links a partner member through the OIDC code and verifies the scoped context, with no userId disclosure or transaction.write.any. Policy, credential, link-code, and Core database suites pass. Live Telegram/Keycloak rollout and legacy database import remain separate deployment/migration gates."
+    android:
+      status: partial
+      scenario: "Android counterpart for F02: Whitelist и роли из `config.py`, `utils/filters.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F02 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F03
     feature: "Onboarding: имя, доход, пропуск, назад, бюджет, повторная настройка; `handlers/onboarding.py`"
@@ -39,6 +52,12 @@ features:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
     evidence:
       - "Web onboarding now has welcome, identity, optional-income and explicit budget-choice steps. Back navigation preserves workspace/member values; the 70%-of-income proposal is never applied without a user action. Existing users can rerun setup through their member profile without creating a tenant. Web tests prove profile-only PATCH, unchanged transaction history, optional income, back navigation and apply/keep choices; PostgreSQL acceptance proves profile edits retain posted operations and tenant membership. Full web suite passes 22 tests; TypeScript and Vite production build pass; Java Core check passes 123 tests. Android onboarding/profile flows have emulator coverage under F59."
+    android:
+      status: partial
+      scenario: "Android counterpart for F03: Onboarding: имя, доход, пропуск, назад, бюджет, повторная настройка; `handlers/onboarding.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F03 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F04
     feature: "Имя из Telegram, своё имя, план дохода, статус onboarding; `services/profile.py`"
@@ -51,6 +70,12 @@ features:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
     evidence:
       - "Member profile is distinct from workspace name and includes planned income, onboarding state, timezone, and currency. Source provenance distinguishes user-selected names from workspace defaults; Telegram may fill or refresh only an unchosen fallback. Link redemption and /start or /menu refresh use the verified linked user, and profile edits permanently protect the user's chosen name. PostgreSQL API acceptance covers initial sync, explicit-name protection, later sync after a profile edit, and preserved profile fields. Full Java Core check passes 126 tests; Python/contracts pass 143 with 3 provider-dependent skips. Live Telegram/Keycloak deployment remains an operational gate, not a parity gap."
+    android:
+      status: partial
+      scenario: "Android counterpart for F04: Имя из Telegram, своё имя, план дохода, статус onboarding; `services/profile.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F04 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F05
     feature: "Свободный текст расхода/дохода/платежа; `ai/llm.py`, `handlers/expenses.py`"
@@ -67,6 +92,12 @@ features:
       - services/python/telegram_gateway/tests/test_commands.py
     evidence:
       - "Java draft creation invokes the Python gateway, validates model output, and stores provider/model/prompt provenance. Russian amounts normalize `2 тыс`, `1,5к`, `2 000`, and decimal-comma forms without rounding; malformed JSON and an unavailable/disabled model fail safely. RU/EN Android and Telegram `/add` submit free text with stable idempotency and render a review draft. Expense, income, and debt-payment drafts remain pending until explicit confirmation; PostgreSQL acceptance proves no transaction exists before confirmation and stale edits fail safely. Focused Python tests pass 33/33 and the PostgreSQL confirmation scenario passes. Receipt-photo OCR and broader legacy Telegram flows are tracked under F10-F18 and F01/E4."
+    android:
+      status: partial
+      scenario: "Android counterpart for F05: Свободный текст расхода/дохода/платежа; `ai/llm.py`, `handlers/expenses.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F05 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F06
     feature: "Карточка подтверждения, сумма, категория, подкатегория, быстрые суммы, отмена"
@@ -80,6 +111,12 @@ features:
       - services/python/telegram_gateway/tests/test_commands.py
     evidence:
       - "Versioned draft API supports correction, confirmation and cancellation with If-Match; stale mutations fail safely and confirmation is idempotent. RU/EN Android and Telegram show model provenance and require explicit confirmation. Telegram edits amount, category, subcategory, description and date; quick amounts update only amount. Android exposes the same editable review fields, quick amounts, cancel and confirm actions. Web provides editable review and cancel. PostgreSQL proves pre-confirm zero writes and stale-version rejection. Verification: Java Core has 126 passing tests; web App suite 17/17; Telegram command suite 14/14; Android connected instrumentation 20/20 with the debug APK installed on the emulator. Live Telegram delivery remains an E4 operational gate."
+    android:
+      status: partial
+      scenario: "Android counterpart for F06: Карточка подтверждения, сумма, категория, подкатегория, быстрые суммы, отмена"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F06 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F07
     feature: "Добавление дохода и источника операции"
@@ -93,6 +130,12 @@ features:
       - services/python/intelligence/tests/test_transaction_drafts.py
     evidence:
       - "Manual and Telegram income retain the source in description, persist source=text_ai for AI extraction, and preserve the local transaction date. The Telegram review card labels the source and requires explicit confirmation. PostgreSQL acceptance proves incomeTotal rises while expenseTotal and budget spend stay zero. Python services/contracts pass 145 tests with 1 integration-only skip; Java Core check passes 123 tests, including the PostgreSQL income/source/date case."
+    android:
+      status: partial
+      scenario: "Android counterpart for F07: Добавление дохода и источника операции"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F07 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F08
     feature: "История последних операций, повтор траты, отмена последней; `main_menu.py`"
@@ -106,6 +149,10 @@ features:
       - apps/web/src/App.test.tsx
     evidence:
       - "Core returns the current member's latest posted history, creates an AI-free repeat draft with copied expense fields and idempotent keys, then marks confirmed repeats with source=repeat. Telegram /history exposes repeat and latest-only undo; Core checks id/version against the newest posted row and delegates void compensation. Python command/client tests and live PostgreSQL acceptance pass; full Python/contracts pass 144 with 1 skip and full Java Core check passes 122 tests."
+    android:
+      status: missing
+      scenario: "Android counterpart for F08: История последних операций, повтор траты, отмена последней; `main_menu.py`"
+      gap: "No Android user screen or equivalent flow is verified for F08 yet."
     intentional_differences: []
   - id: F09
     feature: "Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"
@@ -118,6 +165,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "RU/EN web now creates, edits, repeats and voids all supported transaction types; filters by member, period, type and search; preserves category, subcategory, description, source and member-local date; owner/admin may assign or reassign only active members. Debt-payment edits reverse the prior balance effect and apply the new payment atomically; void compensates it. PostgreSQL acceptance covers family access and assignment permissions, debt compensation and stale versions. Web App tests pass 21/21; TypeScript/Vite build and OpenAPI contract suite pass; full Java Core check passes with PostgreSQL enabled. Live Keycloak browser/API remains tracked under E2/F59."
+    android:
+      status: missing
+      scenario: "Android counterpart for F09: Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"
+      gap: "No Android user screen or equivalent flow is verified for F09 yet."
     intentional_differences: []
   - id: F10
     feature: "Фото чека, прогресс, draft; `expenses.py`"
@@ -137,6 +188,10 @@ features:
       - .github/workflows/receipt-storage.yml
     evidence:
       - "Core validates JPEG/PNG uploads, stores private quarantine objects, scans with ClamAV, runs a durable leased OCR job, saves one owner-scoped review draft and OCR evidence, and never posts a transaction. RU/EN Web tests cover upload, bounded progress polling and opening OCR review. Full local checks pass: Core 177 tests (0 failures, 2 container-gated skips), Python/contracts 211 passed/3 skipped, Web 34/34 plus production build, legacy smoke/handler/receipt scripts pass. GitHub run 37406496544 passed the authenticated SeaweedFS S3 operations and real ClamAV malware-scanning integration on commit 68253b7; F10 is complete."
+    android:
+      status: missing
+      scenario: "Android counterpart for F10: Фото чека, прогресс, draft; `expenses.py`"
+      gap: "No Android user screen or equivalent flow is verified for F10 yet."
     intentional_differences: []
   - id: F11
     feature: "Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
@@ -154,6 +209,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "The ordered Ollama Vision pool accepts at most three allowlisted tags, retains the model that answered, and fails over within the configured execution policy. A process-wide single-slot scheduler bounds Ollama residency; timeout, cancellation and slot release are tested. The adapter normalizes EXIF, strips metadata, bounds image size, validates exact JSON and retries one invalid response with a fixed repair prompt. Core preserves typed Vision-to-local-OCR and OCR-to-Vision fallback reasons; PostgreSQL tests prove either reader can produce only an unposted review draft. RU/EN Web shows model provenance/failover. Full Core/PostgreSQL check passes 183 tests (0 failures, 2 container-gated skips), Python/contracts 219 passed/3 skipped, Web 34/34 and production build. No local Ollama endpoint/model is configured, so live model quality remains unverified and F11 stays in progress."
+    android:
+      status: missing
+      scenario: "Android counterpart for F11: Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
+      gap: "No Android user screen or equivalent flow is verified for F11 yet."
     intentional_differences: []
   - id: F12
     feature: "Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
@@ -166,6 +225,10 @@ features:
       - services/python/intelligence/tests/test_app.py
     evidence:
       - "Local Tesseract uses bounded Pillow/OpenCV crop, grayscale, upscale, Otsu threshold, deskew and denoise variants; at most two variants run concurrently and results remain in declared order. The best reading is selected by text confidence and repeated numeric columns; boxes map back to source-image coordinates. Split decimal/thousands tokens are repaired only when geometry is close. Missing item values are reread from a crop in the inferred total column with a numeric whitelist. Synthetic ordinary and narrow receipts, a 4-degree tilted receipt, column clustering, split numbers, targeted reread and stable parallel order are tested. The installed local Tesseract passed ordinary and tilted-narrow synthetic OCR."
+    android:
+      status: missing
+      scenario: "Android counterpart for F12: Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
+      gap: "No Android user screen or equivalent flow is verified for F12 yet."
     intentional_differences: []
   - id: F13
     feature: "Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
@@ -178,6 +241,10 @@ features:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
     evidence:
       - "Tesseract extracts only coordinate-backed OCR item rows and labeled totals; Java compares OCR and Vision with exact decimal arithmetic and one-to-one row use. A unique top-up of at most three unused OCR rows is exposed only for an unambiguous Vision gap, with ordinals and values retained; ambiguity stays review-required and creates no transaction. PostgreSQL worker/API acceptance proves both readings and suggestions remain owner-scoped and unposted. RU/EN Web shows mismatch, provenance, evidence and top-ups. Full Core check passes 188 tests (0 failures, 2 container-gated skips), Python/contracts 221 passed/3 skipped, Web 34/34 plus production build; diff whitespace check passes."
+    android:
+      status: missing
+      scenario: "Android counterpart for F13: Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
+      gap: "No Android user screen or equivalent flow is verified for F13 yet."
     intentional_differences: []
   - id: F14
     feature: "Защита магазина/даты от выдумывания, fallback категории"
@@ -192,6 +259,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Vision store/date/total remain unverified reading evidence; the OCR text and reading provenance stay owner-visible. PostgreSQL acceptance supplies non-null Vision claims while proving draft merchant/date/cash total and category remain unknown until user verification. The RU/EN review labels Vision fields unverified and shows its date; absent category evidence stays null/unknown and missing item amounts do not trigger a rule. Full Core, Python/contracts, Web and production build pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F14: Защита магазина/даты от выдумывания, fallback категории"
+      gap: "No Android user screen or equivalent flow is verified for F14 yet."
     intentional_differences: []
   - id: F15
     feature: "Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
@@ -205,6 +276,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Versioned receipt item add, edit and delete keep cash total unchanged. PostgreSQL acceptance exercises nine rows across pages of eight, adds a tenth row, edits and deletes with version checks, then changes the cash total only through explicit sync. RU Web tests cover add/delete, sync and page navigation; full Web tests/build and Core/PostgreSQL gates pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F15: Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
+      gap: "No Android user screen or equivalent flow is verified for F15 yet."
     intentional_differences: []
   - id: F16
     feature: "Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
@@ -219,6 +294,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Owner-scoped API lists prior same-owner receipts with the same total in the preceding ten minutes. Versioned duplicate/independent decisions are reversible and audited; a suspected duplicate cannot be confirmed, while two same-amount receipts marked independent produce distinct transactions. Receipt creation and confirmation idempotency keys replay without duplicate records. PostgreSQL API, policy, CSRF BFF, contract and RU/EN Web tests pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F16: Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
+      gap: "No Android user screen or equivalent flow is verified for F16 yet."
     intentional_differences: []
   - id: F17
     feature: "Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"
@@ -233,6 +312,10 @@ features:
       - apps/web/src/ReceiptsPanel.test.tsx
     evidence:
       - "The Java category policy covers exact 10% alcohol and 25% leisure thresholds, unknown amounts, and manual override. PostgreSQL acceptance persists rule-derived shares and human selection with version checks; RU/EN Web displays category provenance and accepts manual choice. Focused PostgreSQL, policy, Web and prior full contract/build gates pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F17: Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"
+      gap: "No Android user screen or equivalent flow is verified for F17 yet."
     intentional_differences: []
   - id: F18
     feature: "Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"
@@ -250,6 +333,10 @@ features:
       - apps/web/src/ReceiptsPanel.test.tsx
     evidence:
       - "Python accepts bounded ordinal/name-only context and strict amount-free model output. Java applies deterministic safety rules, removes repeated advice only across different products, defaults missing/invalid model opinions safely, and preserves rule/model/default sources by item ID. PostgreSQL acceptance proves the AI request contains no total or line sums, rule precedence wins over the model, totals do not change, and advice is audited/versioned. RU/EN Web, Python, Java, contract and PostgreSQL tests pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F18: Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"
+      gap: "No Android user screen or equivalent flow is verified for F18 yet."
     intentional_differences: []
   - id: F19
     feature: "Сохранение verdict/advice/verdict_source по позициям"
@@ -264,6 +351,10 @@ features:
       - apps/web/src/ReceiptsPanel.test.tsx
     evidence:
       - "PostgreSQL acceptance reviews two identical product names with distinct ordinal advice and amounts, verifies each response stays attached to its receipt item UUID, and confirms each audit snapshot records the same item ID and reason. A legacy row with verdict neutral and source/algorithm unknown remains unknown in the owner API and is never relabeled rule. Full Core check (190 tests, 0 failures, 2 container-gated skips), Python migration/contracts (44 passed, 2 skipped), and RU/EN receipt Web tests (7 passed) pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F19: Сохранение verdict/advice/verdict_source по позициям"
+      gap: "No Android user screen or equivalent flow is verified for F19 yet."
     intentional_differences: []
   - id: F20
     feature: "«Не согласен» с вердиктом, пагинация спорных строк"
@@ -278,6 +369,10 @@ features:
       - apps/web/src/ReceiptsPanel.test.tsx
     evidence:
       - "V17 stores tenant/user-scoped product decisions and append-only events. PostgreSQL proves duplicate names share a normalized key, disputed rows page in groups of eight, an allowed key hides matching rows, and revoke restores them. The same decision table suppresses repeat-waste warnings. RU/EN Web allows and revokes products. Focused PostgreSQL/unit tests, 44 Python migration/contracts tests (2 skipped), 7 Web receipt tests, and the full Core check pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F20: «Не согласен» с вердиктом, пагинация спорных строк"
+      gap: "No Android user screen or equivalent flow is verified for F20 yet."
     intentional_differences: []
   - id: F21
     feature: "Повторные предупреждения о необязательном товаре; `services/advice.py`"
@@ -292,6 +387,10 @@ features:
       - apps/web/src/ReceiptsPanel.test.tsx
     evidence:
       - "Java ports legacy token-overlap and SequenceMatcher-style signature similarity. Owner/BFF repeat-warning API scans only prior confirmed receipts, excludes current receipt, filters allowed keys, and streams history with a bounded JDBC fetch size. PostgreSQL proves prior-only results and zero warnings after the matching product is allowed. RU Web shows warning count, last amount and advice. Unit, PostgreSQL, migration/contract and Web tests pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F21: Повторные предупреждения о необязательном товаре; `services/advice.py`"
+      gap: "No Android user screen or equivalent flow is verified for F21 yet."
     intentional_differences: []
   - id: F22
     feature: "Семейные и личные месячные лимиты, общий лимит, reset"
@@ -305,6 +404,12 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Java monthly family/personal/category/total endpoints track separate versions and reset personal overrides; RU/EN Web, Android and Telegram expose family/personal edits and reset. Telegram mutations resolve opaque actor scope, require budget.write, use optimistic versions and idempotency keys, and cannot select another tenant. Family reporting keeps the family limit. PostgreSQL Telegram update/reset integration passes; gateway client/command tests pass."
+    android:
+      status: partial
+      scenario: "Android counterpart for F22: Семейные и личные месячные лимиты, общий лимит, reset"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F22 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F23
     feature: "Бюджет по доходу: 70%, округление; AI-предложение при ≥30 днях"
@@ -320,6 +425,12 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
       - "Java policy and PostgreSQL verify 70% of income, safe exact rounding, debt exclusion, the 30-day history gate, tenant isolation, pending state, explicit apply, and stale-base rejection. Telegram uses opaque actor context and an author/tenant-bound apply button. Python privacy/normalization and gateway tests pass (11); live synthetic budget golden case passes 1/1 at 100% on local Ollama qwen2.5:7b-instruct."
+    android:
+      status: partial
+      scenario: "Android counterpart for F23: Бюджет по доходу: 70%, округление; AI-предложение при ≥30 днях"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F23 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F24
     feature: "Алерты 90%/100%, остаток, прогноз месяца, темп"
@@ -338,6 +449,13 @@ features:
     evidence:
       - "Core snapshots monthly expense totals under a tenant/member transaction lock and returns one-time category and total 90%/100% crossings in the idempotent create response. PostgreSQL acceptance proves category near/exceeded/no-repeat, total near/exceeded with a disabled category limit, and no alert after thresholds were already crossed. Debt payments and refunds stay outside ordinary expense alerts."
       - "Member-timezone pace and projection tests cover December, leap February, elapsed/future periods and zero/low spend. Web, Android and Telegram present server-computed threshold alerts in RU/EN. PASS full Core check: 194 tests, 0 failures, 2 unrelated SeaweedFS/ClamAV integration skips; PostgreSQL API suite: 80 tests, 0 failures/skips; Python/contracts: 223 passed, 3 optional skips; Web: 35/35 plus production build; Android emulator: 23/23. Installed debug APK SHA-256 BED3716A17E748CBFFE2AF2E86D6B117C736C72FC348A7DE507D9A711B3B564F."
+    android:
+      status: partial
+      scenario: "Android counterpart for F24: Алерты 90%/100%, остаток, прогноз месяца, темп"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F24 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F25
     feature: "Недельный food limit и скользящие 7 дней; `services/forecast.py`"
@@ -353,6 +471,12 @@ features:
       - services/python/telegram_gateway/tests/test_commands.py
     evidence:
       - "Java exposes one rolling-food status DTO from budgets, dashboard and reports; Web, Android, Python reports, Telegram report captions, and scheduled digests display Core amounts through the shared `rolling_food_lines` renderer. Insufficient history never invents a baseline; disabled limits omit remaining amount. Python report/digest/worker/Telegram command regression: 71 passed; contracts: 46 passed, 2 skipped; full Core: 200 passed, 2 skipped; Web: 36 passed; Android instrumentation: 26 passed."
+    android:
+      status: partial
+      scenario: "Android counterpart for F25: Недельный food limit и скользящие 7 дней; `services/forecast.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F25 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F26
     feature: "«Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"
@@ -369,6 +493,12 @@ features:
       - services/python/telegram_gateway/tests/test_core_client.py
     evidence:
       - "Java calculates cash guidance synchronously from current posted member transactions, so it has no stale recurring projection cache. It uses actual income or planned fallback, reserves 10%, omits guidance without a usable plan, ignores missed paydays, and includes repeated charges through the payday (inclusive) or month end. A new PostgreSQL test inserts three current salary and subscription occurrences, then proves the immediately requested dashboard uses fresh values and charges due exactly on payday. Web, Android, and Telegram render the same Core DTO. Full Core: 201 passed, 2 integration skips; Web 36/36; Android instrumentation 26/26; Telegram command/client coverage included in 71 passing targeted tests."
+    android:
+      status: partial
+      scenario: "Android counterpart for F26: «Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F26 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F27
     feature: "Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
@@ -383,6 +513,12 @@ features:
       - services/python/telegram_gateway/tests/test_commands.py
     evidence:
       - "Java debt endpoints create debts, apply idempotent payments atomically and close zero-balance debts; PostgreSQL acceptance covers duplicate payment and exact balance effect. Web supports create, payment, adjustment and forecast; Android exposes debt cards and actions. Telegram `/debts` now displays only Core-scoped tenant balances, paid progress, rate, minimum payment and total; `/add` lists active Core-scoped debts and requires explicit confirmation. Verification: Core check with PostgreSQL 134/134, Telegram gateway 46/46, Web App 26/26/build and Android connected instrumentation 20/20. Full Android F01-F58 mapping remains under F59."
+    android:
+      status: partial
+      scenario: "Android counterpart for F27: Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F27 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F28
     feature: "Правка остатка долга через панель, возврат при отмене платежа"
@@ -395,6 +531,12 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
       - "Versioned Java balance adjustments append audit records; voiding debt-payment transactions restores the applied principal effect, including capped overpayment behavior. Web and Android expose balance correction. Full Java Core check executed all PostgreSQL acceptance cases: 134/134, zero failures/errors/skips; Web and Android acceptance/build gates pass."
+    android:
+      status: partial
+      scenario: "Android counterpart for F28: Правка остатка долга через панель, возврат при отмене платежа"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F28 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F29
     feature: "Прогноз погашения с процентами; `services/analytics.py`"
@@ -408,6 +550,12 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
       - "Java payoff estimate accounts for interest without posting it to balances, returns zero for closed debts and null when payment is insufficient or the horizon exceeds 600 months. Web and Android display the estimate basis. Forecast unit, PostgreSQL endpoint acceptance, Web debt-flow test and Android connected suite pass; full Java Core check passes 134/134."
+    android:
+      status: partial
+      scenario: "Android counterpart for F29: Прогноз погашения с процентами; `services/analytics.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F29 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F30
     feature: "Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"
@@ -424,6 +572,12 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Java and Telegram share ReportService/FinanceReport: PostgreSQL acceptance verifies actor-scoped personal/family periods, inclusive dates, and rejects forged tenant/subject; report metrics keep income, expense, refund, debt payments and weekend share separate. Telegram /report accepts month, week, 90d and custom dates, and renders the shared DTO as PNG with text fallback. Web period/scope tests and production build pass; Android report controls are covered by the connected UI suite."
+    android:
+      status: partial
+      scenario: "Android counterpart for F30: Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F30 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F31
     feature: "Графики категорий, лимитов, дней, цен, необязательного"
@@ -438,6 +592,12 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Core-owned period/category/day/limit data drives RU/EN Web and Android charts plus Telegram PNG; zero-spend dates stay present, overrun bars cap at 100% while exact negative remaining stays visible, and PNG failure falls back to text. F34 renders the authoritative F33 purchase history as real price charts in Web and Telegram PNG, only with at least two actual points; single-purchase history has no invented baseline/chart. F31.2 plots authoritative F40 optionalByDay values in Web, Android and Telegram PNG, and lists exact dates/amounts in Telegram text fallback. Unavailable/partial waste has no daily series; Python validates complete windows and never fills client values. GREEN: Web 49/49 plus TypeScript/Vite build, Python presentation/Telegram 114 passed, contracts 42 passed, Android 46/46 on isolated FinanceBotF38 and APK installed/launched (SHA-256 AACE4090332EE28A769688F50E62EFE080818A7B445F824540F0A66BD9BE3C5A). Commit `a07f7cb65cfab5dc76698bc9dc84ff28e1ca473d` pushed; GitHub workflows 37411323031 and 37411323045 passed. F31 complete."
+    android:
+      status: partial
+      scenario: "Android counterpart for F31: Графики категорий, лимитов, дней, цен, необязательного"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F31 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F32
     feature: "Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
@@ -457,6 +617,13 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
       - "PostgreSQL stores versioned member preferences, unique local-date intents, leases, and delivery attempts. Core materializes local daily/weekly occurrences, honors quiet hours, coalesces overdue windows, leases with SKIP LOCKED, and returns only its report DTO. Python renders RU/EN, suppresses no-data reports, classifies permanent/retryable Telegram failures, and acknowledges bounded attempts. Web and Android expose language, local times, weekday, enable switches, and paired quiet hours with version checks. Defaults remain daily 21:00 and Sunday 19:00 in the member timezone. ADR-016 records at-least-once handling of ambiguous Telegram acknowledgements. Verification: Core 200 passed/2 skipped; Android emulator instrumentation 26/26; Web 36/36 and TypeScript; Telegram renderer/worker/client/commands 71/71; migration/OpenAPI contracts 46 passed/2 skipped; debug APK built and installed on a clean emulator."
+    android:
+      status: partial
+      scenario: "Android counterpart for F32: Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F32 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F33
     feature: "Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
@@ -472,6 +639,12 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Go `price-projection.v1` computes exact unit prices, prior-only medians and bounded up/down signals; it excludes the current receipt, future points, conflicting known brands/packages and cross-member history. Core writes `receipt.confirmed` to the transactional outbox and exposes owner/member-authorized price history through Core and BFF. The Go Kafka group writes to ClickHouse before synchronous offset commit, retries boundedly, and sends invalid event metadata to DLQ without financial payload. Public and internal schemas consistently define median, change, fractional relative value (0.125000 means 12.5 percent), signal and history. Web lazily loads this Core result only for confirmed receipt items and plots real purchase points; no-history response shows current price without invented baseline or chart. F34 adds member-scoped catalog/search, Web route and Telegram `/price` PNG over this history API. GitHub run 37411323045 passed Go tests/vet and its `go-price-integration` job started ClickHouse and Redpanda, then passed Kafka-to-ClickHouse price projection/replay and recurring projection/replay on commit `a07f7cb`; the F33 runtime gate is complete."
+    android:
+      status: partial
+      scenario: "Android counterpart for F33: Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F33 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F34
     feature: "Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
@@ -492,6 +665,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Go implements exact member-scoped catalog/search over confirmed price history; blank-query catalog threshold is 3 purchases, search threshold is 1, and chart requires 2 actual purchase points. Core resolves active membership for Web and authenticated Telegram actor, Web exposes `/products`, and Telegram `/price` renders actual history to PNG. One purchase has no fabricated baseline or chart; cheapest merchant means cheapest observed historical purchase. GREEN: Go suite/vet/Linux build; Core check plus `productCatalogUsesAuthenticatedMemberScope` against an isolated PostgreSQL 18.6 database; Web 40/40 + production build; Python presentation/Telegram 84 passed; contracts 48 passed/2 optional skipped; `git diff --check`. F34 acceptance is complete. F33 live ClickHouse replay remains a separate integration gate."
+    android:
+      status: missing
+      scenario: "Android counterpart for F34: Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
+      gap: "No Android user screen or equivalent flow is verified for F34 yet."
     intentional_differences: []
   - id: F35
     feature: "Покупки по ритму, медиана интервалов, стоимость списка"
@@ -510,6 +687,12 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
       - "F35 preserves the legacy `services/shopping.py` policy: minimum 3 confirmed purchases, median cadence and unit-price estimate, 3-day due horizon, expiry after 2 overdue intervals, and explicit no-inventory wording. Go deduplicates same-receipt rows and scopes candidates by tenant/member. Core exposes authenticated Web/BFF and Telegram actor routes; Telegram `/shopping`, Web, and Android present localized estimates without claiming stock inventory. GREEN: Go `go test ./...` + `go vet ./...`; Core `check` 216 tests/0 failures (88 environment/container-gated skips) plus PostgreSQL `TransactionApiPostgresTest` 86/86 on isolated PostgreSQL 18.6, including both shopping member-scope tests; Python Telegram/presentation 87/87; contracts 49 passed/2 optional skips; Web 42/42 + production build; Android emulator instrumentation 29/29, debug package installed (SHA-256 `01BA6456F816407E7C6A5BF0903B458AD2D774B64BD787C775B1E77620655049`); `git diff --check` clean. F35 is complete."
+    android:
+      status: partial
+      scenario: "Android counterpart for F35: Покупки по ритму, медиана интервалов, стоимость списка"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F35 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F36
     feature: "«Уже купил», mute/unmute, блокировки, копирование закупки"
@@ -528,6 +711,12 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "Bought marks are member-scoped and never create a ledger entry; they expire after one median interval and stop suppressing after a later real receipt. Muted and confirmed-blocked candidates stay visible with explanations, while list copy contains active candidates only. Core full check with PostgreSQL acceptance passes; Python Telegram/presentation 91 passed; Web 44 passed and production build passes; contracts 51 passed/2 optional skips; Android emulator instrumentation 31/31 passes. Installed debug APK matches the built artifact, SHA-256 7D7654246341328548CC5D2CE0AD1416C78EDB03171EA3820B7DAE05B43ED82B. `git diff --check` passes with line-ending notices only."
+    android:
+      status: partial
+      scenario: "Android counterpart for F36: «Уже купил», mute/unmute, блокировки, копирование закупки"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F36 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F37
     feature: "Личная инфляция по корзине, окно 90 дней, top rise/fall"
@@ -549,6 +738,13 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "F37 is complete at its feature acceptance boundary: Go `go test ./...` and `go vet ./...`; Core check and isolated PostgreSQL active-member API/BFF acceptance; Python Telegram/presentation 101 passed; contracts 52 passed/2 optional skips; Web 46/46 and production build; Android isolated-AVD instrumentation 36/36 with debug APK installed and launched. The user-facing result uses confirmed receipt prices and explicitly reports insufficient history without fabricated totals. F33 live Kafka/ClickHouse replay remains a separate NOT_RUN runtime gate."
+    android:
+      status: partial
+      scenario: "Android counterpart for F37: Личная инфляция по корзине, окно 90 дней, top rise/fall"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F37 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F38
     feature: "Регулярные расходы/доходы, недельные/месячные серии"
@@ -574,6 +770,13 @@ features:
     evidence:
       - "GREEN: Go tests and vet; Core check plus isolated PostgreSQL member-scoped API/BFF acceptance; Python presentation/Telegram 106 passed; contracts 54 passed/2 skipped; Web 48/48 and production build; Android isolated-AVD instrumentation 41/41. APK SHA-256 B0C275204C68A1F2FA9F02EB6E64F09BB327EA757B3ED3DD7D455B357E99F1C7 installed and launched on emulator-5556."
       - "The tagged Kafka/ClickHouse integration test is present and skipped locally because no endpoints are configured; contracts.yml provisions Redpanda and ClickHouse for CI."
+    android:
+      status: partial
+      scenario: "Android counterpart for F38: Регулярные расходы/доходы, недельные/месячные серии"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F38 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F39
     feature: "Отключение/возврат серии; `services/mutelist.py`"
@@ -595,6 +798,13 @@ features:
       - "Core rechecks active tenant membership and current series ID; RLS-protected `muted_suggestions` stores tenant/member/recurring preferences. Muted series leave active expense/income, due-soon, overdue, next-income and monthly totals, while the transaction ledger stays unchanged. Authenticated Core, CSRF-protected BFF and Telegram actor actions return a restorable projection. Web, Android and Telegram expose localized mute/restore controls."
       - "GREEN: Core `:services:core:check` and four focused PostgreSQL/API/BFF/Telegram service tests; Web 49/49 plus TypeScript/Vite production build; Python presentation/Telegram 109 passed; contracts 54 passed/2 optional skips; Android emulator instrumentation 42/42. Debug APK SHA-256 `3FB2169FD48E14321522548CDACA7DD0763DEB2701B2495B2222146DA7D5796E` installed and launched on `emulator-5556`."
       - "The first GitHub PostgreSQL job exposed that the persisted-event schema test omitted `receipt` events. Added the receipt v1 schema mapping. Follow-up GitHub Core PostgreSQL run `37399400317`, Python/contracts run `37399400232`, and bot tests run `37399400129` all passed."
+    android:
+      status: partial
+      scenario: "Android counterpart for F39: Отключение/возврат серии; `services/mutelist.py`"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F39 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F40
     feature: "Сумма/доля необязательного, источники verdict, исправленные позиции"
@@ -614,6 +824,13 @@ features:
     evidence:
       - "F40.1 implements the versioned Go advice-waste.v1 algorithm and authenticated internal API. Exact reviewed/optional totals, verdict/source provenance, owner-allowed correction visibility, deterministic input hash, local-day series, missing-amount behavior and strict request validation have golden/unit/contract coverage. F40.2 supplies only confirmed receipt lines joined to posted expense transactions in the exact member-local report window, applies each line owner's allowed decision, preserves nullable evidence, stops above 50,000 lines, and calls Go only after Core's database transaction ends. Analytics/query outage and overflow return explicit partial unavailability while finance totals remain available; no-line reports return complete no_reviewed_items. Core report/PostgreSQL acceptance (6 focused report tests), full Core check and contracts 42 passed locally. GitHub runs 37406496536 (Core/PostgreSQL), 37406496576 (Python/contracts), 37406496591 (bot) and 37406496544 (private S3 rerun) passed. Web/Android/Telegram presentation remains open as F40.3."
       - "F40.3 renders Core-owned optional/reviewed totals, share, source totals, top optional items and owner-allowed corrections in RU/EN Web and Android; Telegram PNG/text/caption show the same available values or an explicit unavailable reason/count without placeholder totals. GREEN: Web 49/49 plus TypeScript/Vite production build; Python presentation/Telegram 112 passed; Android instrumentation 45/45 with debug APK installed and launched on isolated emulator-5556, SHA-256 87D8757BA4FE4D9356476F620109B4797088FCAA2DBA973331FFE7047CF09F89. GitHub runs 37409599306 (general tests) and 37409599307 (Python/contracts) pass. Feature commit `ec1a373119263914f23f5e5f7fcbd021bd2947a7` is pushed. F31.2 optional-by-day chart is tracked separately."
+    android:
+      status: partial
+      scenario: "Android counterpart for F40: Сумма/доля необязательного, источники verdict, исправленные позиции"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F40 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F41
     feature: "«Не брать», отдельные догадки модели, подтверждение/разрешение"
@@ -630,6 +847,12 @@ features:
       - "F41.1 groups at least two harmful/unnecessary receipt verdicts by Core-supplied stable product key. Go returns versioned counts, exact-or-null amounts, latest advice, and source counts; only an exclusively model-sourced group is marked modelOnly. A modelOnly flag is evidence, not a purchase block or user decision. Strict authenticated internal HTTP and golden OpenAPI fixture are locally GREEN: full Go tests/vet and 43 contract tests pass. Core member-scoped decision overlay, list/query API, and RU/EN Web/Telegram/Android controls remain F41.2/F41.3 work."
       - "F41.1 GitHub runs 37413587958, 37413587940 and 37413587971 passed. F41.2a stores member-local confirmed/allowed decisions with idempotent versioning, audit, revoke and BFF CSRF; isolated PostgreSQL/Core/contract checks and GitHub runs 37414351352, 37414351376, 37414351356 and 37414351388 passed. F41.2b selects only the member's confirmed expense receipt verdicts, caps input at 50,000, calls Go after the DB transaction, and overlays human decisions in a separate list API. Model-only groups remain guesses and visible shopping candidates until confirmed; rule-backed groups are blocked unless allowed. Outage/overflow is explicit. Focused PostgreSQL/API, full Core check and 45 contract tests pass locally. RU/EN Web/Telegram/Android controls remain F41.3 work."
       - "F41.2b GitHub runs 37415625964, 37415625735, 37415625772 and 37415625724 passed. F41.3a Web now shows rule-backed blocks and model-only guesses separately in RU/EN, requires an explicit CSRF-protected confirm/allow decision, exposes undo for human confirmation, handles analytics outage, and labels blocked shopping candidates by their actual reason. Full Web Vitest 53/53 and TypeScript/Vite production build pass locally. Telegram and Android controls remain F41.3b/F41.3c work."
+    android:
+      status: partial
+      scenario: "Android counterpart for F41: «Не брать», отдельные догадки модели, подтверждение/разрешение"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F41 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F42
     feature: "Пересчёт старых verdict по текущим правилам и отчёт изменений"
@@ -642,6 +865,10 @@ features:
       - apps/web/src/ReceiptRecalculationPanel.test.tsx
     evidence:
       - "F42.1 policy is pushed as 6f80afc. F42.2 adds RLS-protected durable preview snapshots, explicit member-scoped API/BFF preview and apply, stale-preview 412, idempotent retry, unchanged receipt totals and review audit. F42.4 adds authenticated Go impact from equal before/after receipt facts, stores the exact report and profile currency in Core V36, and presents the delta or unavailable reason in Web. F42.5 adds private Telegram /recalculate with actor-scoped preview, stale callback rejection, viewer denial and separate Apply button. F42.6 adds owner-scoped run history: stable cursor pages for 20 runs and bounded 100-change detail pages; Core rejects limits outside 1..100 and retains existing 50,000-item recalculation cap. Web displays stored run status, impact delta and before/after decisions. GREEN: isolated PostgreSQL 18.6 Core `:check`, 245 tests/0 failures/2 skips; `TransactionApiPostgresTest` 102/102; Web 60/60 plus production build; contracts 47/47; `git diff --check`. GitHub CI and runtime/public HTTPS remain separate gates."
+    android:
+      status: missing
+      scenario: "Android counterpart for F42: Пересчёт старых verdict по текущим правилам и отчёт изменений"
+      gap: "No Android user screen or equivalent flow is verified for F42 yet."
     intentional_differences: []
   - id: F43
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"
@@ -656,6 +883,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "F43.1 adds deterministic Go calculation for repeated harmful-item ceiling, four member-local weekly trend buckets, cadence after advice, and separate F42 annotations. F43.2 adds member-scoped durable jobs, watermark snapshots, bounded retries, current-input write guard, public/BFF APIs and service-authenticated worker endpoints. F43.3 runs the worker in the existing analytics-api behind explicit opt-in configuration. F43.4 adds RU/EN Web reporting, pending/processing polling, stale/partial/unavailable states, writer-only explicit enqueue, theoretical-ceiling wording and non-causality copy. RED/GREEN: focused Web suite 7/7; full Web suite 67/67; production TypeScript/Vite build passes; Core PostgreSQL acceptance and migration/contracts suites passed; Go `test ./... -count=1` and `vet ./...` passed; `git diff --check` passes. Telegram report routes serve a separate period-based finance DTO and do not expose the stored F43 job/report DTO; F43 remains available in Web rather than introducing a second calculation. Public runtime/HTTPS and remote GitHub CI remain separate deployment gates."
+    android:
+      status: missing
+      scenario: "Android counterpart for F43: advice analytics report, weekly trend, and cautious savings effect"
+      gap: "No Android view or request flow exists for the member-scoped F43 advice analytics report."
     intentional_differences:
       - "F43 analytics is exposed in Web; the Telegram report endpoint cannot consume the stored F43 DTO without a new Core route and Telegram UI contract."
   - id: F44
@@ -669,6 +900,10 @@ features:
       - tools/contracts/test_contracts.py
     evidence:
       - "F44.1 Go candidate calculation and authenticated internal API are implemented with golden fixture, count/sum boundaries, confirmed-decision eligibility, group rules and limits. F44.2 Core persistence/one-active-goal/immutable accepted terms and F44.3 Web proposal UI remain open; F44 is not complete."
+    android:
+      status: missing
+      scenario: "Android counterpart for F44: Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
+      gap: "No Android user screen or equivalent flow is verified for F44 yet."
     intentional_differences: []
   - id: F45
     feature: "Ход цели, заметка при покупке, завершение, история, следующий кандидат"
@@ -677,6 +912,10 @@ features:
     status: planned
     tests: []
     evidence: []
+    android:
+      status: missing
+      scenario: "Android counterpart for F45: Ход цели, заметка при покупке, завершение, история, следующий кандидат"
+      gap: "No Android user screen or equivalent flow is verified for F45 yet."
     intentional_differences: []
   - id: F46
     feature: "Однократное сообщение исхода цели после успешной отправки"
@@ -685,6 +924,10 @@ features:
     status: planned
     tests: []
     evidence: []
+    android:
+      status: missing
+      scenario: "Android counterpart for F46: Однократное сообщение исхода цели после успешной отправки"
+      gap: "No Android user screen or equivalent flow is verified for F46 yet."
     intentional_differences: []
   - id: F47
     feature: "PDF Т-Банка: операции, даты, merchant/card, сверка итогов"
@@ -697,6 +940,10 @@ features:
       - contracts/schemas/tbank-statement-result.v1.schema.json
     evidence:
       - "A versioned in-memory PDF parser preserves signed Decimal operations, date/time, merchant/card, totals and valid/mismatch/unverifiable status. Core validates the strict parser contract and tenant-scoped staging; full parser/Python contracts pass. A generated Cyrillic T-Bank PDF parses through the authenticated HTTP endpoint with HTTP 200 and valid reconciliation."
+    android:
+      status: missing
+      scenario: "Android counterpart for F47: PDF Т-Банка: операции, даты, merchant/card, сверка итогов"
+      gap: "No Android user screen or equivalent flow is verified for F47 yet."
     intentional_differences: []
   - id: F48
     feature: "Preview импорта, подтверждение, покупки/доходы/refund, skipped"
@@ -709,6 +956,10 @@ features:
       - apps/web/src/ImportsPanel.test.tsx
     evidence:
       - "Core stages tenant-scoped rows, keeps parser quality unchanged, exposes signed included/excluded rows, supports explicit type overrides, and confirms a versioned batch. RU/EN Web tests cover reconciliation, fees, user selection, confirmation, duplicates and undo; all 30 Web tests and production build pass."
+    android:
+      status: missing
+      scenario: "Android counterpart for F48: Preview импорта, подтверждение, покупки/доходы/refund, skipped"
+      gap: "No Android user screen or equivalent flow is verified for F48 yet."
     intentional_differences: []
   - id: F49
     feature: "Дедупликация импорта, bulk insert, undo именно партии"
@@ -721,6 +972,10 @@ features:
       - services/core/src/main/resources/db/migration/V25__defer_bank_import_transaction_link.sql
     evidence:
       - "JDBC batch insertion writes imported transactions, audit records and transaction.created outbox events atomically. Tenant-scoped SHA-256 fingerprints use the full normalized description and occurrence number, preserving identical purchases and refunds. PostgreSQL tests cover replay, overlap, refund dedupe, CSRF, undo of only batch rows, and all-or-nothing conflict reporting. Core check passes."
+    android:
+      status: missing
+      scenario: "Android counterpart for F49: Дедупликация импорта, bulk insert, undo именно партии"
+      gap: "No Android user screen or equivalent flow is verified for F49 yet."
     intentional_differences: []
   - id: F50
     feature: "Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"
@@ -737,6 +992,10 @@ features:
       - "tools/contracts/test_contracts.py"
     evidence:
       - "Core check passes 153/153 with PostgreSQL 18.6 and no skips. The PostgreSQL API test verifies merchant-only AI input, 90-day cache reuse, personal-rule precedence, durable mapping readback and imported category. Python/contracts pass 208 with 3 optional database skips; Web passes 31/31 and production build."
+    android:
+      status: missing
+      scenario: "Android counterpart for F50: Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"
+      gap: "No Android user screen or equivalent flow is verified for F50 yet."
     intentional_differences: []
   - id: F51
     feature: "Уточнение магазина меняет ранее импортированные подходящие записи"
@@ -750,6 +1009,10 @@ features:
       - tools/contracts/test_core_migration.py
     evidence:
       - "F51 Core preview/apply scopes candidates to the importing tenant member and only committed, created bank-import expenses without explicit row category corrections or transaction edits. Apply checks the exact reviewed IDs, versions, categories and current mapping under transaction-scoped merchant locks shared with mapping saves and imports; stale changes reject atomically. Successful changes use the normal transaction update path, versions, audit and outbox, with safe retries. RU/EN Web requires a separate preview and Apply; BFF preview/apply enforce CSRF. PostgreSQL tests cover exact reviewed lists, stale manual edits, explicit import category, other-member isolation, idempotency, outbox and import-lock serialization. PASS Core 159/159, Python/contracts 209 passed with 3 optional skips, Web 32/32 and production build."
+    android:
+      status: missing
+      scenario: "Android counterpart for F51: Уточнение магазина меняет ранее импортированные подходящие записи"
+      gap: "No Android user screen or equivalent flow is verified for F51 yet."
     intentional_differences: []
   - id: F52
     feature: "CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
@@ -758,6 +1021,10 @@ features:
     status: planned
     tests: []
     evidence: []
+    android:
+      status: missing
+      scenario: "Android counterpart for F52: CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
+      gap: "No Android user screen or equivalent flow is verified for F52 yet."
     intentional_differences: []
   - id: F53
     feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
@@ -766,6 +1033,12 @@ features:
     status: planned
     tests: []
     evidence: []
+    android:
+      status: partial
+      scenario: "Android counterpart for F53: Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F53 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F54
     feature: "Статус Ollama/Vision/Tesseract; `services/health.py`"
@@ -779,6 +1052,10 @@ features:
       - apps/web/src/HealthPanel.test.tsx
     evidence:
       - "F54 capability checks use a private bounded endpoint, membership-protected BFF, sanitized diagnostics and RU/EN Web status. F55 additionally prevents remote inventory enumeration. Runtime availability of external providers remains deployment-only proof."
+    android:
+      status: missing
+      scenario: "Android counterpart for F54: Статус Ollama/Vision/Tesseract; `services/health.py`"
+      gap: "No Android user screen or equivalent flow is verified for F54 yet."
     intentional_differences: []
   - id: F55
     feature: "Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"
@@ -793,6 +1070,10 @@ features:
       - apps/web/src/HealthPanel.test.tsx
     evidence:
       - "Configured local model then exact installed preferences; embeddings excluded; inventory is bounded/cached and never enumerated remotely, including health. Missing local text model returns safe unavailable while Tesseract and manual finance flows stay independent. Cloud requires explicit policy and uses its configured model only. Operator setup is documented in docs/AI_MODELS.md; no live cloud inference or model-quality claim was tested."
+    android:
+      status: missing
+      scenario: "Android counterpart for F55: Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"
+      gap: "No Android user screen or equivalent flow is verified for F55 yet."
     intentional_differences: []
   - id: F56
     feature: "Проверки receipt inventory, synthetic/private samples, CI"
@@ -801,6 +1082,11 @@ features:
     status: planned
     tests: []
     evidence: []
+    android:
+      status: not_applicable
+      scenario: "Android counterpart for F56: Проверки receipt inventory, synthetic/private samples, CI"
+      approved_by: "PLAN.md and CONTINUATION.md platform-specific N/A allowance"
+      reason: "Developer/CI evaluation tooling has no mobile user flow; source feature is a receipt inventory CLI."
     intentional_differences: []
   - id: F57
     feature: "Русское форматирование, escaping Telegram, шрифты, текстовый fallback"
@@ -809,6 +1095,13 @@ features:
     status: planned
     tests: []
     evidence: []
+    android:
+      status: partial
+      scenario: "Android counterpart for F57: Русское форматирование, escaping Telegram, шрифты, текстовый fallback"
+      tests:
+        - "apps/android/app/src/test/java/com/decorix/finance/FinancePresentationTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+      gap: "Existing Android test reference does not prove every F57 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F58
     feature: "Конфигурация/секреты/Windows launch scripts/документация/MIT"
@@ -817,6 +1110,11 @@ features:
     status: planned
     tests: []
     evidence: []
+    android:
+      status: not_applicable
+      scenario: "Android counterpart for F58: Конфигурация/секреты/Windows launch scripts/документация/MIT"
+      approved_by: "PLAN.md and CONTINUATION.md platform-specific N/A allowance"
+      reason: "Build configuration, developer launch instructions, and license notices are repository operations, not mobile product behavior."
     intentional_differences: []
   - id: F59
     feature: Android Kotlin Compose client parity F01-F58 RU/EN
@@ -827,7 +1125,8 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
-      - "Android connected instrumentation passes 20/20 on FinanceCodex(AVD) - 14. The debug package `com.decorix.finance.debug` is installed on the emulator. APK SHA-256: 589AA444F8AB0A4446C211C320CEFFFB0FB0D7C6103296C6DB18017EED13AA98. RU/EN onboarding, profile, draft editing/cancel/confirm, budgets, debts, reports and charts have emulator coverage. F01-F58 feature-by-feature coverage and real Core/OIDC end-to-end acceptance remain incomplete."
+      - "Inventory now maps all F01-F58: 28 partial, 28 missing, 2 justified platform-specific N/A. Existing 50-test Android 8.1 instrumentation passed under F57, but feature E2E remains incomplete."
+      - "Real OIDC login, live Java/Core operation, and PostgreSQL tenant-isolation E2E remain required before F59 completion."
     intentional_differences: []
   - id: F60
     feature: Python AI Gateway capability routing and Vertex AI adapter seam

@@ -62,9 +62,9 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 
 ## Current goal
 
-- ID and outcome: F58 — secure configuration, Windows/Linux launchers, current docs, and MIT notice.
-- Status: LOCAL GREEN — 13 focused F57/F58 tests and launch-script checks pass; commit/push pending. Docker is unavailable. See `.agent/PROGRESS.md` for evidence.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `c7d7995` plus uncommitted F58 changes.
+- ID and outcome: F59 — Android Kotlin/Compose RU/EN parity for F01–F58, Java API E2E, and installed APK.
+- Status: IN PROGRESS — F59.1 maps all 58 rows: 28 partial, 28 missing, 2 justified N/A. The map tracks gaps; it does not claim parity completion.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `853d42f`.
 - Updated at: 2026-10-08 Europe/Moscow.
 
 ## Verification evidence
@@ -137,7 +137,7 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 
 ## Next action
 
-- Review, commit, and push F58; inspect GitHub workflows, then continue remaining V1 delivery gates.
+- Commit/push the F59.1 mapping; then build F08 transaction repeat/undo with RED Android acceptance first.
 
 ## E3.37 F40.2 Core optional-spend report — 2026-10-06 05:53 MSK
 
