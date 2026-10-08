@@ -1580,6 +1580,7 @@ Updated: 2026-10-08, Europe/Moscow.
 - TDD RED/GREEN: Compose tests first failed on absent filters/selection/empty states; Postgres acceptance first failed on grouped-type and member-name search; reversed-date runtime RED showed stale Compose state allowed an invalid callback. Fix validates current date fields synchronously and blocks malformed/reversed filters with localized errors.
 - GREEN: API 27 isolated Android instrumentation 64/64, 0 skipped; Core `:services:core:check` 290 tests, 2 environment-gated skips, 0 failures; PostgreSQL `TransactionApiPostgresTest` 136/136. Seaweed S3 and ClamAV integration tests were skipped because their services/configuration are unavailable. Isolated AVD `emulator-5558`; user AVDs untouched.
 - F09 Android remains partial: transaction edit, delete/void parity, and live authenticated Android-to-Core E2E are outstanding. F59 remains in progress; next continue with the next independently testable Android parity slice.
+- Commit/push: `32baed6` (`feat(F59): add Android server-side transaction filters`); no GitHub Actions run was created for the revision.
 
 ## E4.102 F09 Android transaction edit — 2026-10-08 10:44 MSK
 
@@ -1587,6 +1588,7 @@ Updated: 2026-10-08, Europe/Moscow.
 - Added owner/admin family editing and member-own editing; viewers cannot edit. Editor preserves identity/version/currency/source/account/debt/owner, validates amount and Core text limits, converts existing Instant through tenant timezone for date prefill, and sends PATCH with full update payload, quoted version, and retry-stable idempotency key. Stale/permission errors are localized. Debt payments require an active/retained debt and Core performs balance compensation.
 - GREEN: `FinanceScreensTest` 38/38; full isolated API 27 Android instrumentation 69/69, 0 skipped/failures; Android main/test Kotlin compilation and `git diff --check` passed. Core/Postgres unchanged from the preceding slice: Core check 290 with 2 environment-gated skips, `TransactionApiPostgresTest` 136/136.
 - F09 Android remains partial only for owner/admin transaction reassignment and real authenticated Android-to-Core E2E. Continue with the next independently testable F59 Android slice; do not mark F09 or F59 complete.
+- Commit/push: `0c5204c` (`feat(F59): edit Android transactions`); no GitHub Actions run was created for the revision.
 
 ## E4.103 F09 Android transaction reassignment — 2026-10-08 10:45 MSK
 
@@ -1594,3 +1596,4 @@ Updated: 2026-10-08, Europe/Moscow.
 - Added owner/admin-only active-member selection to the editor. Core remains the authority: member reassignment is denied, and missing/inactive target membership is rejected. Ordinary members can edit their own transaction only; viewers cannot edit.
 - GREEN: owner reassignment 1/1, admin reassignment 1/1, member self-vs-other 1/1; full isolated API 27 instrumentation suite XML reports 71 tests, 0 skipped, 0 failures/errors; Gradle log reports `BUILD SUCCESSFUL`. The invoking batch wrapper emitted `The batch file cannot be found` only after Gradle success; test XML and Gradle output both confirm GREEN. `git diff --check` passed.
 - F09 Android locally covers server-side filters/pagination, edit, and owner/admin reassignment. Only authenticated Android-to-Core E2E remains for its parity row; F59 stays in progress. Next follow F59.2 with the next high-priority Android feature slice.
+- Commit/push: `92db740` (`feat(F59): reassign Android transactions`); no GitHub Actions run was created for the revision.
