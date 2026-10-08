@@ -543,15 +543,32 @@ class FinanceScreensTest {
     @Test fun memberCanEditOwnPostedTransactionButNotAnotherMembersTransaction() {
         val own = transaction()
         val anotherMember = transaction().copy(id = "tx-other", description = "Other", ownerUserId = "user-2")
+        var saved: FinanceTransactionEdit? = null
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("member")),
             transactions = listOf(own, anotherMember),
-            transactionMembers = listOf(FinanceTenantMember("user-1", "User", "member"))))
+            transactionMembers = listOf(FinanceTenantMember("user-1", "User", "member"))),
+            onUpdateTransaction = { saved = it })
 
         compose.onNodeWithText("Операции").performClick()
         compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
         compose.onNodeWithTag("transaction-edit-tx-1").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("transaction-edit-tx-1").performClick()
+        compose.onNodeWithTag("transaction-edit-owner-picker").assertDoesNotExist()
+        compose.onNodeWithTag("transaction-edit-description").performTextReplacement("Такси уточнено")
+        compose.onNodeWithTag("transaction-edit-save").performScrollTo().performClick()
+        assertEquals("user-1", saved?.ownerUserId)
+        assertEquals(3L, saved?.version)
+        compose.onNodeWithTag("transaction-edit-cancel").performScrollTo().performClick()
         compose.onNodeWithTag("transaction-history").performScrollToIndex(4)
         compose.onNodeWithTag("transaction-edit-tx-other").assertDoesNotExist()
+    }
+
+    @Test fun ownerCanReassignPostedTransactionToActiveMemberByName() {
+        assertManagerCanReassignTransaction("owner")
+    }
+
+    @Test fun adminCanReassignPostedTransactionToActiveMemberByName() {
+        assertManagerCanReassignTransaction("admin")
     }
 
     @Test fun transactionEditorUsesTenantLocalDateAcrossUtcBoundary() {
@@ -776,6 +793,35 @@ class FinanceScreensTest {
     private fun assertEditableText(tag: String, expected: String) {
         compose.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(
             SemanticsProperties.EditableText, AnnotatedString(expected)))
+    }
+
+    private fun assertManagerCanReassignTransaction(role: String) {
+        val original = transaction().copy(ownerUserId = "member-old", memberName = "Sam Example")
+        val members = listOf(
+            FinanceTenantMember("manager-1", "Alex Example", role),
+            FinanceTenantMember("member-old", "Sam Example", "member"),
+            FinanceTenantMember("member-target", "Taylor Test", "member"),
+        )
+        var saved: FinanceTransactionEdit? = null
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant(role)),
+            transactions = listOf(original), transactionMembers = members),
+            onUpdateTransaction = { saved = it })
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithTag("transaction-edit-${original.id}").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-edit-owner-picker").performScrollTo().performClick()
+        compose.onNodeWithText("Taylor Test").performClick()
+        compose.onNodeWithText("Пользователь операции: Taylor Test").assertIsDisplayed()
+        compose.onNodeWithTag("transaction-edit-save").performScrollTo().performClick()
+
+        assertEquals(FinanceTransactionEdit(
+            id = original.id, version = original.version, type = original.type, amount = original.amount,
+            currency = original.currency, categoryCode = original.categoryCode,
+            subcategoryCode = original.subcategoryCode, description = original.description,
+            source = original.source, occurredAt = "2026-10-08T09:00:00Z", debtId = original.debtId,
+            ownerUserId = "member-target", accountId = original.accountId,
+        ), saved)
     }
 
     private fun tenant(role: String) = FinanceTenant("tenant-1", "Дом", role, "Europe/Moscow")

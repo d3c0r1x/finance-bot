@@ -170,10 +170,10 @@ features:
       - "RU/EN web now creates, edits, repeats and voids all supported transaction types; filters by member, period, type and search; preserves category, subcategory, description, source and member-local date; owner/admin may assign or reassign only active members. Debt-payment edits reverse the prior balance effect and apply the new payment atomically; void compensates it. PostgreSQL acceptance covers family access and assignment permissions, debt compensation and stale versions. Web App tests pass 21/21; TypeScript/Vite build and OpenAPI contract suite pass; full Java Core check passes with PostgreSQL enabled. Live Keycloak browser/API remains tracked under E2/F59."
     android:
       status: partial
-      scenario: "Android sends search, type, date range, and member filters to Core, uses the authenticated member picker, and appends results through cursor pagination. Owners/admins edit family operations; members edit only their own; viewers cannot edit. The editor sends exact money, version, and preserved owner/debt/account fields, validates Core limits, and edits dates in tenant-local time."
+      scenario: "Android sends search, type, date range, and member filters to Core, uses the authenticated member picker, and appends results through cursor pagination. Owners/admins edit family operations and can reassign to an active member; members edit only their own; viewers cannot edit. The editor sends exact money, version, and preserved owner/debt/account fields, validates Core limits, and edits dates in tenant-local time."
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Android owner/admin transaction reassignment and live authenticated Android-to-Core end-to-end proof remain incomplete."
+      gap: "Live authenticated Android-to-Core end-to-end proof remains incomplete."
     intentional_differences: []
   - id: F10
     feature: "Фото чека, прогресс, draft; `expenses.py`"

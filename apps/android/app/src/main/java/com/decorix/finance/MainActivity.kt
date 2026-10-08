@@ -854,7 +854,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             editingTransaction?.let { transaction ->
                                 item(key = "transaction-edit-${transaction.id}") {
                                     TransactionEditEditor(transaction, state.debts, state.tenants.first().timezone,
-                                        language, state.busy, onSave = onUpdateTransaction,
+                                        state.transactionMembers, canManageFamilyTransactions, language, state.busy,
+                                        onSave = onUpdateTransaction,
                                         onCancel = { editingTransaction = null })
                                 }
                             }
@@ -912,6 +913,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
 
 @androidx.compose.runtime.Composable
 private fun TransactionEditEditor(transaction: FinanceTransaction, debts: List<FinanceDebt>, timezone: String,
+                                 members: List<FinanceTenantMember>, canReassignOwner: Boolean,
                                  language: String, busy: Boolean, onSave: (FinanceTransactionEdit) -> Unit,
                                  onCancel: () -> Unit) {
     val russian = language == "ru"
@@ -926,6 +928,10 @@ private fun TransactionEditEditor(transaction: FinanceTransaction, debts: List<F
             java.time.Instant.parse(transaction.occurredAt).atZone(ZoneId.of(timezone)).toLocalDate().toString()
         }.getOrDefault(transaction.occurredAt.take(10)))
     }
+    var ownerUserId by androidx.compose.runtime.remember(transaction.id) {
+        mutableStateOf(transaction.ownerUserId.orEmpty())
+    }
+    var ownerMenuExpanded by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(false) }
     var debtId by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(transaction.debtId) }
     var typeMenuExpanded by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(false) }
     var debtMenuExpanded by androidx.compose.runtime.remember(transaction.id) { mutableStateOf(false) }
@@ -975,6 +981,27 @@ private fun TransactionEditEditor(transaction: FinanceTransaction, debts: List<F
             OutlinedTextField(value = date, onValueChange = { date = it }, enabled = !busy,
                 modifier = Modifier.fillMaxWidth().testTag("transaction-edit-date"),
                 label = { Text(if (russian) "Дата (ГГГГ-ММ-ДД)" else "Date (YYYY-MM-DD)") }, singleLine = true)
+            if (canReassignOwner) {
+                val selectedOwner = members.firstOrNull { it.userId == ownerUserId }
+                Box {
+                    TextButton(modifier = Modifier.testTag("transaction-edit-owner-picker"),
+                        enabled = !busy, onClick = { ownerMenuExpanded = true }) {
+                        Text("${if (russian) "Пользователь операции" else "Transaction member"}: " +
+                            (selectedOwner?.displayName ?: if (russian) "Выберите участника" else "Select member"))
+                    }
+                    DropdownMenu(expanded = ownerMenuExpanded, onDismissRequest = { ownerMenuExpanded = false }) {
+                        members.forEach { member ->
+                            DropdownMenuItem(
+                                modifier = Modifier.testTag("transaction-edit-owner-option-${member.userId}"),
+                                text = { Text(member.displayName) },
+                                onClick = {
+                                    ownerUserId = member.userId
+                                    ownerMenuExpanded = false
+                                })
+                        }
+                    }
+                }
+            }
             if (!valid) Text(if (russian)
                 "Проверьте сумму и поля: категория и источник обязательны (до 64 символов), подкатегория — до 64, описание — до 500."
             else "Check amount and fields: category and source are required (up to 64 characters), subcategory up to 64, description up to 500.",
@@ -1005,7 +1032,8 @@ private fun TransactionEditEditor(transaction: FinanceTransaction, debts: List<F
                             amount = amount.trim().replace(',', '.'), currency = transaction.currency,
                             categoryCode = categoryValue, subcategoryCode = subcategoryValue.takeIf(String::isNotEmpty),
                             description = descriptionValue, source = sourceValue, occurredAt = instant,
-                            debtId = debtId, ownerUserId = transaction.ownerUserId, accountId = transaction.accountId,
+                            debtId = debtId, ownerUserId = ownerUserId.takeIf(String::isNotBlank),
+                            accountId = transaction.accountId,
                         ))
                     }) { Text(if (russian) "Сохранить" else "Save") }
                 TextButton(modifier = Modifier.testTag("transaction-edit-cancel"), enabled = !busy,
