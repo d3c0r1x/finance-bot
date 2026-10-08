@@ -280,6 +280,10 @@ data class FinanceNotificationPreferences(
 
 data class FinanceTelegramLinkCode(val code: String, val expiresAt: String)
 
+data class FinanceTransactionPage(val items: List<FinanceTransaction>, val nextCursor: String?)
+
+data class FinanceTenantMember(val userId: String, val displayName: String, val role: String)
+
 data class FinanceBudgetAlert(val budgetKey: String, val threshold: String, val limit: String, val spent: String)
 
 data class TransactionDraftEdit(
@@ -295,6 +299,30 @@ data class TransactionDraftEdit(
 )
 
 internal object FinanceModels {
+    fun tenantMembers(json: JSONArray): List<FinanceTenantMember> =
+        (0 until json.length()).map { index ->
+            val member = json.getJSONObject(index)
+            FinanceTenantMember(member.getString("userId"), member.getString("displayName"), member.getString("role"))
+        }
+
+    fun transactionPage(json: JSONObject) = FinanceTransactionPage(
+        items = json.getJSONArray("items").let { rows ->
+            (0 until rows.length()).map { index -> transaction(rows.getJSONObject(index)) }
+        },
+        nextCursor = nullableString(json, "nextCursor"),
+    )
+
+    fun transactionQuery(pageSize: Int = 50, cursor: String? = null, from: String? = null, to: String? = null,
+                         type: String? = null, search: String? = null, memberId: String? = null): String {
+        require(pageSize in 1..200) { "Transaction page size must be from 1 to 200" }
+        val parameters = mutableListOf("pageSize=$pageSize")
+        listOf("cursor" to cursor, "from" to from, "to" to to, "type" to type,
+            "search" to search, "memberId" to memberId).forEach { (name, value) ->
+            if (!value.isNullOrBlank()) parameters += "$name=${android.net.Uri.encode(value)}"
+        }
+        return parameters.joinToString("&")
+    }
+
     fun transaction(json: JSONObject) = FinanceTransaction(
         id = json.getString("id"), tenantId = json.getString("tenantId"), type = json.getString("type"),
         amount = json.getString("amount"), currency = json.getString("currency"),

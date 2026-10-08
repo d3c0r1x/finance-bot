@@ -25,6 +25,51 @@ class FinanceModelsTest {
         assertNull(transaction.debtId)
     }
 
+    @Test fun parsesTransactionPageAndRetainsOpaqueNextCursor() {
+        val page = FinanceModels.transactionPage(JSONObject("""
+            {"items":[{"id":"tx-1","tenantId":"tenant-1","type":"expense","amount":"0.10",
+             "currency":"RUB","categoryCode":"food","subcategoryCode":null,"description":"Чай",
+             "source":"manual","occurredAt":"2026-10-08T09:00:00Z","accountId":null,"status":"posted",
+             "version":1,"createdAt":"2026-10-08T09:00:00Z","memberName":"User","debtId":null,
+             "ownerUserId":"user-1"}],"nextCursor":"opaque-cursor-2"}
+        """.trimIndent()))
+
+        assertEquals("0.10", page.items.single().amount)
+        assertEquals("opaque-cursor-2", page.nextCursor)
+        assertEquals("pageSize=50&cursor=opaque%20cursor&from=2026-10-01&to=2026-10-31&type=expense&search=tea%20coffee&memberId=member%201",
+            FinanceModels.transactionQuery(cursor = "opaque cursor", from = "2026-10-01", to = "2026-10-31",
+                type = "expense", search = "tea coffee", memberId = "member 1"))
+    }
+
+    @Test fun parsesTenantMembersForTransactionFilterPicker() {
+        val members = FinanceModels.tenantMembers(org.json.JSONArray("""
+            [{"userId":"member-42","displayName":"Taylor Display","role":"member"},
+             {"userId":"owner-1","displayName":"Owner Display","role":"owner"}]
+        """.trimIndent()))
+
+        assertEquals(listOf(
+            FinanceTenantMember("member-42", "Taylor Display", "member"),
+            FinanceTenantMember("owner-1", "Owner Display", "owner"),
+        ), members)
+    }
+
+    @Test fun transactionQueryOmitsBlankOptionalFiltersAndEncodesReservedCharacters() {
+        assertEquals("pageSize=1", FinanceModels.transactionQuery(pageSize = 1, cursor = " ", from = "",
+            to = null, type = "", search = "  ", memberId = null))
+        assertEquals("pageSize=200&search=x%26y%3D1%2B%20%2F%D1%8F",
+            FinanceModels.transactionQuery(pageSize = 200, search = "x&y=1+ /я"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun transactionQueryRejectsPageSizeBelowOne() {
+        FinanceModels.transactionQuery(pageSize = 0)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun transactionQueryRejectsPageSizeAboveTwoHundred() {
+        FinanceModels.transactionQuery(pageSize = 201)
+    }
+
     @Test fun parsesServerBudgetAlertsWithoutRecomputingThresholds() {
         val alerts = FinanceModels.budgetAlerts(JSONObject("""
             {"budgetAlerts":[{"budgetKey":"еда","threshold":"near","limit":"5000.00","spent":"4500.00"},

@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -98,7 +100,8 @@ class MainActivity : ComponentActivity() {
                         onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation,
                         onDoNotBuyLoad = ::loadDoNotBuy, onDoNotBuyDecision = ::applyDoNotBuyDecision,
                         onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision,
-                        onRepeatTransaction = ::repeatTransaction, onVoidTransaction = ::voidTransaction)
+                        onRepeatTransaction = ::repeatTransaction, onVoidTransaction = ::voidTransaction,
+                        onTransactionFilter = ::filterTransactions, onTransactionLoadMore = ::loadMoreTransactions)
                 }
             }
         }
@@ -197,18 +200,43 @@ class MainActivity : ComponentActivity() {
         workspaceData()
     }
 
+    private fun filterTransactions(search: String, type: String, from: String, to: String, memberId: String) = runApi {
+        workspaceData(transactionSearch = search, transactionType = type,
+            transactionFrom = from, transactionTo = to, transactionMemberId = memberId)
+    }
+
+    private fun loadMoreTransactions() = runApi {
+        val cursor = ui.transactionNextCursor ?: return@runApi workspaceData()
+        workspaceData(transactionCursor = cursor, appendTransactions = true)
+    }
+
     private fun workspaceData(proposal: BudgetProposal? = ui.budgetProposal,
                               draft: FinanceTransactionDraft? = ui.transactionDraft,
                               memberProfile: FinanceMemberProfile? = null,
                               notificationPreferences: FinanceNotificationPreferences? = null,
-                              budgetAlerts: List<FinanceBudgetAlert> = emptyList()): FinanceWorkspaceSnapshot {
+                              budgetAlerts: List<FinanceBudgetAlert> = emptyList(),
+                              transactionSearch: String = ui.transactionSearch,
+                              transactionType: String = ui.transactionTypeFilter,
+                              transactionFrom: String = ui.transactionFrom,
+                              transactionTo: String = ui.transactionTo,
+                              transactionMemberId: String = ui.transactionMemberId,
+                              transactionCursor: String? = null,
+                              appendTransactions: Boolean = false): FinanceWorkspaceSnapshot {
         val tenants = api.tenants()
         val tenant = tenants.firstOrNull()
-        return if (tenant == null) FinanceWorkspaceSnapshot(tenants, emptyList(), null, emptyList(), proposal, null, null,
-            draft, null, null, budgetAlerts)
+        return if (tenant == null) FinanceWorkspaceSnapshot(tenants, emptyList(), emptyList(), null, transactionSearch,
+            transactionType, transactionFrom, transactionTo, transactionMemberId, null, emptyList(), proposal,
+            null, null, draft, null, null, budgetAlerts)
         else {
             val month = YearMonth.now(ZoneId.of(tenant.timezone)).toString()
-            FinanceWorkspaceSnapshot(tenants, api.transactions(tenant.id), api.budgets(tenant.id), api.debts(tenant.id),
+            val members = api.members(tenant.id)
+            val transactionPage = api.transactions(tenant.id, transactionSearch, transactionType, transactionCursor,
+                transactionFrom.trim().ifBlank { null }, transactionTo.trim().ifBlank { null },
+                transactionMemberId.trim().ifBlank { null })
+            val transactions = (if (appendTransactions) ui.transactions else emptyList()) + transactionPage.items
+            FinanceWorkspaceSnapshot(tenants, transactions, members, transactionPage.nextCursor, transactionSearch, transactionType,
+                transactionFrom, transactionTo, transactionMemberId,
+                api.budgets(tenant.id), api.debts(tenant.id),
                 proposal, api.dashboardSummary(tenant.id), api.report(tenant.id, "month", "personal", month, "", ""),
                 draft, memberProfile ?: api.memberProfile(tenant.id),
                 notificationPreferences ?: api.notificationPreferences(tenant.id), budgetAlerts)
@@ -221,7 +249,12 @@ class MainActivity : ComponentActivity() {
             runCatching(action).onSuccess { snapshot ->
                 val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
                 ui = ui.copy(busy = false, tenants = snapshot.tenants,
-                    transactions = snapshot.transactions, budgets = snapshot.budgets, debts = snapshot.debts,
+                    transactions = snapshot.transactions, transactionNextCursor = snapshot.transactionNextCursor,
+                    transactionMembers = snapshot.transactionMembers,
+                    transactionSearch = snapshot.transactionSearch, transactionTypeFilter = snapshot.transactionTypeFilter,
+                    transactionFrom = snapshot.transactionFrom, transactionTo = snapshot.transactionTo,
+                    transactionMemberId = snapshot.transactionMemberId,
+                    budgets = snapshot.budgets, debts = snapshot.debts,
                     budgetProposal = snapshot.proposal, dashboardSummary = snapshot.dashboardSummary,
                     report = snapshot.report, transactionDraft = snapshot.transactionDraft,
                     memberProfile = snapshot.memberProfile, notificationPreferences = snapshot.notificationPreferences,
@@ -479,6 +512,13 @@ data class FinanceUiState(
     val error: String? = null,
     val tenants: List<FinanceTenant> = emptyList(),
     val transactions: List<FinanceTransaction> = emptyList(),
+    val transactionMembers: List<FinanceTenantMember> = emptyList(),
+    val transactionNextCursor: String? = null,
+    val transactionSearch: String = "",
+    val transactionTypeFilter: String = "all",
+    val transactionFrom: String = "",
+    val transactionTo: String = "",
+    val transactionMemberId: String = "",
     val budgets: BudgetOverview? = null,
     val debts: List<FinanceDebt> = emptyList(),
     val budgetProposal: BudgetProposal? = null,
@@ -508,6 +548,13 @@ data class FinanceUiState(
 private data class FinanceWorkspaceSnapshot(
     val tenants: List<FinanceTenant>,
     val transactions: List<FinanceTransaction>,
+    val transactionMembers: List<FinanceTenantMember>,
+    val transactionNextCursor: String?,
+    val transactionSearch: String,
+    val transactionTypeFilter: String,
+    val transactionFrom: String,
+    val transactionTo: String,
+    val transactionMemberId: String,
     val budgets: BudgetOverview?,
     val debts: List<FinanceDebt>,
     val proposal: BudgetProposal?,
@@ -549,14 +596,27 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onRecurringLoad: () -> Unit = {},
                           onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> },
                           onRepeatTransaction: (FinanceTransaction) -> Unit = {},
-                          onVoidTransaction: (FinanceTransaction) -> Unit = {}) {
+                          onVoidTransaction: (FinanceTransaction) -> Unit = {},
+                          onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
+                          onTransactionLoadMore: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
     var plannedIncome by androidx.compose.runtime.remember { mutableStateOf("") }
     var transactionText by androidx.compose.runtime.remember { mutableStateOf("") }
-    var transactionSearch by androidx.compose.runtime.remember { mutableStateOf("") }
-    var transactionTypeFilter by androidx.compose.runtime.remember { mutableStateOf("all") }
+    var transactionSearch by androidx.compose.runtime.remember(state.transactionSearch) { mutableStateOf(state.transactionSearch) }
+    var transactionTypeFilter by androidx.compose.runtime.remember(state.transactionTypeFilter) {
+        mutableStateOf(state.transactionTypeFilter)
+    }
+    var transactionFrom by androidx.compose.runtime.remember(state.transactionFrom) { mutableStateOf(state.transactionFrom) }
+    var transactionTo by androidx.compose.runtime.remember(state.transactionTo) { mutableStateOf(state.transactionTo) }
+    var transactionMemberId by androidx.compose.runtime.remember(state.transactionMemberId) {
+        mutableStateOf(state.transactionMemberId)
+    }
+    var transactionMemberPickerExpanded by androidx.compose.runtime.remember { mutableStateOf(false) }
+    var validateTransactionDates by androidx.compose.runtime.remember { mutableStateOf(false) }
+    val transactionDateError = if (validateTransactionDates)
+        transactionDateValidationError(transactionFrom, transactionTo, russian) else null
     var draftCreateKey by androidx.compose.runtime.remember { mutableStateOf(java.util.UUID.randomUUID().toString()) }
     var activeScreen by androidx.compose.runtime.remember { mutableStateOf("overview") }
     val canWriteTransactions = state.tenants.firstOrNull()?.role != "viewer"
@@ -664,19 +724,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onNotificationPreferencesSave,
                         onBack = { activeScreen = "overview" })
                     else -> {
-                        val visibleTransactions = state.transactions.filter { transaction ->
-                            val query = transactionSearch.trim()
-                            val matchesSearch = query.isBlank() || listOfNotNull(
-                                transaction.description, transaction.categoryCode, transaction.memberName,
-                            ).any { it.contains(query, ignoreCase = true) }
-                            val matchesType = when (transactionTypeFilter) {
-                                "expense" -> transaction.type == "expense" || transaction.type == "debt_payment"
-                                "income" -> transaction.type == "income" || transaction.type == "refund"
-                                else -> true
-                            }
-                            matchesSearch && matchesType
-                        }
-                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        LazyColumn(Modifier.weight(1f).testTag("transaction-history"),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             item {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     OutlinedTextField(
@@ -687,18 +736,77 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                         singleLine = true,
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        TextButton(modifier = Modifier.testTag("transaction-filter-all"),
-                                            onClick = { transactionTypeFilter = "all" }) {
-                                            Text(if (russian) "Все" else "All")
+                                        FilterChip(selected = transactionTypeFilter == "all",
+                                            modifier = Modifier.testTag("transaction-filter-all"),
+                                            onClick = { transactionTypeFilter = "all" },
+                                            label = { Text(if (russian) "Все" else "All") })
+                                        FilterChip(selected = transactionTypeFilter == "expense",
+                                            modifier = Modifier.testTag("transaction-filter-expense"),
+                                            onClick = { transactionTypeFilter = "expense" },
+                                            label = { Text(if (russian) "Расходы" else "Expenses") })
+                                        FilterChip(selected = transactionTypeFilter == "income",
+                                            modifier = Modifier.testTag("transaction-filter-income"),
+                                            onClick = { transactionTypeFilter = "income" },
+                                            label = { Text(if (russian) "Доходы" else "Income") })
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedTextField(value = transactionFrom, onValueChange = { transactionFrom = it },
+                                            modifier = Modifier.weight(1f).testTag("transaction-filter-from"),
+                                            label = { Text(if (russian) "С даты" else "From date") }, singleLine = true)
+                                        OutlinedTextField(value = transactionTo, onValueChange = { transactionTo = it },
+                                            modifier = Modifier.weight(1f).testTag("transaction-filter-to"),
+                                            label = { Text(if (russian) "По дату" else "To date") }, singleLine = true)
+                                    }
+                                    transactionDateError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                    val role = state.tenants.firstOrNull()?.role
+                                    val canSeeAllMembers = role == "owner" || role == "admin"
+                                    val selectedMemberId = transactionMemberId
+                                    val selectedMemberLabel = when {
+                                        selectedMemberId == "all" -> if (russian) "Все участники" else "All members"
+                                        selectedMemberId.isBlank() -> if (russian) "Мои операции" else "My transactions"
+                                        else -> state.transactionMembers.firstOrNull { it.userId == selectedMemberId }
+                                            ?.displayName ?: if (russian) "Выберите участника" else "Select member"
+                                    }
+                                    Box {
+                                        TextButton(modifier = Modifier.testTag("transaction-filter-member-picker"),
+                                            onClick = { transactionMemberPickerExpanded = true }) {
+                                            Text("${if (russian) "Участник" else "Member"}: $selectedMemberLabel")
                                         }
-                                        TextButton(modifier = Modifier.testTag("transaction-filter-expense"),
-                                            onClick = { transactionTypeFilter = "expense" }) {
-                                            Text(if (russian) "Расходы" else "Expenses")
+                                        DropdownMenu(expanded = transactionMemberPickerExpanded,
+                                            onDismissRequest = { transactionMemberPickerExpanded = false }) {
+                                            DropdownMenuItem(
+                                                modifier = Modifier.testTag("transaction-member-option-self"),
+                                                text = { Text(if (russian) "Мои операции" else "My transactions") },
+                                                onClick = {
+                                                    transactionMemberId = ""
+                                                    transactionMemberPickerExpanded = false
+                                                })
+                                            if (canSeeAllMembers) DropdownMenuItem(
+                                                modifier = Modifier.testTag("transaction-member-option-all"),
+                                                text = { Text(if (russian) "Все участники" else "All members") },
+                                                onClick = {
+                                                    transactionMemberId = "all"
+                                                    transactionMemberPickerExpanded = false
+                                                })
+                                            state.transactionMembers.forEach { member ->
+                                                DropdownMenuItem(
+                                                    modifier = Modifier.testTag("transaction-member-option-${member.userId}"),
+                                                    text = { Text(member.displayName) },
+                                                    onClick = {
+                                                        transactionMemberId = member.userId
+                                                        transactionMemberPickerExpanded = false
+                                                    })
+                                            }
                                         }
-                                        TextButton(modifier = Modifier.testTag("transaction-filter-income"),
-                                            onClick = { transactionTypeFilter = "income" }) {
-                                            Text(if (russian) "Доходы" else "Income")
-                                        }
+                                    }
+                                    Button(enabled = !state.busy,
+                                        onClick = {
+                                            validateTransactionDates = true
+                                            if (transactionDateValidationError(transactionFrom, transactionTo, russian) == null)
+                                                onTransactionFilter(transactionSearch,
+                                                transactionTypeFilter, transactionFrom, transactionTo, selectedMemberId)
+                                        }) {
+                                        Text(if (russian) "Применить фильтры" else "Apply filters")
                                     }
                                 }
                             }
@@ -726,9 +834,19 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 Text(if (russian) "Недавние операции" else "Recent transactions",
                                     style = MaterialTheme.typography.titleMedium)
                             }
-                            items(visibleTransactions) { transaction ->
+                            if (state.transactions.isEmpty() && !state.busy) item {
+                                Text(if (russian) "Нет операций по выбранным фильтрам"
+                                    else "No transactions match these filters")
+                            }
+                            items(state.transactions) { transaction ->
                                 TransactionHistoryCard(transaction, language, canWriteTransactions, state.busy,
                                     onRepeatTransaction, onVoidTransaction)
+                            }
+                            if (state.transactionNextCursor != null) item {
+                                Button(modifier = Modifier.testTag("transaction-load-more"), enabled = !state.busy,
+                                    onClick = onTransactionLoadMore) {
+                                    Text(if (russian) "Загрузить ещё" else "Load more")
+                                }
                             }
                         }
                     }
@@ -1428,6 +1546,21 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
             else "Food over 7 days: ${formatMoney(food.spent, language)} / ${formatMoney(food.limit, language)} · " +
                 formatSemanticStatus("paceStatus", food.paceStatus, language))
         }
+    }
+}
+
+private fun transactionDateValidationError(from: String, to: String, russian: Boolean): String? {
+    val fromValue = from.trim()
+    val toValue = to.trim()
+    val parsedFrom = fromValue.takeIf(String::isNotEmpty)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    val parsedTo = toValue.takeIf(String::isNotEmpty)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    return when {
+        fromValue.isNotEmpty() && parsedFrom == null || toValue.isNotEmpty() && parsedTo == null ->
+            if (russian) "Введите дату в формате ГГГГ-ММ-ДД" else "Enter dates as YYYY-MM-DD"
+        parsedFrom != null && parsedTo != null && parsedFrom.isAfter(parsedTo) ->
+            if (russian) "Дата начала должна быть не позже даты окончания"
+            else "Start date must be on or before end date"
+        else -> null
     }
 }
 

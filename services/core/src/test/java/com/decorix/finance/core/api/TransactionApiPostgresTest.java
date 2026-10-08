@@ -4602,7 +4602,8 @@ class TransactionApiPostgresTest {
         mvc.perform(get(membersPath).with(memberAuth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].displayName").value("Taylor"));
+                .andExpect(jsonPath("$[0].displayName").value("Taylor"))
+                .andExpect(jsonPath("$[0].userId").value(memberId.toString()));
 
         mvc.perform(get(path).with(ownerAuth).param("memberId", "all"))
                 .andExpect(status().isOk())
@@ -4617,6 +4618,64 @@ class TransactionApiPostgresTest {
                 .andExpect(status().isForbidden());
         mvc.perform(get(path).with(memberAuth).param("memberId", userIdFor(subject).toString()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void transactionTypeFiltersIncludeExpenseDebtPaymentAndIncomeRefund() throws Exception {
+        var ownerAuth = jwt().jwt(token -> token.subject(subject));
+        UUID ownerId = userIdFor(subject);
+        String path = "/api/v1/tenants/" + tenantId + "/transactions";
+
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            Object[][] fixtures = {
+                    {ownerId, subject, "expense", "Owner expense", "2026-10-01T08:00:00Z"},
+                    {ownerId, subject, "debt_payment", "Owner debt payment", "2026-10-01T09:00:00Z"},
+                    {ownerId, subject, "income", "Owner income", "2026-10-01T10:00:00Z"},
+                    {ownerId, subject, "refund", "Owner refund", "2026-10-01T11:00:00Z"},
+            };
+            for (Object[] fixture : fixtures) {
+                jdbc.update("""
+                        INSERT INTO transactions (tenant_id, owner_subject, owner_user_id, type, amount, currency,
+                            category_code, description, source, occurred_at)
+                        VALUES (?, ?, ?, ?, 12.34, 'RUB', 'food', ?, 'test', ?)
+                        """, tenantId, fixture[1], fixture[0], fixture[2], fixture[3],
+                        java.sql.Timestamp.from(Instant.parse((String) fixture[4])));
+            }
+        });
+
+        mvc.perform(get(path).with(ownerAuth).param("type", "expense"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].type").value("debt_payment"))
+                .andExpect(jsonPath("$.items[1].type").value("expense"));
+        mvc.perform(get(path).with(ownerAuth).param("type", "income"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].type").value("refund"))
+                .andExpect(jsonPath("$.items[1].type").value("income"));
+    }
+
+    @Test
+    void transactionSearchMatchesMemberDisplayName() throws Exception {
+        var ownerAuth = jwt().jwt(token -> token.subject(subject));
+        String memberSubject = "keycloak|transaction-search-member-" + UUID.randomUUID();
+        UUID memberId = addTenantMember(memberSubject, "Taylor Display", "member");
+        String path = "/api/v1/tenants/" + tenantId + "/transactions";
+        transactions.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("""
+                    INSERT INTO transactions (tenant_id, owner_subject, owner_user_id, type, amount, currency,
+                        category_code, description, source, occurred_at)
+                    VALUES (?, ?, ?, 'expense', 12.34, 'RUB', 'food', 'Member expense', 'test', ?)
+                    """, tenantId, memberSubject, memberId,
+                    java.sql.Timestamp.from(Instant.parse("2026-10-01T12:00:00Z")));
+        });
+
+        mvc.perform(get(path).with(ownerAuth).param("memberId", "all").param("search", "Taylor Display"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].memberName").value("Taylor Display"));
     }
 
     @Test

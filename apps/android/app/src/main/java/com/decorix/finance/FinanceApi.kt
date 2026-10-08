@@ -54,10 +54,16 @@ class FinanceApi(context: Context) {
         }
     }
 
-    fun transactions(tenantId: String): List<FinanceTransaction> {
-        val body = JSONObject(execute("/api/v1/tenants/$tenantId/transactions?pageSize=50", "GET"))
-        val list = body.getJSONArray("items")
-        return (0 until list.length()).map { index -> FinanceModels.transaction(list.getJSONObject(index)) }
+    fun members(tenantId: String): List<FinanceTenantMember> =
+        FinanceModels.tenantMembers(org.json.JSONArray(execute("/api/v1/tenants/$tenantId/members", "GET")))
+
+    fun transactions(tenantId: String, search: String = "", type: String = "all", cursor: String? = null,
+                     from: String? = null, to: String? = null, memberId: String? = null): FinanceTransactionPage {
+        val filters = FinanceModels.transactionQuery(cursor = cursor, from = from, to = to,
+            type = type.takeIf { it != "all" }, search = search.takeIf { it.isNotBlank() }, memberId = memberId)
+        return FinanceModels.transactionPage(JSONObject(
+            execute("/api/v1/tenants/$tenantId/transactions?$filters", "GET"),
+        ))
     }
 
     fun repeatTransaction(tenantId: String, original: FinanceTransaction, occurredAt: String): FinanceTransaction {

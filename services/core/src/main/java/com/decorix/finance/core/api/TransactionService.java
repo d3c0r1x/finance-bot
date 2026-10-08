@@ -552,11 +552,18 @@ public class TransactionService {
                 args.add(Timestamp.from(to.plusDays(1).atStartOfDay(memberZone).toInstant()));
             }
             if (type != null) {
-                query += " AND t.type = ?";
-                args.add(type);
+                if ("expense".equals(type)) {
+                    query += " AND t.type IN ('expense', 'debt_payment')";
+                } else if ("income".equals(type)) {
+                    query += " AND t.type IN ('income', 'refund')";
+                } else {
+                    query += " AND t.type = ?";
+                    args.add(type);
+                }
             }
             if (search != null && !search.isBlank()) {
-                query += " AND strpos(lower(coalesce(t.description, '') || ' ' || t.category_code), lower(?)) > 0";
+                query += " AND strpos(lower(coalesce(t.description, '') || ' ' || t.category_code || ' ' "
+                        + "|| coalesce(p.display_name, '')), lower(?)) > 0";
                 args.add(search.trim());
             }
             if (after != null) {

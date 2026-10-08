@@ -1572,3 +1572,11 @@ Updated: 2026-10-08, Europe/Moscow.
 - GREEN: Python/contracts/report/Telegram command suite 199 passed. Web 95 tests passed and production build passed. Android Gradle unit suite 4 passed from a temporary ASCII junction; `assembleDebug assembleDebugAndroidTest` passed. Isolated Android 8.1/API 27 instrumentation: `OK (50 tests)`; debug APK installed and launched without fatal crash. APK SHA-256: `5D6D6F12A62697C1A693BFC6F328B98330931002E097307A168A2DA69D285E97`.
 - Portable Temurin 17 and API 27 AVD were created under `%TEMP%`; no system Java/PATH changes or user AVD changes. No private receipts or personal finance data were used.
 - Final `git diff --check`, F57 commit/push and GitHub workflow inspection remain. Then begin F58 configuration/secrets/docs/licence gates.
+
+## E4.101 F09 Android server-backed filters — 2026-10-08 10:20 MSK
+
+- Split work across Android UI, Core/API, acceptance tests, and coordinator/review. The Core/API agent also handled the date-validation fix; no concurrent edits were made to the same files.
+- Android history now sends search, type, ISO date range, and member filters to Core; uses authenticated member names and role-scoped options; appends results using the opaque cursor; and retains filters on refresh. Core groups expense/debt-payment and income/refund, and includes member display name in parameterized search while preserving tenant and role scope.
+- TDD RED/GREEN: Compose tests first failed on absent filters/selection/empty states; Postgres acceptance first failed on grouped-type and member-name search; reversed-date runtime RED showed stale Compose state allowed an invalid callback. Fix validates current date fields synchronously and blocks malformed/reversed filters with localized errors.
+- GREEN: API 27 isolated Android instrumentation 64/64, 0 skipped; Core `:services:core:check` 290 tests, 2 environment-gated skips, 0 failures; PostgreSQL `TransactionApiPostgresTest` 136/136. Seaweed S3 and ClamAV integration tests were skipped because their services/configuration are unavailable. Isolated AVD `emulator-5558`; user AVDs untouched.
+- F09 Android remains partial: transaction edit, delete/void parity, and live authenticated Android-to-Core E2E are outstanding. F59 remains in progress; next continue with the next independently testable Android parity slice.

@@ -2,6 +2,7 @@ package com.decorix.finance
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -13,7 +14,9 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.compose.ui.semantics.SemanticsProperties
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
@@ -435,6 +438,7 @@ class FinanceScreensTest {
             }
         }
         compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(1)
         compose.onNodeWithText("Опишите операцию").performTextInput("Такси 2 тыс")
         compose.onNodeWithText("Разобрать текст").performClick()
 
@@ -443,15 +447,15 @@ class FinanceScreensTest {
 
         compose.onNodeWithText("Предложение операции").assertIsDisplayed()
         compose.onNodeWithText("Провайдер: ollama · модель: local-test · промпт: transaction-draft.v1")
-            .assertIsDisplayed()
-        compose.onNodeWithText("1 000 ₽").performClick()
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("1 000 ₽").performScrollTo().performClick()
         compose.onNodeWithText("Сумма, ₽").assertIsDisplayed()
         compose.onNodeWithText("Подтвердить").assertIsNotEnabled()
         compose.onNodeWithText("Сохранить изменения").performScrollTo().performClick()
         assertEquals("1000.00", edit?.amount)
         assertEquals(1L, edit?.version)
 
-        compose.onNodeWithText("Подтвердить").performClick()
+        compose.onNodeWithText("Подтвердить").performScrollTo().performClick()
         assertEquals("draft-1" to 2L, confirmation)
     }
 
@@ -460,6 +464,7 @@ class FinanceScreensTest {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
             transactionDraft = draft(version = 4)), onCancelDraft = { id, version -> cancelled = id to version })
         compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(1)
         compose.onNodeWithText("Предложение операции").assertIsDisplayed()
         compose.onNodeWithText("Отменить").performScrollTo().performClick()
         assertEquals("draft-1" to 4L, cancelled)
@@ -475,6 +480,7 @@ class FinanceScreensTest {
             onVoidTransaction = { item -> voided = item.id to item.version })
 
         compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
         compose.onNodeWithText("Такси").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("−2 000,00 ₽", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("transaction-repeat-tx-1").performScrollTo().performClick()
@@ -483,6 +489,7 @@ class FinanceScreensTest {
         assertEquals("tx-1" to 3L, voided)
 
         compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
         compose.onNodeWithText("Такси").assertIsDisplayed()
         compose.onNodeWithText("−2,000.00 RUB", substring = true).assertIsDisplayed()
     }
@@ -491,25 +498,126 @@ class FinanceScreensTest {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
             transactions = listOf(transaction())))
         compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
         compose.onNodeWithTag("transaction-repeat-tx-1").assertDoesNotExist()
         compose.onNodeWithTag("transaction-void-tx-1").assertDoesNotExist()
     }
 
-    @Test fun transactionHistorySearchAndTypeFilterNarrowVisibleRows() {
+    @Test fun transactionHistorySearchAndTypeFilterRequestCoreResultsAndCanLoadNextPage() {
         val grocery = transaction().copy(description = "Продукты")
         val salary = transaction().copy(id = "tx-2", type = "income", description = "Зарплата")
+        val queries = mutableListOf<Pair<String, String>>()
+        var loadedMore = 0
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
-            transactions = listOf(grocery, salary)))
+            transactions = listOf(grocery, salary), transactionNextCursor = "cursor-2"),
+            onTransactionFilter = { search, type, _, _, _ -> queries += search to type },
+            onTransactionLoadMore = { loadedMore++ })
 
         compose.onNodeWithText("Операции").performClick()
         compose.onNodeWithTag("transaction-search").performTextInput("зарп")
-        compose.onNodeWithText("Зарплата").assertIsDisplayed()
-        compose.onNodeWithText("Продукты").assertDoesNotExist()
+        compose.onNodeWithText("Применить фильтры").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(4)
+        compose.onNodeWithText("Зарплата").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Продукты").performScrollTo().assertIsDisplayed()
 
         compose.onNodeWithTag("transaction-search").performTextReplacement("")
-        compose.onNodeWithTag("transaction-filter-expense").performClick()
-        compose.onNodeWithText("Продукты").assertIsDisplayed()
-        compose.onNodeWithText("Зарплата").assertDoesNotExist()
+        compose.onNodeWithTag("transaction-filter-expense").performScrollTo().performClick()
+        compose.onNodeWithText("Применить фильтры").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithText("Продукты").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(4)
+        compose.onNodeWithText("Зарплата").performScrollTo().assertIsDisplayed()
+        assertEquals(listOf("зарп" to "all", "" to "expense"), queries)
+
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(5)
+        compose.onNodeWithText("Загрузить ещё").performScrollTo().performClick()
+        assertEquals(1, loadedMore)
+    }
+
+    @Test fun transactionDateAndMemberFiltersReachCoreWhenApplied() {
+        var applied: List<String>? = null
+        val member = FinanceTenantMember("member-42", "Taylor Display", "member")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactionMembers = listOf(member)),
+            onTransactionFilter = { search, type, from, to, memberId ->
+                applied = listOf(search, type, from, to, memberId)
+            })
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-search").performTextInput("зарп")
+        compose.onNodeWithTag("transaction-filter-expense").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-filter-from").performScrollTo().performTextInput("2026-10-01")
+        compose.onNodeWithTag("transaction-filter-to").performScrollTo().performTextInput("2026-10-31")
+        compose.onNodeWithTag("transaction-filter-member-picker").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-member-option-all").assertIsDisplayed()
+        compose.onNodeWithTag("transaction-member-option-member-42").assertIsDisplayed()
+        compose.onNodeWithTag("transaction-member-option-member-42").performClick()
+        compose.onNodeWithText("Участник: Taylor Display").assertIsDisplayed()
+        compose.onNodeWithText("Применить фильтры").performScrollTo().performClick()
+
+        assertEquals(listOf("зарп", "expense", "2026-10-01", "2026-10-31", "member-42"), applied)
+    }
+
+    @Test fun reversedTransactionDateRangeShowsLocalizedErrorAndDoesNotApply() {
+        var applied: List<String>? = null
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),
+            onTransactionFilter = { search, type, from, to, memberId ->
+                applied = listOf(search, type, from, to, memberId)
+            })
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-filter-from").performScrollTo().performTextInput("2026-10-31")
+        compose.onNodeWithTag("transaction-filter-to").performScrollTo().performTextInput("2026-10-01")
+        compose.onNodeWithText("Применить фильтры").performScrollTo().performClick()
+
+        assertEquals(null, applied)
+        compose.onNodeWithText("Дата начала должна быть не позже даты окончания").assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("transaction-filter-from").performScrollTo().performTextReplacement("2026-10-31")
+        compose.onNodeWithTag("transaction-filter-to").performScrollTo().performTextReplacement("2026-10-01")
+        compose.onNodeWithText("Apply filters").performScrollTo().performClick()
+
+        assertEquals(null, applied)
+        compose.onNodeWithText("Start date must be on or before end date").assertIsDisplayed()
+    }
+
+    @Test fun viewerMemberPickerUsesCoreSuppliedSelfAndHidesAllMembers() {
+        val self = FinanceTenantMember("viewer-42", "Viewer Display", "member")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
+            transactionMembers = listOf(self)))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-filter-member-picker").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-member-option-self").assertIsDisplayed()
+        compose.onNodeWithTag("transaction-member-option-viewer-42").assertIsDisplayed()
+        compose.onNodeWithText("Viewer Display").assertIsDisplayed()
+        compose.onNodeWithTag("transaction-member-option-all").assertDoesNotExist()
+    }
+
+    @Test fun transactionTypeFilterShowsAppliedSelection() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(transaction())))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-filter-expense").performScrollTo().performClick()
+        compose.onNodeWithText("Применить фильтры").performScrollTo().performClick()
+
+        compose.onNodeWithTag("transaction-filter-expense")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+        compose.onNodeWithTag("transaction-filter-income")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, false))
+    }
+
+    @Test fun emptyTransactionResultsExplainAppliedFiltersInRussianAndEnglish() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))))
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithText("Нет операций по выбранным фильтрам").assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("No transactions match these filters").assertIsDisplayed()
     }
 
     private fun show(state: FinanceUiState,
@@ -527,11 +635,15 @@ class FinanceScreensTest {
                       onPersonalInflationLoad: () -> Unit = {},
                      onRecurringLoad: () -> Unit = {},
                       onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> },
-                      onRepeatTransaction: (FinanceTransaction) -> Unit = {},
-                      onVoidTransaction: (FinanceTransaction) -> Unit = {}) {
+                     onRepeatTransaction: (FinanceTransaction) -> Unit = {},
+                      onVoidTransaction: (FinanceTransaction) -> Unit = {},
+                      onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
+                      onTransactionLoadMore: () -> Unit = {}) {
         val language = mutableStateOf("ru")
+        val contentKey = Any()
         compose.setContent {
         MaterialTheme {
+            androidx.compose.runtime.key(contentKey) {
             FinanceScreen(
                 state = state,
                 language = language.value,
@@ -550,7 +662,9 @@ class FinanceScreensTest {
                 onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> }, onDebtForecast = {},
                 onReportLoad = onReportLoad,
                 onRepeatTransaction = onRepeatTransaction, onVoidTransaction = onVoidTransaction,
+                onTransactionFilter = onTransactionFilter, onTransactionLoadMore = onTransactionLoadMore,
             )
+            }
         }
         }
     }
