@@ -302,6 +302,50 @@ class FinanceReceiptApiTest {
         assertEquals("\"4\"", request.getHeader("If-Match"))
     }
 
+    @Test fun syncReceiptTotalPostsWithCurrentVersionAndParsesExactReturnedTotals() {
+        val responseJson = org.json.JSONObject(receiptJson()).apply {
+            put("version", 6)
+            put("cashTotal", "246.80")
+            put("itemsTotal", "246.80")
+        }
+        server.enqueue(MockResponse().setBody(responseJson.toString()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val updated = api.syncReceiptTotal("tenant-17", "receipt-42", 5)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/sync-total", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"5\"", request.getHeader("If-Match"))
+        assertEquals("{}", request.body.readUtf8())
+        assertEquals("246.80", updated.cashTotal)
+        assertEquals("246.80", updated.itemsTotal)
+        assertEquals(6L, updated.version)
+        assertEquals(null, updated.transactionId)
+    }
+
+    @Test fun syncReceiptTotalPreservesConflictAndStaleVersionFailures() {
+        listOf(409, 412).forEach { status ->
+            server.enqueue(MockResponse().setResponseCode(status).setBody("""{"detail":"sync_failed"}"""))
+        }
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        listOf(409, 412).forEach { status ->
+            val failure = runCatching { api.syncReceiptTotal("tenant-17", "receipt-42", 5) }.exceptionOrNull()
+            assertTrue("HTTP $status must remain an API failure", failure is ApiFailure)
+            assertEquals(status, (failure as ApiFailure).status)
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/sync-total", request.path)
+            assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+            assertEquals("\"5\"", request.getHeader("If-Match"))
+            assertEquals("{}", request.body.readUtf8())
+        }
+    }
+
     @Test fun budgetProposalAndApplyReuseCallerSuppliedIdempotencyKeys() {
         repeat(2) { server.enqueue(MockResponse().setBody(budgetProposalJson())) }
         repeat(2) { server.enqueue(MockResponse().setBody(budgetOverviewJson())) }

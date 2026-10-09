@@ -119,6 +119,14 @@ class FinanceApi internal constructor(
         )))
     }
 
+    fun syncReceiptTotal(tenantId: String, receiptId: String, version: Long): FinanceReceipt {
+        require(version > 0) { "Invalid receipt version" }
+        return FinanceModels.receipt(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/sync-total", "POST",
+            ifMatchVersion = version,
+        )))
+    }
+
     fun transactions(tenantId: String, search: String = "", type: String = "all", cursor: String? = null,
                      from: String? = null, to: String? = null, memberId: String? = null): FinanceTransactionPage {
         val filters = FinanceModels.transactionQuery(cursor = cursor, from = from, to = to,

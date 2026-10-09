@@ -111,11 +111,124 @@ class FinanceReceiptScreensTest {
         assertEquals(listOf("${receipt.id}:2", "${receipt.id}:1"), requestedPages)
         assertEquals(cashTotal, state.value.receiptDraft?.cashTotal)
         compose.onNodeWithText("101,00 ₽").performScrollTo().assertIsDisplayed()
-        listOf("Добавить позицию", "Сохранить позицию", "Удалить позицию", "Синхронизировать итог",
+        compose.onNodeWithTag("receipt-sync-total").performScrollTo().assertIsDisplayed().assertIsEnabled()
+        listOf("Добавить позицию", "Сохранить позицию", "Удалить позицию",
             "Решить дубликат", "Подтвердить чек").forEach { compose.onNodeWithText(it).assertDoesNotExist() }
         assertEquals(emptyList<String>(), created)
         assertEquals(emptyList<String>(), confirmed)
         assertEquals("Missing exact item values: ${missingItemValues.joinToString()}", emptyList<String>(), missingItemValues)
+    }
+
+    @Test fun ownerExplicitlySyncsReceiptTotalOnlyAfterTapAndAppliesServerResponse() {
+        val original = receiptDraft().copy(version = 5, cashTotal = "245.70", itemsTotal = "80.10")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = original))
+        val syncRequests = mutableListOf<String>()
+        val created = mutableListOf<String>()
+        val confirmed = mutableListOf<String>()
+        show(state.value, onCreate = { type, amount, _ -> created += "$type:$amount" },
+            onConfirmDraft = { id, _ -> confirmed += id },
+            onReceiptTotalSync = { receiptId, version ->
+                syncRequests += "$receiptId:$version"
+                state.value = state.value.copy(receiptDraft = original.copy(
+                    version = 6, cashTotal = "80.10", itemsTotal = "80.10"))
+            }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-cash-total").performScrollTo().assertTextContains("По чеку: 245,70 ₽")
+        compose.onNodeWithTag("receipt-items-total").performScrollTo().assertTextContains("По позициям: 80,10 ₽")
+        compose.onNodeWithTag("receipt-sync-total").performScrollTo().assertIsDisplayed().assertIsEnabled()
+        assertEquals(emptyList<String>(), syncRequests)
+        assertEquals(original.cashTotal, state.value.receiptDraft?.cashTotal)
+        assertEquals(original.itemsTotal, state.value.receiptDraft?.itemsTotal)
+
+        compose.onNodeWithTag("receipt-sync-total").performScrollTo().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf("${original.id}:5"), syncRequests)
+        assertEquals("80.10", state.value.receiptDraft?.cashTotal)
+        assertEquals("80.10", state.value.receiptDraft?.itemsTotal)
+        assertEquals(6L, state.value.receiptDraft?.version)
+        compose.onNodeWithTag("receipt-cash-total").performScrollTo().assertTextContains("По чеку: 80,10 ₽")
+        compose.onNodeWithTag("receipt-items-total").performScrollTo().assertTextContains("По позициям: 80,10 ₽")
+        assertEquals(emptyList<String>(), created)
+        assertEquals(emptyList<String>(), confirmed)
+    }
+
+    @Test fun viewerCannotSyncReceiptTotal() {
+        val receipt = receiptDraft().copy(cashTotal = "245.70", itemsTotal = "80.10")
+        var syncCalls = 0
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")), receiptDraft = receipt),
+            onReceiptTotalSync = { _, _ -> syncCalls++ })
+
+        compose.onNodeWithTag("receipt-cash-total").assertTextContains("По чеку: 245,70 ₽")
+        compose.onNodeWithTag("receipt-items-total").assertTextContains("По позициям: 80,10 ₽")
+        compose.onNodeWithTag("receipt-sync-total").assertDoesNotExist()
+        compose.onNodeWithText("Синхронизировать итог").assertDoesNotExist()
+        assertEquals(0, syncCalls)
+        assertEquals("245.70", receipt.cashTotal)
+        assertEquals("80.10", receipt.itemsTotal)
+    }
+
+    @Test fun receiptTotalSyncButtonOnlyAppearsForDifferentTotalsAndLeavesEligibilityToCore() {
+        val violations = mutableListOf<String>()
+        val alreadyReconciled = receiptDraft().copy(cashTotal = "245.70", itemsTotal = "245.70")
+        val incompleteItemsTotal = receiptDraft().copy(version = 7, cashTotal = "245.70", itemsTotal = null)
+        val syncRequests = mutableListOf<String>()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = alreadyReconciled))
+        show(state.value, onReceiptTotalSync = { receiptId, version -> syncRequests += "$receiptId:$version" },
+            stateHolder = state)
+        try {
+            compose.onNodeWithTag("receipt-sync-total").assertDoesNotExist()
+        } catch (failure: AssertionError) {
+            violations += "sync action remains visible when totals already match"
+        }
+
+        state.value = FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = incompleteItemsTotal)
+        compose.waitForIdle()
+        val syncAction = compose.onNodeWithTag("receipt-sync-total")
+        syncAction.performScrollTo().assertIsDisplayed()
+        val enableFailure = runCatching { syncAction.assertIsEnabled() }.exceptionOrNull()
+        val syncActionEnabled = enableFailure == null
+        if (enableFailure != null) violations +=
+            "sync action is disabled before Core can return incomplete-total conflict: ${enableFailure.message}"
+        if (syncActionEnabled) {
+            syncAction.performScrollTo().performClick()
+            assertEquals(listOf("${incompleteItemsTotal.id}:7"), syncRequests)
+        }
+        assertEquals("245.70", incompleteItemsTotal.cashTotal)
+        assertNull(incompleteItemsTotal.itemsTotal)
+        assertEquals(emptyList<String>(), violations)
+    }
+
+    @Test fun receiptTotalSyncErrorsAreLocalizedAndStaleVersionOffersRefresh() {
+        val receipt = receiptDraft().copy(version = 5, cashTotal = "245.70", itemsTotal = "80.10")
+        val refreshCalls = mutableListOf<String>()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, receiptTotalSyncError = "incomplete_items"))
+        show(state.value, onReceiptTotalSyncRefresh = { receiptId -> refreshCalls += receiptId }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-sync-error").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Итог позиций должен быть полным и больше нуля. Проверьте чек перед синхронизацией.",
+            substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Item total must be complete and greater than zero. Check the receipt before syncing.",
+            substring = true).performScrollTo().assertIsDisplayed()
+
+        state.value = state.value.copy(receiptTotalSyncError = "stale_version")
+        compose.waitForIdle()
+        compose.onNodeWithText("RU").performClick()
+        compose.onNodeWithText("Чек изменился. Обновите чек перед повторной синхронизацией.",
+            substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-sync-refresh").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(listOf(receipt.id), refreshCalls)
+        assertEquals("245.70", state.value.receiptDraft?.cashTotal)
+        assertEquals("80.10", state.value.receiptDraft?.itemsTotal)
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Receipt changed. Refresh it before syncing again.",
+            substring = true).performScrollTo().assertIsDisplayed()
     }
 
     @Test fun retryingReceiptItemsErrorDoesNotIssueHiddenThirdRequest() {
@@ -215,7 +328,8 @@ class FinanceReceiptScreensTest {
         assertEquals("245.70", receipt.cashTotal)
         assertEquals(emptyList<String>(), creates)
         assertEquals(emptyList<String>(), confirmations)
-        listOf("Добавить позицию", "Удалить позицию", "Синхронизировать итог", "Подтвердить чек")
+        compose.onNodeWithTag("receipt-sync-total").performScrollTo().assertIsDisplayed().assertIsEnabled()
+        listOf("Добавить позицию", "Удалить позицию", "Подтвердить чек")
             .forEach { compose.onNodeWithText(it).assertDoesNotExist() }
     }
 
@@ -698,6 +812,8 @@ class FinanceReceiptScreensTest {
                      onReceiptItemRefresh: (String) -> Unit = {},
                      onReceiptDiscard: () -> Unit = {},
                      onReceiptItemsPage: (String, Int) -> Unit = { _, _ -> },
+                     onReceiptTotalSync: (String, Long) -> Unit = { _, _ -> },
+                     onReceiptTotalSyncRefresh: (String) -> Unit = {},
                      onReceiptItemUpdate: (String, String, Long, String, String, String, String) -> Unit =
                          { _, _, _, _, _, _, _ -> },
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
@@ -713,7 +829,9 @@ class FinanceReceiptScreensTest {
                     onDebtForecast = {}, onReportLoad = { _, _, _, _, _ -> }, onReceiptPick = onReceiptPick,
                     onReceiptRefresh = onReceiptRefresh, onReceiptItemRefresh = onReceiptItemRefresh,
                     onReceiptDiscard = onReceiptDiscard,
-                    onReceiptItemsPage = onReceiptItemsPage, onReceiptItemUpdate = onReceiptItemUpdate)
+                    onReceiptItemsPage = onReceiptItemsPage, onReceiptItemUpdate = onReceiptItemUpdate,
+                    onReceiptTotalSync = onReceiptTotalSync,
+                    onReceiptTotalSyncRefresh = onReceiptTotalSyncRefresh)
             }
         }
         compose.waitForIdle()

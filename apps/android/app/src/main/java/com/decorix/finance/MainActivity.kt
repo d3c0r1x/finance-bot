@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
     private val receiptReadingGeneration = AtomicLong(0L)
     private val receiptItemsGeneration = AtomicLong(0L)
     private val receiptItemEditGeneration = AtomicLong(0L)
+    private val receiptTotalSyncGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -141,7 +142,9 @@ class MainActivity : ComponentActivity() {
                         onReceiptReading = ::loadReceiptReading,
                         onReceiptItemsPage = ::loadReceiptItems,
                         onReceiptItemUpdate = ::updateReceiptItem,
-                        onReceiptItemRefresh = ::refreshReceiptAfterItemConflict)
+                        onReceiptItemRefresh = ::refreshReceiptAfterItemConflict,
+                        onReceiptTotalSync = ::syncReceiptTotal,
+                        onReceiptTotalSyncRefresh = ::refreshReceiptTotalSync)
                 }
             }
         }
@@ -437,7 +440,7 @@ class MainActivity : ComponentActivity() {
                         receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = page,
                         receiptItemsLoading = false,
                         receiptItemsError = if (result.pageRefreshError == null) null else "unavailable",
-                        receiptItemEditError = null,
+                        receiptItemEditError = null, receiptTotalSyncError = null,
                         receiptItemEditSavedToken = "$receiptId:$itemId:${updated.version}")
                 }
             } else {
@@ -479,6 +482,79 @@ class MainActivity : ComponentActivity() {
                     receiptItemsPage = result.page, receiptItemsReceiptId = receiptId,
                     receiptItemsRequestedPage = page, receiptItemsLoading = false,
                     receiptItemsError = if (result.pageRefreshError == null) null else "unavailable")
+            }
+        }
+    }
+
+    private fun syncReceiptTotal(receiptId: String, receiptVersion: Long) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated || ui.receiptDraft?.id != receiptId || ui.receiptDraft?.version != receiptVersion ||
+            ui.tenants.firstOrNull()?.role == "viewer" || ui.busy) return
+        val generation = receiptTotalSyncGeneration.incrementAndGet()
+        val page = ui.receiptItemsPage?.page?.takeIf { ui.receiptItemsReceiptId == receiptId } ?: 1
+        val previousPage = ui.receiptItemsPage?.takeIf { ui.receiptItemsReceiptId == receiptId }
+        ui = ui.copy(receiptTotalSyncInProgress = true, receiptTotalSyncError = null)
+        executor.execute {
+            if (receiptTotalSyncGeneration.get() != generation) return@execute
+            val result = updateReceiptItemWithPageRefresh(
+                update = { api.syncReceiptTotal(tenantId, receiptId, receiptVersion) },
+                refreshPage = { updated ->
+                    if (page == 1) FinanceReceiptItemPage(updated.items.take(8), 1,
+                        updated.itemCount, updated.itemCount > 8)
+                    else api.receiptItems(tenantId, receiptId, page)
+                },
+            )
+            if (receiptTotalSyncGeneration.get() != generation || !ui.authenticated ||
+                ui.tenants.firstOrNull()?.id != tenantId || ui.receiptDraft?.id != receiptId) return@execute
+            if (result.mutationError != null) {
+                val status = (result.mutationError as? ApiFailure)?.status
+                ui = ui.copy(receiptTotalSyncInProgress = false,
+                    receiptTotalSyncError = when (status) {
+                        409 -> "incomplete_items"
+                        412 -> "stale_version"
+                        else -> "unavailable"
+                    })
+            } else {
+                val updated = requireNotNull(result.updatedReceipt)
+                ui = ui.copy(receiptTotalSyncInProgress = false, receiptDraft = updated,
+                    receiptItemsPage = result.updatedPage ?: previousPage,
+                    receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = page,
+                    receiptItemsLoading = false,
+                    receiptItemsError = if (result.pageRefreshError == null) null else "unavailable",
+                    receiptTotalSyncError = null)
+            }
+        }
+    }
+
+    private fun refreshReceiptTotalSync(receiptId: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated || ui.receiptDraft?.id != receiptId || ui.busy) return
+        val generation = receiptTotalSyncGeneration.incrementAndGet()
+        val page = ui.receiptItemsPage?.page?.takeIf { ui.receiptItemsReceiptId == receiptId } ?: 1
+        val previousPage = ui.receiptItemsPage?.takeIf { ui.receiptItemsReceiptId == receiptId }
+        ui = ui.copy(receiptTotalSyncInProgress = true)
+        executor.execute {
+            if (receiptTotalSyncGeneration.get() != generation) return@execute
+            val result = refreshReceiptAfterConflictWithPage(
+                currentPage = previousPage,
+                refreshReceipt = { api.receipt(tenantId, receiptId) },
+                refreshPage = { updated ->
+                    if (page == 1) FinanceReceiptItemPage(updated.items.take(8), 1,
+                        updated.itemCount, updated.itemCount > 8)
+                    else api.receiptItems(tenantId, receiptId, page)
+                },
+            )
+            if (receiptTotalSyncGeneration.get() != generation || !ui.authenticated ||
+                ui.tenants.firstOrNull()?.id != tenantId || ui.receiptDraft?.id != receiptId) return@execute
+            if (result.receiptRefreshError != null) {
+                ui = ui.copy(receiptTotalSyncInProgress = false, receiptTotalSyncError = "refresh_unavailable")
+            } else {
+                val updated = requireNotNull(result.updatedReceipt)
+                ui = ui.copy(receiptTotalSyncInProgress = false, receiptDraft = updated,
+                    receiptItemsPage = result.page, receiptItemsReceiptId = receiptId,
+                    receiptItemsRequestedPage = page, receiptItemsLoading = false,
+                    receiptItemsError = if (result.pageRefreshError == null) null else "unavailable",
+                    receiptTotalSyncError = null)
             }
         }
     }
@@ -1246,6 +1322,8 @@ data class FinanceUiState(
     val receiptItemsError: String? = null,
     val receiptItemEditError: String? = null,
     val receiptItemEditSavedToken: String? = null,
+    val receiptTotalSyncError: String? = null,
+    val receiptTotalSyncInProgress: Boolean = false,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
@@ -1364,7 +1442,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptItemsPage: (String, Int) -> Unit = { _, _ -> },
                           onReceiptItemUpdate: (String, String, Long, String, String, String, String) -> Unit =
                               { _, _, _, _, _, _, _ -> },
-                          onReceiptItemRefresh: (String) -> Unit = {}) {
+                          onReceiptItemRefresh: (String) -> Unit = {},
+                          onReceiptTotalSync: (String, Long) -> Unit = { _, _ -> },
+                          onReceiptTotalSyncRefresh: (String) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -1597,8 +1677,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptItemsPage, state.receiptItemsReceiptId, state.receiptItemsRequestedPage,
                         state.receiptItemsLoading, state.receiptItemsError,
                         state.receiptItemEditError, state.receiptItemEditSavedToken,
+                        state.receiptTotalSyncError, state.receiptTotalSyncInProgress,
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
-                        onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh)
+                        onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
+                        onReceiptTotalSync, onReceiptTotalSyncRefresh)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -1807,12 +1889,15 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 receiptItemsRequestedPage: Int?, receiptItemsLoading: Boolean,
                                 receiptItemsError: String?, receiptItemEditError: String?,
                                 receiptItemEditSavedToken: String?,
+                                receiptTotalSyncError: String?, receiptTotalSyncInProgress: Boolean,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
                                 onLoadReading: (String) -> Unit,
                                 onLoadItemsPage: (String, Int) -> Unit,
                                 onUpdateItem: (String, String, Long, String, String, String, String) -> Unit,
-                                onRefreshItem: (String) -> Unit) {
+                                onRefreshItem: (String) -> Unit,
+                                onSyncTotal: (String, Long) -> Unit,
+                                onRefreshTotalSync: (String) -> Unit) {
     var pageNumber by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableIntStateOf(1)
     }
@@ -1927,6 +2012,56 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                             draft.merchant?.let { Text(it) }
                             draft.receiptDate?.let { Text(it) }
                             draft.cashTotal?.let { Text(formatMoney(it, language, draft.currency)) }
+                        }
+                    }
+                }
+            }
+            receipt?.let { draft ->
+                Card(Modifier.fillMaxWidth().testTag("receipt-totals")) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("${if (russian) "По чеку" else "Cash total"}: ${draft.cashTotal?.let {
+                            formatMoney(it, language, draft.currency)
+                        } ?: "—"}", modifier = Modifier.testTag("receipt-cash-total"))
+                        Text("${if (russian) "По позициям" else "Items total"}: ${draft.itemsTotal?.let {
+                            formatMoney(it, language, draft.currency)
+                        } ?: "—"}", modifier = Modifier.testTag("receipt-items-total"))
+                        if (receiptTotalSyncError != null) {
+                            val message = when (receiptTotalSyncError) {
+                                "incomplete_items" -> if (russian)
+                                    "Итог позиций должен быть полным и больше нуля. Проверьте чек перед синхронизацией."
+                                else "Item total must be complete and greater than zero. Check the receipt before syncing."
+                                "stale_version" -> if (russian)
+                                    "Чек изменился. Обновите чек перед повторной синхронизацией."
+                                else "Receipt changed. Refresh it before syncing again."
+                                "refresh_unavailable" -> if (russian)
+                                    "Не удалось обновить чек. Проверьте связь и повторите попытку."
+                                else "Could not refresh the receipt. Check your connection and retry."
+                                else -> if (russian) "Не удалось синхронизировать итог чека. Повторите попытку."
+                                else "Could not sync the receipt total. Please retry."
+                            }
+                            Text(message, modifier = Modifier.testTag("receipt-sync-error"),
+                                color = MaterialTheme.colorScheme.error)
+                            if (receiptTotalSyncError == "stale_version" ||
+                                receiptTotalSyncError == "refresh_unavailable") {
+                                TextButton(modifier = Modifier.testTag("receipt-sync-refresh"),
+                                    enabled = !receiptTotalSyncInProgress, onClick = {
+                                        onRefreshTotalSync(draft.id)
+                                    }) {
+                                    Text(if (russian) "Обновить чек" else "Refresh receipt")
+                                }
+                            }
+                        }
+                        val cashValue = draft.cashTotal?.toBigDecimalOrNull()
+                        val itemsValue = draft.itemsTotal?.toBigDecimalOrNull()
+                        val totalsDiffer = if (cashValue != null && itemsValue != null)
+                            cashValue.compareTo(itemsValue) != 0
+                        else draft.cashTotal != draft.itemsTotal
+                        if (canWrite && draft.transactionId == null && draft.state != "confirmed" && totalsDiffer) {
+                            Button(modifier = Modifier.testTag("receipt-sync-total"),
+                                enabled = !receiptTotalSyncInProgress && !busy,
+                                onClick = { onSyncTotal(draft.id, draft.version) }) {
+                                Text(if (russian) "Синхронизировать итог" else "Sync receipt total")
+                            }
                         }
                     }
                 }
