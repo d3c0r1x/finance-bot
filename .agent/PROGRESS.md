@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-08, Europe/Moscow.
+Updated: 2026-10-09, Europe/Moscow.
 
 ## Global plan
 
@@ -23,13 +23,14 @@ Updated: 2026-10-08, Europe/Moscow.
 - F59.2 F09 basic search/type filters observed RED then GREEN; API 27 full instrumentation 54/54. Updated debug APK SHA-256: `FB008F9E13114578347D653E602C158C3870886AF379263F8124931CBABCC937`; `MainActivity` is resumed on isolated API 27 emulator. Remaining: server-backed date/member filters, cursor paging, transaction editing, and live Core E2E.
 - F59.2 F03.1 first-time onboarding is locally GREEN and pushed in `1395decae6c50d337193fb6ec3810e6710484116`. F03 Android stays PARTIAL because repeat setup from profile is a later slice. Live OIDC/Core E2E, remaining parity, and F60/production gates remain.
 - F59.2 F14.1 Android receipt evidence review is locally GREEN and pushed in `69dcb25` (`feat(android): review receipt reading evidence`). Core provides owner-scoped `GET /api/v1/tenants/{tenantId}/receipts/{receiptId}/readings`; Android now has typed exact-value models, authenticated read-only fetch, scrollable OCR/Vision evidence, localized fallback reasons and unknown-category presentation. F14 Android remains PARTIAL until later receipt edit/reconciliation flows and live OIDC/Core E2E.
+- F59.2 F15.1 Android read-only receipt-item browsing is locally GREEN; commit pending. Authenticated owner-scoped paging uses fixed 8-row pages, preserves exact item values and versions, gates Next by loaded-page `hasMore`, and performs no mutations.
 - User-owned untracked paths `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/` are out of scope and untouched.
 - Latest F03.1 verification: JVM unit suite GREEN; `assembleDebug` and `assembleDebugAndroidTest` GREEN; full API 27 instrumentation 104/104; parity contracts 60/60 via project `.venv`; debug APK installed/launched on isolated `emulator-5558`, PID 10980, SHA-256 `453A36AB1D74D6CC4D88F99DC1EB8F80B081D0FC28169D9086D0A75DE2F11E73`.
 - `gh run list --commit 1395dec` returned no workflow runs; local verification is complete, remote CI is not confirmed.
 - F14.1 TDD evidence: observed RED for missing API/model/state; later RED exposed inaccessible non-scrollable evidence and untranslated Core fallback codes. GREEN: API 10/10, receipt screens 16/16, JVM 12/12, full isolated API 27 instrumentation 112/112, debug and Android-test APK builds, and parity contracts 60/60. `git diff --check` clean.
 - Runtime proof: installed fresh `com.decorix.finance.debug` on isolated Android 8.1 `emulator-5558`; `MainActivity` resumed, PID 16317. APK SHA-256 `A5ED96A8C199CB6283E9B1178A8A464B8FD6DE2E1C6A15E50DC3CB66EBC72693`; screenshot SHA-256 `13BCA9B4EAA6F76AEE011E77D5357A3F5A38E166C6118B53739F26EE01EF9DD8`. No live OIDC/Core E2E was exercised.
 - Remote CI: `gh run list --commit 69dcb25 --limit 10` returned no runs; GitHub CI is not confirmed.
-- Next: continue F59.2 with F15.1 Android receipt item review/editing while retaining the no-auto-post and unchanged-cash-total safeguards.
+- Next: observe F15.1 API and Compose REDs for ordered pages of eight, exact item values, Previous/Next gating by `hasMore`, and no mutations; then implement only the read-only browse flow.
 
 ## Goals
 
@@ -1666,3 +1667,14 @@ Updated: 2026-10-08, Europe/Moscow.
 - Acceptance: authenticated Android GET uses `/api/v1/tenants/{tenantId}/receipts/{receiptId}/readings`; typed parser preserves raw OCR text/word coordinates, provenance, exact decimal strings, reconciliation, nullable Vision reading. Compose renders scrollable evidence and `categorySource` in RU/EN, translates known fallback reasons without exposing machine codes, unknown values remain visibly unknown, and reading failure does not fail or mutate the receipt draft. No transaction is posted.
 - Dependencies and constraints: F10.1 photo upload creates the draft; existing receipt API/model and F14 spec are source of truth. Synthetic fixtures only. No OCR content in logs or persistent local state. F14 stays partial until additional receipt editing/reconciliation flows land.
 - RED observed: `:app:compileDebugAndroidTestKotlin` failed on missing receipt-reading API/model/Compose-state seams; screen RED exposed inaccessible below-viewport evidence and raw fallback codes. GREEN: API 10/10, Compose 16/16, JVM 12/12, full API 27 instrumentation 112/112, `assembleDebug`, `assembleDebugAndroidTest`, contracts 60/60, and `git diff --check`. Fresh APK installed/launched on isolated Android 8.1; resumed `MainActivity`, PID 16317; SHA-256 `A5ED96A8C199CB6283E9B1178A8A464B8FD6DE2E1C6A15E50DC3CB66EBC72693`. No live OIDC/Core E2E. F14 Android remains partial until receipt edit/reconciliation flows land. Commit/push: `69dcb25`; remote CI has no run yet.
+
+## E4.107 F15.1 Android receipt item browsing/pagination — COMMIT_PENDING
+
+- Source of truth: `PLAN.md` F15 and Core `GET /api/v1/tenants/{tenantId}/receipts/{receiptId}/items?page=N`; authenticated owner-scoped route returns a 1-based page of exactly up to 8 ordered items plus required `page`, `totalItems`, and `hasMore` fields.
+- Acceptance: typed Android page parser preserves item IDs, order, version, nullable fields and exact decimal strings. The receipt owner can browse pages with Previous/Next; Next follows only `hasMore`, pages do not duplicate or skip items, and all displayed cash totals remain unchanged. Browse remains read-only, with no item add/edit/delete, total sync, duplicate decision, confirmation, or transaction post. Foreign-owner 404 propagates.
+- RED: API compile failed on the missing typed page API/DTO. Compose compile failed on missing page state/callback. Runtime tests then exposed absent quantity/unit-price display, duplicate request after manual Retry, and Next enabled after page-load error without a loaded `hasMore`. Test-only viewport issues were corrected: scroll to off-screen pager controls/content and match the combined item row by substring.
+- GREEN: `FinanceReceiptApiTest` 12/12; `FinanceReceiptScreensTest` 19/19; JVM 12/12; full isolated API 27 instrumentation 117/117 with zero skipped/failures; `assembleDebug` and `assembleDebugAndroidTest` successful; parity contracts 60/60; `git diff --check` clean. Synthetic 9-item acceptance verifies 8→1→8 paging, exact quantity/unitPrice/lineSum, item IDs/versions/order, unchanged cash total, and no mutation/post callbacks. Retry is exactly one request; Next remains disabled after page-load failure until a response provides `hasMore`.
+- Runtime proof: installed and launched `com.decorix.finance.debug` on isolated Android 8.1 `emulator-5558`; resumed `MainActivity`, PID 7078. APK SHA-256 `11D7875BD40FADC392C79C7B9D51ADE1F6774AD4DCFF812D90C28BB287E0E6F7`. Runtime screen is login; live authenticated Android-to-Core OIDC E2E was not available. No Core changes; existing endpoint is owner-scoped and foreign-receipt 404 is verified by API test.
+- Review: independent API reviewer found no blocking or important findings.
+- Commit state: COMMIT_PENDING. GitHub CI status not yet checked for this revision.
+- Constraints: synthetic fixtures only; no Core changes because endpoint already exists. `totalItems` is non-null in the Core contract, so no fabricated unknown-total behavior is added.

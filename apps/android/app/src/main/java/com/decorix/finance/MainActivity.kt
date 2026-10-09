@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
     private val receiptPollExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val receiptPollGeneration = AtomicLong(0L)
     private val receiptReadingGeneration = AtomicLong(0L)
+    private val receiptItemsGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -136,7 +137,8 @@ class MainActivity : ComponentActivity() {
                         onReceiptRefresh = ::refreshReceiptJob,
                         onReceiptRetry = ::retryReceiptPhotoUpload,
                         onReceiptDiscard = ::discardPendingReceiptPhoto,
-                        onReceiptReading = ::loadReceiptReading)
+                        onReceiptReading = ::loadReceiptReading,
+                        onReceiptItemsPage = ::loadReceiptItems)
                 }
             }
         }
@@ -192,12 +194,15 @@ class MainActivity : ComponentActivity() {
         ReceiptOperationGeneration.runIfCurrent(operationToken) {
             invalidateReceiptPoll()
             receiptReadingGeneration.incrementAndGet()
+            receiptItemsGeneration.incrementAndGet()
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             pendingReceiptUri = uri
             pendingReceiptKey = java.util.UUID.randomUUID().toString()
             ui = ui.copy(receiptJob = null, receiptDraft = null, receiptUploadError = null,
                 receiptReading = null, receiptReadingReceiptId = null, receiptReadingLoading = false,
                 receiptReadingError = null,
+                receiptItemsPage = null, receiptItemsReceiptId = null, receiptItemsRequestedPage = null,
+                receiptItemsLoading = false, receiptItemsError = null,
                 receiptCanRetryUpload = true, receiptCheckpointUnresolved = true)
         } ?: return
         uploadSelectedReceiptPhoto(operationToken)
@@ -365,6 +370,34 @@ class MainActivity : ComponentActivity() {
                         ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
                         ui = ui.copy(receiptReading = null, receiptReadingLoading = false,
                             receiptReadingError = "unavailable")
+                    }
+                }
+        }
+    }
+
+    private fun loadReceiptItems(receiptId: String, page: Int) {
+        if (page < 1) return
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (ui.receiptDraft?.id != receiptId) return
+        val generation = receiptItemsGeneration.incrementAndGet()
+        ui = ui.copy(receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = page,
+            receiptItemsLoading = true, receiptItemsError = null)
+        executor.execute {
+            if (receiptItemsGeneration.get() != generation) return@execute
+            runCatching { api.receiptItems(tenantId, receiptId, page) }
+                .onSuccess { itemPage ->
+                    if (receiptItemsGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId &&
+                        ui.receiptItemsRequestedPage == page) {
+                        ui = ui.copy(receiptItemsPage = itemPage, receiptItemsReceiptId = receiptId,
+                            receiptItemsRequestedPage = page, receiptItemsLoading = false, receiptItemsError = null)
+                    }
+                }
+                .onFailure {
+                    if (receiptItemsGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId &&
+                        ui.receiptItemsRequestedPage == page) {
+                        ui = ui.copy(receiptItemsLoading = false, receiptItemsError = "unavailable")
                     }
                 }
         }
@@ -1048,6 +1081,7 @@ class MainActivity : ComponentActivity() {
     private fun logout() {
         ReceiptOperationGeneration.invalidate()
         receiptReadingGeneration.incrementAndGet()
+        receiptItemsGeneration.incrementAndGet()
         receiptPickerOperationToken = null
         invalidateReceiptPoll()
         ui = ui.copy(busy = true, error = null)
@@ -1125,6 +1159,11 @@ data class FinanceUiState(
     val receiptReadingReceiptId: String? = null,
     val receiptReadingLoading: Boolean = false,
     val receiptReadingError: String? = null,
+    val receiptItemsPage: FinanceReceiptItemPage? = null,
+    val receiptItemsReceiptId: String? = null,
+    val receiptItemsRequestedPage: Int? = null,
+    val receiptItemsLoading: Boolean = false,
+    val receiptItemsError: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
@@ -1192,7 +1231,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptRefresh: () -> Unit = {},
                           onReceiptRetry: () -> Unit = {},
                           onReceiptDiscard: () -> Unit = {},
-                          onReceiptReading: (String) -> Unit = {}) {
+                          onReceiptReading: (String) -> Unit = {},
+                          onReceiptItemsPage: (String, Int) -> Unit = { _, _ -> }) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -1422,7 +1462,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptUploadError, state.receiptCanRetryUpload, state.busy,
                         state.receiptCheckpointUnresolved, state.receiptReading,
                         state.receiptReadingReceiptId, state.receiptReadingLoading, state.receiptReadingError,
-                        onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading)
+                        state.receiptItemsPage, state.receiptItemsReceiptId, state.receiptItemsRequestedPage,
+                        state.receiptItemsLoading, state.receiptItemsError,
+                        onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
+                        onReceiptItemsPage)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -1627,9 +1670,31 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 canRetryUpload: Boolean, busy: Boolean, checkpointUnresolved: Boolean,
                                 reading: FinanceReceiptReading?, readingReceiptId: String?, readingLoading: Boolean,
                                 readingError: String?,
+                                receiptItemsPage: FinanceReceiptItemPage?, receiptItemsReceiptId: String?,
+                                receiptItemsRequestedPage: Int?, receiptItemsLoading: Boolean,
+                                receiptItemsError: String?,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
-                                onLoadReading: (String) -> Unit) {
+                                onLoadReading: (String) -> Unit,
+                                onLoadItemsPage: (String, Int) -> Unit) {
+    var pageNumber by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableIntStateOf(1)
+    }
+    var lastRequestedPage by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf<Int?>(null)
+    }
+    androidx.compose.runtime.LaunchedEffect(receipt?.id, receipt?.itemCount, pageNumber,
+        receiptItemsPage?.page, receiptItemsReceiptId, receiptItemsRequestedPage, receiptItemsLoading) {
+        val currentReceipt = receipt ?: return@LaunchedEffect
+        val pageLoaded = receiptItemsReceiptId == currentReceipt.id && receiptItemsPage?.page == pageNumber
+        val embeddedFirstPageAvailable = pageNumber == 1 && currentReceipt.items.size >= minOf(8, currentReceipt.itemCount)
+        val requestInProgress = receiptItemsLoading && receiptItemsReceiptId == currentReceipt.id &&
+            receiptItemsRequestedPage == pageNumber
+        if (!pageLoaded && !embeddedFirstPageAvailable && !requestInProgress && lastRequestedPage != pageNumber) {
+            lastRequestedPage = pageNumber
+            onLoadItemsPage(currentReceipt.id, pageNumber)
+        }
+    }
     val russian = language == "ru"
     val activeJob = job?.state in setOf<String?>("queued", "running", "retryable") ||
         (job?.state == "completed" && receipt == null && errorCode != null)
@@ -1695,7 +1760,6 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                             draft.receiptDate?.let { Text(it) }
                             draft.cashTotal?.let { Text(formatMoney(it, language, draft.currency)) }
                             Text(if (russian) "Позиций: ${draft.itemCount}" else "Items: ${draft.itemCount}")
-                            draft.items.forEach { item -> Text(item.name) }
                         }
                     }
                 }
@@ -1709,12 +1773,75 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                             draft.merchant?.let { Text(it) }
                             draft.receiptDate?.let { Text(it) }
                             draft.cashTotal?.let { Text(formatMoney(it, language, draft.currency)) }
-                            draft.items.forEach { Text(it.name) }
                         }
                     }
                 }
             }
             receipt?.let { draft ->
+                val currentItemsPage = receiptItemsPage?.takeIf {
+                    receiptItemsReceiptId == draft.id && it.page == pageNumber
+                } ?: if (pageNumber == 1 && draft.items.size >= minOf(8, draft.itemCount)) {
+                    FinanceReceiptItemPage(draft.items.take(8), 1, draft.itemCount, draft.itemCount > 8)
+                } else null
+                if (draft.itemCount > 0 || currentItemsPage != null) {
+                    Card(Modifier.fillMaxWidth().testTag("receipt-items")) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(if (russian) "Позиции чека" else "Receipt items",
+                                style = MaterialTheme.typography.titleSmall)
+                            Text(if (russian) "Страница $pageNumber" else "Page $pageNumber",
+                                modifier = Modifier.testTag("receipt-items-page"))
+                            currentItemsPage?.items?.forEach { item ->
+                                val quantity = item.quantity?.let { "$it × " }.orEmpty()
+                                val unitPrice = item.unitPrice?.let { "$it · " }.orEmpty()
+                                Text("${item.name} · $quantity$unitPrice${item.lineSum ?: "—"} ₽",
+                                    modifier = Modifier.testTag("receipt-item-${item.id}"))
+                            }
+                            if (receiptItemsLoading && (receiptItemsReceiptId == null || receiptItemsReceiptId == draft.id) &&
+                                (receiptItemsRequestedPage == null || receiptItemsRequestedPage == pageNumber)) {
+                                Text(if (russian) "Загружаем позиции…" else "Loading items…",
+                                    modifier = Modifier.testTag("receipt-items-loading"))
+                            }
+                            if (receiptItemsError != null &&
+                                (receiptItemsReceiptId == null || receiptItemsReceiptId == draft.id) &&
+                                (receiptItemsRequestedPage == null || receiptItemsRequestedPage == pageNumber)) {
+                                Text(if (russian) "Не удалось загрузить позиции чека."
+                                    else "Could not load receipt items.",
+                                    modifier = Modifier.testTag("receipt-items-error"),
+                                    color = MaterialTheme.colorScheme.error)
+                                TextButton(modifier = Modifier.testTag("receipt-items-retry"),
+                                    enabled = !receiptItemsLoading, onClick = {
+                                        // Keep the page marked as requested: this click already retries it.
+                                        // Clearing the guard lets LaunchedEffect issue a hidden duplicate.
+                                        lastRequestedPage = pageNumber
+                                        onLoadItemsPage(draft.id, pageNumber)
+                                    }) {
+                                    Text(if (russian) "Повторить" else "Retry")
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(modifier = Modifier.testTag("receipt-items-previous"),
+                                    enabled = pageNumber > 1 && !receiptItemsLoading, onClick = {
+                                        val previous = (pageNumber - 1).coerceAtLeast(1)
+                                        pageNumber = previous
+                                        lastRequestedPage = previous
+                                        onLoadItemsPage(draft.id, previous)
+                                    }) {
+                                    Text(if (russian) "Назад" else "Previous")
+                                }
+                                TextButton(modifier = Modifier.testTag("receipt-items-next"),
+                                    enabled = currentItemsPage?.hasMore == true && !receiptItemsLoading,
+                                    onClick = {
+                                        val next = pageNumber + 1
+                                        pageNumber = next
+                                        lastRequestedPage = next
+                                        onLoadItemsPage(draft.id, next)
+                                    }) {
+                                    Text(if (russian) "Далее" else "Next")
+                                }
+                            }
+                        }
+                    }
+                }
                 val currentReading = reading.takeIf { readingReceiptId == null || readingReceiptId == draft.id }
                 val sourceLabel = when (draft.categorySource) {
                     "human" -> if (russian) "вручную" else "manual"

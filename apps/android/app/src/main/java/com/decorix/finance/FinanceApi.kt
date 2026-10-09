@@ -99,6 +99,11 @@ class FinanceApi internal constructor(
         JSONObject(execute("/api/v1/tenants/$tenantId/receipts/$receiptId/readings", "GET")),
     )
 
+    fun receiptItems(tenantId: String, receiptId: String, page: Int = 1): FinanceReceiptItemPage =
+        FinanceModels.receiptItemPage(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/items?page=$page", "GET",
+        )))
+
     fun transactions(tenantId: String, search: String = "", type: String = "all", cursor: String? = null,
                      from: String? = null, to: String? = null, memberId: String? = null): FinanceTransactionPage {
         val filters = FinanceModels.transactionQuery(cursor = cursor, from = from, to = to,

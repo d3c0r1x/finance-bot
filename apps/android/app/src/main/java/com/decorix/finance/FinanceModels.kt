@@ -319,6 +319,13 @@ data class FinanceReceiptItem(
     val version: Long,
 )
 
+data class FinanceReceiptItemPage(
+    val items: List<FinanceReceiptItem>,
+    val page: Int,
+    val totalItems: Int,
+    val hasMore: Boolean,
+)
+
 data class FinanceReceiptReading(
     val text: String,
     val words: List<Map<String, Any?>>,
@@ -514,6 +521,16 @@ internal object FinanceModels {
             items = items,
             itemCount = json.getInt("itemCount"),
             createdAt = json.getString("createdAt"),
+        )
+    }
+
+    fun receiptItemPage(json: JSONObject): FinanceReceiptItemPage {
+        val rows = json.getJSONArray("items")
+        return FinanceReceiptItemPage(
+            items = (0 until rows.length()).map { index -> receiptItem(rows.getJSONObject(index)) },
+            page = json.getInt("page"),
+            totalItems = json.getInt("totalItems"),
+            hasMore = json.getBoolean("hasMore"),
         )
     }
 

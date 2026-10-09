@@ -182,6 +182,68 @@ class FinanceReceiptApiTest {
         assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
     }
 
+    @Test fun receiptItemsFetchesOrderedPagesOfEightWithExactValuesAndOwnerAuthorization() {
+        val pageOneItems = (1..8).map(::receiptItemJson)
+        val pageTwoItems = listOf(receiptItemJson(9))
+        server.enqueue(MockResponse().setBody(receiptItemPageJson(pageOneItems, page = 1, totalItems = 9, hasMore = true)))
+        server.enqueue(MockResponse().setBody(receiptItemPageJson(pageTwoItems, page = 2, totalItems = 9, hasMore = false)))
+
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val firstPage = api.receiptItems("tenant-17", "receipt-42", page = 1)
+        val secondPage = api.receiptItems("tenant-17", "receipt-42", page = 2)
+
+        assertEquals(1, firstPage.page)
+        assertEquals(9, firstPage.totalItems)
+        assertTrue(firstPage.hasMore)
+        assertEquals(8, firstPage.items.size)
+        assertEquals((1..8).map(::receiptItemId), firstPage.items.map { it.id })
+        assertEquals("Synthetic item 1", firstPage.items.first().name)
+        assertEquals("1.000", firstPage.items.first().quantity)
+        assertEquals("0.10", firstPage.items.first().unitPrice)
+        assertEquals("0.10", firstPage.items.first().lineSum)
+        assertEquals(1L, firstPage.items.first().version)
+        assertEquals(null, firstPage.items.first().productKey)
+        assertEquals(null, firstPage.items.first().categoryCode)
+        assertEquals(null, firstPage.items.first().verdict)
+        assertEquals(null, firstPage.items.first().confidence)
+
+        assertEquals(2, secondPage.page)
+        assertEquals(9, secondPage.totalItems)
+        assertFalse(secondPage.hasMore)
+        assertEquals(listOf(receiptItemId(9)), secondPage.items.map { it.id })
+        assertEquals("0.90", secondPage.items.single().lineSum)
+        assertEquals(9L, secondPage.items.single().version)
+        assertTrue((firstPage.items + secondPage.items).map { it.id }.distinct().size == 9)
+
+        val firstRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        val secondRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", firstRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/items?page=1", firstRequest.path)
+        assertEquals("Bearer receipt-owner-token", firstRequest.getHeader("Authorization"))
+        assertEquals("GET", secondRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/items?page=2", secondRequest.path)
+        assertEquals("Bearer receipt-owner-token", secondRequest.getHeader("Authorization"))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test fun foreignReceiptItemPage404IsPropagatedWithoutInventingRows() {
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"detail":"not found"}"""))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val failure = runCatching { api.receiptItems("tenant-17", "foreign-receipt", page = 1) }.exceptionOrNull()
+
+        assertTrue(failure is ApiFailure)
+        assertEquals(404, (failure as ApiFailure).status)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/foreign-receipt/items?page=1", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals(1, server.requestCount)
+    }
+
     @Test fun budgetProposalAndApplyReuseCallerSuppliedIdempotencyKeys() {
         repeat(2) { server.enqueue(MockResponse().setBody(budgetProposalJson())) }
         repeat(2) { server.enqueue(MockResponse().setBody(budgetOverviewJson())) }
@@ -409,6 +471,41 @@ class FinanceReceiptApiTest {
          "receiptId":"${if (state == "completed") "receipt-42" else ""}",
          "createdAt":"2026-10-08T09:00:00Z","updatedAt":"2026-10-08T09:01:00Z"}
     """.trimIndent()
+
+    private fun receiptItemId(index: Int) = "00000000-0000-4000-8000-%012d".format(index)
+
+    private fun receiptItemJson(index: Int) = org.json.JSONObject()
+        .put("id", receiptItemId(index))
+        .put("name", "Synthetic item $index")
+        .put("quantity", "1.000")
+        .put("unitPrice", if (index == 9) "0.90" else "0.10")
+        .put("lineSum", if (index == 9) "0.90" else "0.10")
+        .put("productKey", org.json.JSONObject.NULL)
+        .put("provenance", "ocr")
+        .put("confidence", org.json.JSONObject.NULL)
+        .put("categoryCode", org.json.JSONObject.NULL)
+        .put("verdict", org.json.JSONObject.NULL)
+        .put("advice", org.json.JSONObject.NULL)
+        .put("reviewReason", org.json.JSONObject.NULL)
+        .put("reviewAction", org.json.JSONObject.NULL)
+        .put("verdictSource", org.json.JSONObject.NULL)
+        .put("reviewProvider", org.json.JSONObject.NULL)
+        .put("reviewModelVersion", org.json.JSONObject.NULL)
+        .put("reviewPromptVersion", org.json.JSONObject.NULL)
+        .put("reviewAlgorithmVersion", org.json.JSONObject.NULL)
+        .put("version", index)
+        .toString()
+
+    private fun receiptItemPageJson(items: List<String>, page: Int, totalItems: Int, hasMore: Boolean): String {
+        val jsonItems = org.json.JSONArray()
+        items.forEach { jsonItems.put(org.json.JSONObject(it)) }
+        return org.json.JSONObject()
+            .put("items", jsonItems)
+            .put("page", page)
+            .put("totalItems", totalItems)
+            .put("hasMore", hasMore)
+            .toString()
+    }
 
     private fun receiptJson() = """
         {"id":"receipt-42","tenantId":"tenant-17","documentId":"document-9","state":"review_required",

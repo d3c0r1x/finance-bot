@@ -1,10 +1,13 @@
 package com.decorix.finance
 
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -16,6 +19,7 @@ import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(AndroidJUnit4::class)
 class FinanceReceiptScreensTest {
@@ -62,11 +66,145 @@ class FinanceReceiptScreensTest {
         compose.onNodeWithTag("receipt-draft").assertIsDisplayed()
         compose.onNodeWithText("Магазин Тест").assertIsDisplayed()
         compose.onNodeWithText("245,70 ₽").assertIsDisplayed()
-        compose.onNodeWithText("Хлеб").assertIsDisplayed()
+        compose.onNodeWithText("Хлеб", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Черновик · проверьте данные").assertIsDisplayed()
         assertEquals(emptyList<String>(), created)
         assertEquals(emptyList<String>(), confirmed)
     }
+
+    @Test fun ownerBrowsesReceiptItemsEightThenOneThenEightWithoutMutationOrCashTotalChange() {
+        val firstPage = receiptItemPage((1..8).map(::receiptItem), page = 1, totalItems = 9, hasMore = true)
+        val secondPage = receiptItemPage(listOf(receiptItem(9)), page = 2, totalItems = 9, hasMore = false)
+        val cashTotal = "101.00"
+        val receipt = receiptDraft().copy(cashTotal = cashTotal, itemsTotal = "84.00", itemCount = 9,
+            items = firstPage.items)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, receiptItemsPage = firstPage, receiptItemsReceiptId = receipt.id,
+            receiptItemsLoading = false, receiptItemsError = null))
+        val requestedPages = mutableListOf<String>()
+        val created = mutableListOf<String>()
+        val confirmed = mutableListOf<String>()
+        show(state.value, onCreate = { type, amount, _ -> created += "$type:$amount" },
+            onConfirmDraft = { id, _ -> confirmed += id },
+            onReceiptItemsPage = { receiptId, page ->
+                requestedPages += "$receiptId:$page"
+                state.value = state.value.copy(receiptItemsPage = if (page == 2) secondPage else firstPage,
+                    receiptItemsReceiptId = receiptId, receiptItemsLoading = false, receiptItemsError = null)
+            }, stateHolder = state)
+
+        val missingItemValues = mutableListOf<String>()
+        missingItemValues += assertReceiptItemPage(firstPage)
+        assertEquals(cashTotal, state.value.receiptDraft?.cashTotal)
+        compose.onNodeWithTag("receipt-items-next").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf("${receipt.id}:2"), requestedPages)
+        missingItemValues += assertReceiptItemPage(secondPage)
+        compose.onNodeWithTag("receipt-items-next").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("receipt-items-previous").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        missingItemValues += assertReceiptItemPage(firstPage)
+        assertEquals(listOf("${receipt.id}:2", "${receipt.id}:1"), requestedPages)
+        assertEquals(cashTotal, state.value.receiptDraft?.cashTotal)
+        compose.onNodeWithText("101,00 ₽").performScrollTo().assertIsDisplayed()
+        listOf("Добавить позицию", "Сохранить позицию", "Удалить позицию", "Синхронизировать итог",
+            "Решить дубликат", "Подтвердить чек").forEach { compose.onNodeWithText(it).assertDoesNotExist() }
+        assertEquals(emptyList<String>(), created)
+        assertEquals(emptyList<String>(), confirmed)
+        assertEquals("Missing exact item values: ${missingItemValues.joinToString()}", emptyList<String>(), missingItemValues)
+    }
+
+    @Test fun retryingReceiptItemsErrorDoesNotIssueHiddenThirdRequest() {
+        val firstPage = receiptItemPage((1..8).map(::receiptItem), page = 1, totalItems = 9, hasMore = true)
+        val receipt = receiptDraft().copy(itemCount = 9, items = firstPage.items)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, receiptItemsPage = firstPage, receiptItemsReceiptId = receipt.id,
+            receiptItemsLoading = false, receiptItemsError = null))
+        val requests = AtomicInteger()
+        val completions = AtomicInteger()
+        val handler = Handler(Looper.getMainLooper())
+        show(state.value, onReceiptItemsPage = { receiptId, page ->
+            requests.incrementAndGet()
+            state.value = state.value.copy(receiptItemsReceiptId = receiptId,
+                receiptItemsRequestedPage = page, receiptItemsLoading = true, receiptItemsError = null)
+            handler.postDelayed({
+                completions.incrementAndGet()
+                state.value = state.value.copy(receiptItemsRequestedPage = null,
+                    receiptItemsLoading = false, receiptItemsError = "unavailable")
+            }, 50)
+        }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-items-next").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { completions.get() >= 1 && state.value.receiptItemsError != null }
+        compose.onNodeWithTag("receipt-items-retry").performScrollTo().assertIsEnabled().performClick()
+        compose.waitUntil(5_000) {
+            requests.get() >= 3 || (completions.get() >= 2 && state.value.receiptItemsError != null &&
+                !state.value.receiptItemsLoading)
+        }
+        compose.waitForIdle()
+
+        assertEquals("Retry should make one additional request, not trigger a hidden third request", 2, requests.get())
+    }
+
+    @Test fun nextWaitsForPageHasMoreAfterPageLoadError() {
+        val firstPage = receiptItemPage((1..8).map(::receiptItem), page = 1, totalItems = 25, hasMore = true)
+        val secondPage = receiptItemPage((9..16).map(::receiptItem), page = 2, totalItems = 25, hasMore = true)
+        val receipt = receiptDraft().copy(itemCount = 25, items = firstPage.items)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, receiptItemsPage = firstPage, receiptItemsReceiptId = receipt.id,
+            receiptItemsLoading = false, receiptItemsError = null))
+        val requestedPages = mutableListOf<Int>()
+        show(state.value, onReceiptItemsPage = { receiptId, page ->
+            requestedPages += page
+            state.value = state.value.copy(receiptItemsReceiptId = receiptId,
+                receiptItemsRequestedPage = page, receiptItemsLoading = false, receiptItemsError = "unavailable")
+        }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-items-next").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(2), requestedPages)
+        compose.onNodeWithTag("receipt-items-error").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-items-next").performScrollTo().assertIsNotEnabled()
+
+        state.value = state.value.copy(receiptItemsPage = secondPage, receiptItemsReceiptId = receipt.id,
+            receiptItemsRequestedPage = null, receiptItemsLoading = false, receiptItemsError = null)
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-items-next").performScrollTo().assertIsEnabled()
+    }
+
+    private fun assertReceiptItemPage(page: FinanceReceiptItemPage): List<String> {
+        val missingValues = mutableListOf<String>()
+        compose.onNodeWithTag("receipt-items-page").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Страница ${page.page}").performScrollTo().assertIsDisplayed()
+        page.items.forEach { item ->
+            val row = compose.onNodeWithTag("receipt-item-${item.id}").performScrollTo().assertIsDisplayed()
+            listOf(item.name, requireNotNull(item.quantity), requireNotNull(item.unitPrice),
+                requireNotNull(item.lineSum)).forEach { expected ->
+                try {
+                    row.assertTextContains(expected, substring = true)
+                } catch (_: AssertionError) {
+                    missingValues += "page ${page.page}: item ${item.id}: $expected"
+                }
+            }
+        }
+        val offPageIndex = if (page.page == 1) 9 else 1
+        compose.onNodeWithText("Synthetic item $offPageIndex", substring = true).assertDoesNotExist()
+        return missingValues
+    }
+
+    private fun receiptItemPage(items: List<FinanceReceiptItem>, page: Int, totalItems: Int,
+                                hasMore: Boolean) = FinanceReceiptItemPage(items, page, totalItems, hasMore)
+
+    private fun receiptItem(index: Int) = FinanceReceiptItem(
+        id = "00000000-0000-4000-8000-%012d".format(index), name = "Synthetic item $index",
+        quantity = "$index.000", unitPrice = "$index.10", lineSum = "$index.100",
+        productKey = null, provenance = "ocr",
+        confidence = null, categoryCode = null, verdict = null, advice = null, reviewReason = null,
+        reviewAction = null, verdictSource = null, reviewProvider = null, reviewModelVersion = null,
+        reviewPromptVersion = null, reviewAlgorithmVersion = null, version = index.toLong(),
+    )
 
     @Test fun visionReadingStaysUnverifiedAndUnknownDraftFieldsStayNullInRussianAndEnglish() {
         val draft = receiptDraft().copy(merchant = null, receiptDate = null, cashTotal = null,
@@ -115,7 +253,7 @@ class FinanceReceiptScreensTest {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
             receiptDraft = draft, receiptReadingError = "not_found"))
 
-        compose.onNodeWithTag("receipt-reading-unavailable").assertIsDisplayed()
+        compose.onNodeWithTag("receipt-reading-unavailable").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("receipt-reading").assertDoesNotExist()
         assertNull(draft.merchant)
         assertNull(draft.receiptDate)
@@ -356,6 +494,7 @@ class FinanceReceiptScreensTest {
                      onConfirmDraft: (String, Long) -> Unit = { _, _ -> },
                      onReceiptRefresh: () -> Unit = {},
                      onReceiptDiscard: () -> Unit = {},
+                     onReceiptItemsPage: (String, Int) -> Unit = { _, _ -> },
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
         val language = mutableStateOf("ru")
         compose.setContent {
@@ -367,7 +506,8 @@ class FinanceReceiptScreensTest {
                     onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = {},
                     onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> },
                     onDebtForecast = {}, onReportLoad = { _, _, _, _, _ -> }, onReceiptPick = onReceiptPick,
-                    onReceiptRefresh = onReceiptRefresh, onReceiptDiscard = onReceiptDiscard)
+                    onReceiptRefresh = onReceiptRefresh, onReceiptDiscard = onReceiptDiscard,
+                    onReceiptItemsPage = onReceiptItemsPage)
             }
         }
         compose.waitForIdle()
