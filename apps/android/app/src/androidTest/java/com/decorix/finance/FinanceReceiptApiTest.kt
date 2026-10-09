@@ -244,6 +244,64 @@ class FinanceReceiptApiTest {
         assertEquals(1, server.requestCount)
     }
 
+    @Test fun updateReceiptItemPatchesExactValuesWithReceiptVersionAndKeepsCashTotal() {
+        val responseJson = org.json.JSONObject(receiptJson()).apply {
+            put("version", 5)
+            put("itemsTotal", "246.80")
+            getJSONArray("items").getJSONObject(0).apply {
+                put("name", "Ржаной хлеб")
+                put("quantity", "2.000")
+                put("unitPrice", "123.40")
+                put("lineSum", "246.80")
+                put("version", 2)
+            }
+        }
+        server.enqueue(MockResponse().setBody(responseJson.toString()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val updated = api.updateReceiptItem("tenant-17", "receipt-42", "item-3", 4,
+            "Ржаной хлеб", "2.000", "123.40", "246.80")
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PATCH", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/items/item-3", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"4\"", request.getHeader("If-Match"))
+        val body = org.json.JSONObject(request.body.readUtf8())
+        assertEquals(setOf("name", "quantity", "unitPrice", "lineSum"), body.keys().asSequence().toSet())
+        assertEquals("Ржаной хлеб", body.getString("name"))
+        assertEquals("2.000", body.getString("quantity"))
+        assertEquals("123.40", body.getString("unitPrice"))
+        assertEquals("246.80", body.getString("lineSum"))
+        assertEquals("245.70", updated.cashTotal)
+        assertEquals("246.80", updated.itemsTotal)
+        assertEquals(5L, updated.version)
+        val item = updated.items.single()
+        assertEquals("Ржаной хлеб", item.name)
+        assertEquals("2.000", item.quantity)
+        assertEquals("123.40", item.unitPrice)
+        assertEquals("246.80", item.lineSum)
+        assertEquals(2L, item.version)
+    }
+
+    @Test fun updateReceiptItemSurfacesPreconditionFailedVersion() {
+        server.enqueue(MockResponse().setResponseCode(412).setBody("""{"detail":"stale_version"}"""))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val failure = runCatching {
+            api.updateReceiptItem("tenant-17", "receipt-42", "item-3", 4,
+                "Ржаной хлеб", "2.000", "123.40", "246.80")
+        }.exceptionOrNull()
+
+        assertTrue("412 must be returned as an API failure", failure is ApiFailure)
+        assertEquals(412, (failure as ApiFailure).status)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PATCH", request.method)
+        assertEquals("\"4\"", request.getHeader("If-Match"))
+    }
+
     @Test fun budgetProposalAndApplyReuseCallerSuppliedIdempotencyKeys() {
         repeat(2) { server.enqueue(MockResponse().setBody(budgetProposalJson())) }
         repeat(2) { server.enqueue(MockResponse().setBody(budgetOverviewJson())) }

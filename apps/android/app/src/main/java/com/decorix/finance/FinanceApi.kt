@@ -104,6 +104,21 @@ class FinanceApi internal constructor(
             "/api/v1/tenants/$tenantId/receipts/$receiptId/items?page=$page", "GET",
         )))
 
+    fun updateReceiptItem(tenantId: String, receiptId: String, itemId: String, version: Long,
+                          name: String, quantity: String?, unitPrice: String?, lineSum: String?): FinanceReceipt {
+        require(version > 0) { "Invalid receipt version" }
+        val body = JSONObject()
+            .put("name", name)
+            .put("quantity", quantity ?: JSONObject.NULL)
+            .put("unitPrice", unitPrice ?: JSONObject.NULL)
+            .put("lineSum", lineSum ?: JSONObject.NULL)
+            .toString()
+        return FinanceModels.receipt(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/items/$itemId", "PATCH",
+            body, ifMatchVersion = version,
+        )))
+    }
+
     fun transactions(tenantId: String, search: String = "", type: String = "all", cursor: String? = null,
                      from: String? = null, to: String? = null, memberId: String? = null): FinanceTransactionPage {
         val filters = FinanceModels.transactionQuery(cursor = cursor, from = from, to = to,

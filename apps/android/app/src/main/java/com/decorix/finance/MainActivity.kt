@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
     private val receiptPollGeneration = AtomicLong(0L)
     private val receiptReadingGeneration = AtomicLong(0L)
     private val receiptItemsGeneration = AtomicLong(0L)
+    private val receiptItemEditGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -138,7 +139,9 @@ class MainActivity : ComponentActivity() {
                         onReceiptRetry = ::retryReceiptPhotoUpload,
                         onReceiptDiscard = ::discardPendingReceiptPhoto,
                         onReceiptReading = ::loadReceiptReading,
-                        onReceiptItemsPage = ::loadReceiptItems)
+                        onReceiptItemsPage = ::loadReceiptItems,
+                        onReceiptItemUpdate = ::updateReceiptItem,
+                        onReceiptItemRefresh = ::refreshReceiptAfterItemConflict)
                 }
             }
         }
@@ -400,6 +403,83 @@ class MainActivity : ComponentActivity() {
                         ui = ui.copy(receiptItemsLoading = false, receiptItemsError = "unavailable")
                     }
                 }
+        }
+    }
+
+    private fun updateReceiptItem(receiptId: String, itemId: String, receiptVersion: Long,
+                                  name: String, quantity: String, unitPrice: String, lineSum: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated || ui.receiptDraft?.id != receiptId || ui.busy) return
+        val generation = receiptItemEditGeneration.incrementAndGet()
+        val page = ui.receiptItemsPage?.page?.takeIf { ui.receiptItemsReceiptId == receiptId } ?: 1
+        ui = ui.copy(busy = true, receiptItemEditError = null, receiptItemEditSavedToken = null)
+        executor.execute {
+            if (receiptItemEditGeneration.get() != generation) return@execute
+            val result = updateReceiptItemWithPageRefresh(
+                update = {
+                    api.updateReceiptItem(tenantId, receiptId, itemId, receiptVersion,
+                        name, quantity.takeIf { it.isNotBlank() }, unitPrice.takeIf { it.isNotBlank() },
+                        lineSum.takeIf { it.isNotBlank() })
+                },
+                refreshPage = { updated ->
+                    if (page == 1) FinanceReceiptItemPage(updated.items.take(8), 1,
+                        updated.itemCount, updated.itemCount > 8)
+                    else api.receiptItems(tenantId, receiptId, page)
+                },
+            )
+            if (result.mutationError == null) {
+                val updated = requireNotNull(result.updatedReceipt)
+                val updatedPage = result.updatedPage
+                if (receiptItemEditGeneration.get() == generation && ui.authenticated &&
+                    ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
+                    ui = ui.copy(busy = false, receiptDraft = updated,
+                        receiptItemsPage = updatedPage,
+                        receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = page,
+                        receiptItemsLoading = false,
+                        receiptItemsError = if (result.pageRefreshError == null) null else "unavailable",
+                        receiptItemEditError = null,
+                        receiptItemEditSavedToken = "$receiptId:$itemId:${updated.version}")
+                }
+            } else {
+                val error = requireNotNull(result.mutationError)
+                if (receiptItemEditGeneration.get() == generation && ui.authenticated &&
+                    ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
+                    ui = ui.copy(busy = false,
+                        receiptItemEditError = if ((error as? ApiFailure)?.status == 412) "stale_version" else "unavailable")
+                }
+            }
+        }
+    }
+
+    private fun refreshReceiptAfterItemConflict(receiptId: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated || ui.receiptDraft?.id != receiptId || ui.busy) return
+        val generation = receiptItemEditGeneration.incrementAndGet()
+        val page = ui.receiptItemsPage?.page?.takeIf { ui.receiptItemsReceiptId == receiptId } ?: 1
+        val previousPage = ui.receiptItemsPage?.takeIf { ui.receiptItemsReceiptId == receiptId }
+        ui = ui.copy(busy = true, receiptItemEditError = null)
+        executor.execute {
+            if (receiptItemEditGeneration.get() != generation) return@execute
+            val result = refreshReceiptAfterConflictWithPage(
+                currentPage = previousPage,
+                refreshReceipt = { api.receipt(tenantId, receiptId) },
+                refreshPage = { updated ->
+                    if (page == 1) FinanceReceiptItemPage(updated.items.take(8), 1,
+                        updated.itemCount, updated.itemCount > 8)
+                    else api.receiptItems(tenantId, receiptId, page)
+                },
+            )
+            if (receiptItemEditGeneration.get() != generation || !ui.authenticated ||
+                ui.tenants.firstOrNull()?.id != tenantId || ui.receiptDraft?.id != receiptId) return@execute
+            if (result.receiptRefreshError != null) {
+                ui = ui.copy(busy = false, receiptItemEditError = "refresh_unavailable")
+            } else {
+                val updated = requireNotNull(result.updatedReceipt)
+                ui = ui.copy(busy = false, receiptDraft = updated, receiptItemEditError = null,
+                    receiptItemsPage = result.page, receiptItemsReceiptId = receiptId,
+                    receiptItemsRequestedPage = page, receiptItemsLoading = false,
+                    receiptItemsError = if (result.pageRefreshError == null) null else "unavailable")
+            }
         }
     }
 
@@ -1164,6 +1244,8 @@ data class FinanceUiState(
     val receiptItemsRequestedPage: Int? = null,
     val receiptItemsLoading: Boolean = false,
     val receiptItemsError: String? = null,
+    val receiptItemEditError: String? = null,
+    val receiptItemEditSavedToken: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
@@ -1191,6 +1273,53 @@ private data class FinanceWorkspaceSnapshot(
     val budgetAlerts: List<FinanceBudgetAlert>,
     val transactionEditSavedToken: String? = null,
 )
+
+internal data class ReceiptItemUpdateWithPageRefreshResult(
+    val updatedReceipt: FinanceReceipt? = null,
+    val updatedPage: FinanceReceiptItemPage? = null,
+    val mutationError: Throwable? = null,
+    val pageRefreshError: Throwable? = null,
+)
+
+internal data class ReceiptConflictRefreshResult(
+    val updatedReceipt: FinanceReceipt? = null,
+    val page: FinanceReceiptItemPage? = null,
+    val receiptRefreshError: Throwable? = null,
+    val pageRefreshError: Throwable? = null,
+)
+
+internal fun refreshReceiptAfterConflictWithPage(
+    currentPage: FinanceReceiptItemPage?,
+    refreshReceipt: () -> FinanceReceipt,
+    refreshPage: (FinanceReceipt) -> FinanceReceiptItemPage,
+): ReceiptConflictRefreshResult {
+    val updated = try {
+        refreshReceipt()
+    } catch (error: Exception) {
+        return ReceiptConflictRefreshResult(page = currentPage, receiptRefreshError = error)
+    }
+    return try {
+        ReceiptConflictRefreshResult(updatedReceipt = updated, page = refreshPage(updated))
+    } catch (error: Exception) {
+        ReceiptConflictRefreshResult(updatedReceipt = updated, page = currentPage, pageRefreshError = error)
+    }
+}
+
+internal fun updateReceiptItemWithPageRefresh(
+    update: () -> FinanceReceipt,
+    refreshPage: (FinanceReceipt) -> FinanceReceiptItemPage,
+): ReceiptItemUpdateWithPageRefreshResult {
+    val updated = try {
+        update()
+    } catch (error: Exception) {
+        return ReceiptItemUpdateWithPageRefreshResult(mutationError = error)
+    }
+    return try {
+        ReceiptItemUpdateWithPageRefreshResult(updatedReceipt = updated, updatedPage = refreshPage(updated))
+    } catch (error: Exception) {
+        ReceiptItemUpdateWithPageRefreshResult(updatedReceipt = updated, pageRefreshError = error)
+    }
+}
 
 data class FinanceTenant(val id: String, val name: String, val role: String, val timezone: String)
 
@@ -1232,7 +1361,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptRetry: () -> Unit = {},
                           onReceiptDiscard: () -> Unit = {},
                           onReceiptReading: (String) -> Unit = {},
-                          onReceiptItemsPage: (String, Int) -> Unit = { _, _ -> }) {
+                          onReceiptItemsPage: (String, Int) -> Unit = { _, _ -> },
+                          onReceiptItemUpdate: (String, String, Long, String, String, String, String) -> Unit =
+                              { _, _, _, _, _, _, _ -> },
+                          onReceiptItemRefresh: (String) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -1464,8 +1596,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptReadingReceiptId, state.receiptReadingLoading, state.receiptReadingError,
                         state.receiptItemsPage, state.receiptItemsReceiptId, state.receiptItemsRequestedPage,
                         state.receiptItemsLoading, state.receiptItemsError,
+                        state.receiptItemEditError, state.receiptItemEditSavedToken,
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
-                        onReceiptItemsPage)
+                        onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -1672,13 +1805,34 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 readingError: String?,
                                 receiptItemsPage: FinanceReceiptItemPage?, receiptItemsReceiptId: String?,
                                 receiptItemsRequestedPage: Int?, receiptItemsLoading: Boolean,
-                                receiptItemsError: String?,
+                                receiptItemsError: String?, receiptItemEditError: String?,
+                                receiptItemEditSavedToken: String?,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
                                 onLoadReading: (String) -> Unit,
-                                onLoadItemsPage: (String, Int) -> Unit) {
+                                onLoadItemsPage: (String, Int) -> Unit,
+                                onUpdateItem: (String, String, Long, String, String, String, String) -> Unit,
+                                onRefreshItem: (String) -> Unit) {
     var pageNumber by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableIntStateOf(1)
+    }
+    var editingItemId by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    }
+    var editName by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf("")
+    }
+    var editQuantity by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf("")
+    }
+    var editUnitPrice by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf("")
+    }
+    var editLineSum by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf("")
+    }
+    androidx.compose.runtime.LaunchedEffect(receiptItemEditSavedToken) {
+        if (receiptItemEditSavedToken != null) editingItemId = null
     }
     var lastRequestedPage by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableStateOf<Int?>(null)
@@ -1793,8 +1947,72 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                             currentItemsPage?.items?.forEach { item ->
                                 val quantity = item.quantity?.let { "$it × " }.orEmpty()
                                 val unitPrice = item.unitPrice?.let { "$it · " }.orEmpty()
-                                Text("${item.name} · $quantity$unitPrice${item.lineSum ?: "—"} ₽",
-                                    modifier = Modifier.testTag("receipt-item-${item.id}"))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Text("${item.name} · $quantity$unitPrice${item.lineSum ?: "—"} ₽",
+                                        modifier = Modifier.weight(1f).testTag("receipt-item-${item.id}"))
+                                    if (canWrite) TextButton(
+                                        modifier = Modifier.testTag("receipt-item-edit-${item.id}"),
+                                        enabled = !busy, onClick = {
+                                            editingItemId = item.id
+                                            editName = item.name
+                                            editQuantity = item.quantity.orEmpty()
+                                            editUnitPrice = item.unitPrice.orEmpty()
+                                            editLineSum = item.lineSum.orEmpty()
+                                        }) {
+                                        Text(if (russian) "Изменить" else "Edit")
+                                    }
+                                }
+                                if (canWrite && editingItemId == item.id) {
+                                    Column(Modifier.fillMaxWidth().padding(top = 4.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        OutlinedTextField(editName, { editName = it }, modifier = Modifier
+                                            .fillMaxWidth().testTag("receipt-item-edit-name"),
+                                            label = { Text(if (russian) "Название" else "Name") }, singleLine = true)
+                                        OutlinedTextField(editQuantity, { editQuantity = it }, modifier = Modifier
+                                            .fillMaxWidth().testTag("receipt-item-edit-quantity"),
+                                            label = { Text(if (russian) "Количество" else "Quantity") }, singleLine = true)
+                                        OutlinedTextField(editUnitPrice, { editUnitPrice = it }, modifier = Modifier
+                                            .fillMaxWidth().testTag("receipt-item-edit-unit-price"),
+                                            label = { Text(if (russian) "Цена за единицу" else "Unit price") }, singleLine = true)
+                                        OutlinedTextField(editLineSum, { editLineSum = it }, modifier = Modifier
+                                            .fillMaxWidth().testTag("receipt-item-edit-line-sum"),
+                                            label = { Text(if (russian) "Сумма позиции" else "Line total") }, singleLine = true)
+                                        if (receiptItemEditError != null) {
+                                            val message = when (receiptItemEditError) {
+                                                "stale_version" -> if (russian)
+                                                    "Чек изменился. Ваши значения сохранены в форме. Обновите чек перед повторным сохранением."
+                                                else "The receipt changed. Your edits are preserved in the form. Refresh the receipt before saving again."
+                                                "refresh_unavailable" -> if (russian)
+                                                    "Не удалось обновить чек. Проверьте связь и повторите попытку."
+                                                else "Could not refresh the receipt. Check your connection and retry."
+                                                else -> if (russian) "Не удалось сохранить позицию. Проверьте связь и повторите попытку."
+                                                else "Could not save this item. Check your connection and retry."
+                                            }
+                                            Text(message, modifier = Modifier.testTag("receipt-item-edit-error"),
+                                                color = MaterialTheme.colorScheme.error)
+                                            if (receiptItemEditError == "stale_version" ||
+                                                receiptItemEditError == "refresh_unavailable") {
+                                                TextButton(modifier = Modifier.testTag("receipt-item-edit-refresh"),
+                                                    enabled = !busy, onClick = { onRefreshItem(draft.id) }) {
+                                                    Text(if (russian) "Обновить чек" else "Refresh receipt")
+                                                }
+                                            }
+                                        }
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(modifier = Modifier.testTag("receipt-item-edit-save"),
+                                                enabled = !busy && editName.isNotBlank(), onClick = {
+                                                    onUpdateItem(draft.id, item.id, draft.version, editName,
+                                                        editQuantity, editUnitPrice, editLineSum)
+                                                }) {
+                                                Text(if (russian) "Сохранить" else "Save")
+                                            }
+                                            TextButton(enabled = !busy, onClick = { editingItemId = null }) {
+                                                Text(if (russian) "Отмена" else "Cancel")
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             if (receiptItemsLoading && (receiptItemsReceiptId == null || receiptItemsReceiptId == draft.id) &&
                                 (receiptItemsRequestedPage == null || receiptItemsRequestedPage == pageNumber)) {
