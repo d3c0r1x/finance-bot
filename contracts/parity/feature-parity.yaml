@@ -503,7 +503,7 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F24 acceptance condition or live Core integration."
+      gap: "Local synthetic Compose tests cover Core-backed monthly remainder, exact RU/EN pace and forecast, unavailable values, disabled limits and localized threshold alerts; live authenticated Android-to-Core OIDC E2E remains unverified."
     intentional_differences: []
   - id: F25
     feature: "Недельный food limit и скользящие 7 дней; `services/forecast.py`"

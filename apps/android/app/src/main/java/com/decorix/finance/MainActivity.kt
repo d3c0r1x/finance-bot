@@ -4933,11 +4933,24 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
                 Text(if (russian) "Операций: ${summary.transactionCount}" else "Transactions: ${summary.transactionCount}")
             }
         }
+        state.report?.takeIf { report ->
+            report.period == "month" && report.scope == "personal" &&
+                report.fromDate.startsWith(summary.month) && report.toDate.startsWith(summary.month)
+        }?.let { report ->
+            if (report.monthlyBudgetLimit != null) {
+                report.monthlyBudgetRemaining?.let { remaining ->
+                    Text(if (russian) "Остаток лимита месяца: ${formatMoney(remaining, language, report.currency)}"
+                        else "Monthly budget remaining: ${formatMoney(remaining, language, report.currency)}")
+                }
+            }
+        }
         summary.dailyExpensePace?.let {
-            Text(if (russian) "Средний расход в день: $it ₽" else "Daily expense pace: $it RUB")
+            Text(if (russian) "Средний расход в день: ${formatMoney(it, language)}"
+                else "Daily expense pace: ${formatMoney(it, language)}")
         }
         summary.projectedExpenseTotal?.let {
-            Text(if (russian) "Прогноз расходов за месяц: $it ₽" else "Projected monthly expenses: $it RUB")
+            Text(if (russian) "Прогноз расходов за месяц: ${formatMoney(it, language)}"
+                else "Projected monthly expenses: ${formatMoney(it, language)}")
         }
         summary.safeToSpend?.let { cash ->
             Card(Modifier.fillMaxWidth()) {
@@ -4954,12 +4967,16 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
             }
         }
         budget?.let {
-            Text(if (russian) "Лимит месяца: ${formatMoney(it.effectiveTotalLimit, language)} · потрачено " +
-                "${formatMoney(it.totalMonthlySpent, language)} · ${formatSemanticStatus("limitStatus", it.totalLimitStatus, language)}"
-            else "Monthly budget: ${formatMoney(it.effectiveTotalLimit, language)} · spent " +
-                "${formatMoney(it.totalMonthlySpent, language)} · ${formatSemanticStatus("limitStatus", it.totalLimitStatus, language)}")
-            LinearProgressIndicator(progress = { amountFraction(it.totalMonthlySpent, it.effectiveTotalLimit) },
-                modifier = Modifier.fillMaxWidth())
+            if (it.totalLimitStatus == "disabled") {
+                Text(if (russian) "Лимит месяца отключён" else "Monthly budget disabled")
+            } else {
+                Text(if (russian) "Лимит месяца: ${formatMoney(it.effectiveTotalLimit, language)} · потрачено " +
+                    "${formatMoney(it.totalMonthlySpent, language)} · ${formatSemanticStatus("limitStatus", it.totalLimitStatus, language)}"
+                else "Monthly budget: ${formatMoney(it.effectiveTotalLimit, language)} · spent " +
+                    "${formatMoney(it.totalMonthlySpent, language)} · ${formatSemanticStatus("limitStatus", it.totalLimitStatus, language)}")
+                LinearProgressIndicator(progress = { amountFraction(it.totalMonthlySpent, it.effectiveTotalLimit) },
+                    modifier = Modifier.fillMaxWidth().testTag("dashboard-month-budget-progress"))
+            }
             val food = summary.rolling7FoodStatus
             Text(if (russian) "Еда за 7 дней: ${formatMoney(food.spent, language)} / ${formatMoney(food.limit, language)} · " +
                 formatSemanticStatus("paceStatus", food.paceStatus, language)

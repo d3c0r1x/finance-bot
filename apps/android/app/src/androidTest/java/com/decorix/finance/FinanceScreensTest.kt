@@ -745,6 +745,74 @@ class FinanceScreensTest {
         compose.onNodeWithText("Платежи по долгам: 3 000,00 ₽").assertIsDisplayed()
     }
 
+    @Test fun dashboardShowsCoreBudgetRemainderPaceAndForecastExactlyInRussianAndEnglish() {
+        val summary = DashboardSummary(
+            month = "2026-10", incomeTotal = "95000.00", expenseTotal = "42000.35", transactionCount = 8,
+            asOfDate = "2026-10-18", daysElapsed = 18, daysInMonth = 31, daysRemaining = 13,
+            dailyExpensePace = "1354.27", projectedExpenseTotal = "41982.37",
+            rolling7FoodStatus = budget().rolling7FoodStatus,
+        )
+        val coreReport = report().copy(
+            scope = "personal", monthlyBudgetLimit = "50000.00", monthlyBudgetRemaining = "7957.63",
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budget(),
+            dashboardSummary = summary, report = coreReport))
+
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText("Остаток лимита месяца: 7 957,63 ₽").assertExists().assertIsDisplayed()
+        compose.onNodeWithText("Средний расход в день: 1 354,27 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Прогноз расходов за месяц: 41 982,37 ₽").assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Monthly budget remaining: 7,957.63 RUB").assertIsDisplayed()
+        compose.onNodeWithText("Daily expense pace: 1,354.27 RUB").assertIsDisplayed()
+        compose.onNodeWithText("Projected monthly expenses: 41,982.37 RUB").assertIsDisplayed()
+    }
+
+    @Test fun dashboardDoesNotInventUnavailablePaceOrMonthlyForecastInRussianAndEnglish() {
+        val summary = DashboardSummary(
+            month = "2026-10", incomeTotal = "0.00", expenseTotal = "0.00", transactionCount = 0,
+            asOfDate = "2026-10-01", daysElapsed = 1, daysInMonth = 31, daysRemaining = 30,
+            dailyExpensePace = null, projectedExpenseTotal = null,
+            rolling7FoodStatus = budget().rolling7FoodStatus,
+        )
+        val coreReport = report().copy(
+            scope = "personal", monthlyBudgetLimit = "50000.00", monthlyBudgetRemaining = "50000.00",
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budget(),
+            dashboardSummary = summary, report = coreReport))
+
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText("Средний расход в день:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Прогноз расходов за месяц:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("null").assertDoesNotExist()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Daily expense pace:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Projected monthly expenses:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("null").assertDoesNotExist()
+    }
+
+    @Test fun dashboardShowsZeroMonthlyLimitAsDisabledWithoutProgressBar() {
+        val disabledBudget = budget().copy(effectiveTotalLimit = "0.00", totalLimitStatus = "disabled")
+        val summary = DashboardSummary(
+            month = "2026-10", incomeTotal = "0.00", expenseTotal = "12.00", transactionCount = 1,
+            asOfDate = "2026-10-01", daysElapsed = 1, daysInMonth = 31, daysRemaining = 30,
+            dailyExpensePace = null, projectedExpenseTotal = null,
+            rolling7FoodStatus = disabledBudget.rolling7FoodStatus,
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = disabledBudget,
+            dashboardSummary = summary))
+
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText("Лимит месяца отключён").assertIsDisplayed()
+        compose.onNodeWithTag("dashboard-month-budget-progress").assertDoesNotExist()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Monthly budget disabled").assertIsDisplayed()
+        compose.onNodeWithTag("dashboard-month-budget-progress").assertDoesNotExist()
+    }
+
     @Test fun reportControlsRequestSelectedDateRangeAndFamilyScope() {
         var requested: List<String>? = null
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),
