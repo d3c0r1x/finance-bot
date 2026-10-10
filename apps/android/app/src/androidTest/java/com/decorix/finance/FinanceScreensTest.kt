@@ -423,6 +423,143 @@ class FinanceScreensTest {
         assertEquals("Алексей" to "90000.00", updated)
     }
 
+    @Test fun existingUserCanRepeatSetupFromProfileWithoutCreatingWorkspaceOrLosingHistory() {
+        var created = 0
+        var saved: Pair<String, String?>? = null
+        var transactionMutations = 0
+        var proposals = emptyList<String?>()
+        var applied = emptyList<String>()
+        var finishProfileSave: ((Boolean) -> Unit)? = null
+        val ui = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(transaction()),
+            memberProfile = FinanceMemberProfile("Алекс", "90000.00", "complete", "Europe/Moscow", "RUB")))
+        show(ui.value, stateHolder = ui,
+            onCreateTenant = { _, _, _ -> created++ },
+            onProfileSave = { name, income ->
+                saved = name to income
+                ui.value = ui.value.copy(memberProfile = ui.value.memberProfile!!.copy(
+                    displayName = name, plannedIncome = income, onboardingState = "complete"))
+            },
+            onRepeatProfileSave = { name, income, finished ->
+                saved = name to income
+                ui.value = ui.value.copy(memberProfile = ui.value.memberProfile!!.copy(
+                    displayName = name, plannedIncome = income, onboardingState = "complete"))
+                finishProfileSave = finished
+            },
+            onBudgetProposal = { income ->
+                proposals = proposals + income
+                ui.value = ui.value.copy(budgetProposal = budgetProposal().copy(monthlyIncome = income!!))
+            },
+            onBudgetApply = { proposalId ->
+                applied = applied + proposalId
+                ui.value = ui.value.copy(budgetProposal = null)
+            },
+            onTransactionMutation = { transactionMutations++ })
+
+        compose.onNodeWithText("Операции").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithText("Такси").assertIsDisplayed()
+        compose.onNodeWithText("Профиль").performScrollTo().performClick()
+        compose.onNodeWithText("Пройти настройку заново").performScrollTo().performClick()
+        compose.onNodeWithTag("onboarding-start").performClick()
+
+        assertEditableText("onboarding-member-name", "Алекс")
+        compose.onNodeWithTag("onboarding-member-name").performTextReplacement("Алексей")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        assertEditableText("onboarding-income-value", "90000.00")
+        compose.onNodeWithTag("onboarding-income-value").performTextReplacement("95000")
+        compose.onNodeWithTag("onboarding-income-next").performClick()
+
+        assertEquals("Алексей" to "95000.00", saved)
+        assertEquals(0, created)
+        assertEquals(0, transactionMutations)
+        assertEquals(emptyList<String?>(), proposals)
+        compose.runOnIdle { finishProfileSave!!.invoke(true) }
+        assertEquals(listOf("95000.00"), proposals)
+        assertEquals(emptyList<String>(), applied)
+        compose.onNodeWithTag("onboarding-budget-choice").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-budget-proposal-total").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-budget-apply").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-budget-keep").assertIsDisplayed()
+        assertEquals(emptyList<String>(), applied)
+        compose.onNodeWithTag("onboarding-budget-apply").performClick()
+        assertEquals(listOf("proposal-7"), applied)
+        compose.onNodeWithText("Операции").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithText("Такси").assertIsDisplayed()
+    }
+
+    @Test fun englishExistingUserCanRepeatSetupAndSkipIncomeThroughProfileUpdate() {
+        var created = 0
+        var saved: Pair<String, String?>? = null
+        var proposals = emptyList<String?>()
+        var transactionMutations = 0
+        val ui = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(transaction()),
+            memberProfile = FinanceMemberProfile("Alex Example", null, "started", "Europe/Moscow", "RUB")))
+        show(ui.value, stateHolder = ui,
+            onCreateTenant = { _, _, _ -> created++ },
+            onProfileSave = { name, income ->
+                saved = name to income
+                ui.value = ui.value.copy(memberProfile = ui.value.memberProfile!!.copy(
+                    displayName = name, plannedIncome = income, onboardingState = "complete"))
+            },
+            onBudgetProposal = { income -> proposals = proposals + income },
+            onTransactionMutation = { transactionMutations++ })
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Profile").performScrollTo().performClick()
+        compose.onNodeWithText("Repeat setup").performScrollTo().performClick()
+        compose.onNodeWithTag("onboarding-start").performClick()
+        assertEditableText("onboarding-member-name", "Alex Example")
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-skip").performClick()
+        compose.onNodeWithTag("onboarding-income-next").performClick()
+
+        assertEquals("Alex Example" to null, saved)
+        assertEquals(0, created)
+        assertEquals(emptyList<String?>(), proposals)
+        assertEquals(0, transactionMutations)
+        compose.onNodeWithText("Transactions").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithText("Такси").assertIsDisplayed()
+    }
+
+    @Test fun repeatSetupSaveFailureDoesNotProposeBudgetAndCanRetry() {
+        var proposals = emptyList<String?>()
+        val completions = mutableListOf<(Boolean) -> Unit>()
+        val ui = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactions = listOf(transaction()),
+            memberProfile = FinanceMemberProfile("Алекс", "90000.00", "complete", "Europe/Moscow", "RUB")))
+        show(ui.value, stateHolder = ui,
+            onRepeatProfileSave = { _, _, finished -> completions += finished },
+            onBudgetProposal = { income ->
+                proposals = proposals + income
+                ui.value = ui.value.copy(budgetProposal = budgetProposal().copy(monthlyIncome = income!!))
+            })
+
+        compose.onNodeWithText("Профиль").performScrollTo().performClick()
+        compose.onNodeWithText("Пройти настройку заново").performScrollTo().performClick()
+        compose.onNodeWithTag("onboarding-start").performClick()
+        compose.onNodeWithTag("onboarding-identity-next").performClick()
+        compose.onNodeWithTag("onboarding-income-value").performTextReplacement("95000")
+        compose.onNodeWithTag("onboarding-income-next").performClick()
+
+        assertEquals(1, completions.size)
+        assertEquals(emptyList<String?>(), proposals)
+        compose.runOnIdle { completions[0](false) }
+        compose.onNodeWithTag("onboarding-income").assertIsDisplayed()
+        compose.onNodeWithTag("onboarding-income-next").assertIsEnabled()
+        assertEquals(emptyList<String?>(), proposals)
+
+        compose.onNodeWithTag("onboarding-income-next").performClick()
+        assertEquals(2, completions.size)
+        assertEquals(emptyList<String?>(), proposals)
+        compose.runOnIdle { completions[1](true) }
+        assertEquals(listOf("95000.00"), proposals)
+        compose.onNodeWithTag("onboarding-budget-choice").assertIsDisplayed()
+    }
+
     @Test fun profileOffersTelegramBindingCode() {
         var requested = false
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
@@ -873,8 +1010,14 @@ class FinanceScreensTest {
                      onReportLoad: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
                      onCreateTenant: (String, String, String?) -> Unit = { _, _, _ -> },
                      onBudgetApply: (String) -> Unit = {},
+                     onBudgetProposal: (String?) -> Unit = {},
+                     onTransactionMutation: () -> Unit = {},
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null,
                      onProfileSave: (String, String?) -> Unit = { _, _ -> },
+                     onRepeatProfileSave: (String, String?, (Boolean) -> Unit) -> Unit = { name, income, finished ->
+                         onProfileSave(name, income)
+                         finished(true)
+                     },
                      onCreateDraft: (String, String) -> Unit = { _, _ -> }, onUpdateDraft: (TransactionDraftEdit) -> Unit = {},
                      onConfirmDraft: (String, Long) -> Unit = { _, _ -> },
                      onCancelDraft: (String, Long) -> Unit = { _, _ -> },
@@ -900,7 +1043,9 @@ class FinanceScreensTest {
                 state = stateHolder?.value ?: state,
                 language = language.value,
                 onLanguage = { language.value = it }, onLogin = {}, onRefresh = {}, onCreate = onCreateTenant,
-                onProfileSave = onProfileSave, onCreateDraft = onCreateDraft,
+                onProfileSave = onProfileSave, onRepeatProfileSave = { name, income, finished ->
+                    onRepeatProfileSave(name, income, finished)
+                }, onCreateDraft = { text, key -> onTransactionMutation(); onCreateDraft(text, key) },
                 onCreateTelegramLink = onCreateTelegramLink,
                 onNotificationPreferencesSave = onNotificationPreferencesSave,
                 onShoppingDecision = onShoppingDecision, onShoppingCopy = onShoppingCopy,
@@ -908,14 +1053,18 @@ class FinanceScreensTest {
                 onPersonalInflationLoad = onPersonalInflationLoad,
                 onRecurringLoad = onRecurringLoad,
                 onRecurringDecision = onRecurringDecision,
-                onUpdateDraft = onUpdateDraft, onConfirmDraft = onConfirmDraft, onCancelDraft = onCancelDraft,
+                onUpdateDraft = { edit -> onTransactionMutation(); onUpdateDraft(edit) },
+                onConfirmDraft = { id, version -> onTransactionMutation(); onConfirmDraft(id, version) },
+                onCancelDraft = { id, version -> onTransactionMutation(); onCancelDraft(id, version) },
                 onLogout = {},
-                onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {}, onBudgetProposal = {}, onBudgetApply = onBudgetApply,
+                onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {},
+                onBudgetProposal = onBudgetProposal, onBudgetApply = onBudgetApply,
                 onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> }, onDebtForecast = {},
                 onReportLoad = onReportLoad,
-                onRepeatTransaction = onRepeatTransaction, onVoidTransaction = onVoidTransaction,
+                onRepeatTransaction = { transaction -> onTransactionMutation(); onRepeatTransaction(transaction) },
+                onVoidTransaction = { transaction -> onTransactionMutation(); onVoidTransaction(transaction) },
                 onTransactionFilter = onTransactionFilter, onTransactionLoadMore = onTransactionLoadMore,
-                onUpdateTransaction = onUpdateTransaction,
+                onUpdateTransaction = { edit -> onTransactionMutation(); onUpdateTransaction(edit) },
             )
             }
         }

@@ -57,7 +57,8 @@ features:
       scenario: "Android counterpart for F03: Onboarding: имя, доход, пропуск, назад, бюджет, повторная настройка; `handlers/onboarding.py`"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F03 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+      gap: "Android repeat setup and profile PATCH are covered by local API 27 tests; authenticated Android-to-Core/OIDC end-to-end remains unverified."
     intentional_differences: []
   - id: F04
     feature: "Имя из Telegram, своё имя, план дохода, статус onboarding; `services/profile.py`"

@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-07 08:49, Europe/Moscow.
+Updated: 2026-10-10, Europe/Moscow.
 
 ## Global plan
 
@@ -62,10 +62,10 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 
 ## Current goal
 
-- ID and outcome: F59 — Android Kotlin/Compose RU/EN parity for F01–F58, Java API E2E, and installed APK.
-- Status: IN PROGRESS — F59.1 maps all 58 rows: now 30 partial, 26 missing, 2 justified N/A. F08 history/repeat/void and F09 basic search/type filtering are locally verified; live Core E2E and other parity gaps remain.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `bf6fd01` plus uncommitted F09.
-- Updated at: 2026-10-08 Europe/Moscow.
+- ID and outcome: E4.112 — F03.2 Android repeat setup from the existing profile.
+- Status: locally GREEN; F03 Android remains PARTIAL pending authenticated Android-to-Core/OIDC end-to-end verification. F15.5 remains awaiting the user's answer to its design question.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, current worktree; implementation commit pending.
+- Updated at: 2026-10-10 Europe/Moscow.
 
 ## Verification evidence
 
@@ -78,6 +78,16 @@ Updated: 2026-10-07 08:49, Europe/Moscow.
 | F34 Core suite | `:services:core:check --no-daemon` | F34 worktree | PASS | Full Core unit/check gate; focused PostgreSQL acceptance also passed |
 | F33 live event store | tagged Kafka/ClickHouse replay | GitHub run `37411323045` on `a07f7cb` | PASS | `go-price-integration`: ClickHouse and Redpanda started; price projection/replay and recurring projection/replay passed |
 | F10 private receipt storage | `.github/workflows/receipt-storage.yml` integration | GitHub run `37406496544` on `68253b7` | PASS | Authenticated SeaweedFS S3 operations and real ClamAV malware scan passed |
+
+## E4.112 F03.2 Android repeat setup from profile — GREEN, commit pending
+
+- Source: `PLAN.md` F03 acceptance: repeat setup must preserve posted transactions and must not make an existing user a new workspace member.
+- Implementation: profile action opens a localized repeat wizard, prefills current display name and planned income, and saves with the existing authenticated `PATCH /api/v1/tenants/{tenantId}/profile/me`. It starts budget proposal only after the profile PATCH plus snapshot refresh succeeds; failure leaves the form retryable. Budget Apply/Keep remains explicit. No tenant create or transaction mutation is issued.
+- TDD: Compose RED first showed the profile repeat action was missing. First implementation RED showed the budget proposal was not triggered reliably; the flow now uses an explicit API completion callback. Tests defer completion and prove no proposal before success, prove failure causes no proposal and can be retried, and prove unchanged history and explicit Apply/Keep.
+- GREEN: full API 27 instrumentation 145/145; focused F03 UI tests 3/3; `FinanceReceiptApiTest` 21/21; Gradle JVM unit tests pass; `assembleDebug` and `assembleDebugAndroidTest` pass; debug APK installed and instrumentation run on isolated Android 8.1/API 27 emulator `emulator-5554`. `git diff --check` passes. Synthetic data only.
+- The parity registry now points to both Compose and API tests and states the remaining live OIDC/Core gate. No live authenticated Android-to-Core E2E was run; F03 Android remains partial. No backend code changed.
+- Preserve user-owned untracked `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/`.
+- Next: finalize registry contract verification, commit/push this slice, then continue the next independently executable V1 parity goal. Keep F15.5 design pending until the user's answer arrives.
 | F41.1 Go baseline | `go test ./... -count=1` | HEAD `7a0f992` before F41 code; Go 1.27.1 SHA-256-verified portable toolchain | PASS | advice, prices, recurring and projector tests all pass |
 | F41.1 observed RED | `go test ./advice -run TestBuildEvidenceGroups -count=1` | new test only, no F41 production code | FAIL expected | Compiler reports missing `EvidenceRequest`, `EvidenceLine`, `BuildEvidenceGroups`, `EvidenceAlgorithmVersion` |
 | F41.1 HTTP/contract RED | focused Go HTTP and Python contract tests | F41.1 tests before handler/schema | FAIL expected | Missing `NewEvidenceHandler` and OpenAPI evidence-groups path |

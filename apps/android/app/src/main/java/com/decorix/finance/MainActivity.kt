@@ -120,7 +120,8 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize()) {
                     FinanceScreen(ui, language, onLanguage = { language = it }, onLogin = ::startLogin,
                         onRefresh = ::loadTenants, onCreate = ::createTenantAndRefresh,
-                        onProfileSave = ::saveMemberProfile, onCreateTelegramLink = ::createTelegramLinkCode,
+                        onProfileSave = ::saveMemberProfile, onRepeatProfileSave = ::saveMemberProfileForRepeat,
+                        onCreateTelegramLink = ::createTelegramLinkCode,
                         onNotificationPreferencesSave = ::saveNotificationPreferences,
                         onBudgetKeep = ::keepBudgetProposal,
                         onCreateDraft = ::createTransactionDraft, onUpdateDraft = ::updateTransactionDraft,
@@ -1012,6 +1013,11 @@ class MainActivity : ComponentActivity() {
         val profile = api.updateMemberProfile(activeTenantId(), name, plannedIncome)
         workspaceData(memberProfile = profile)
     }
+    private fun saveMemberProfileForRepeat(name: String, plannedIncome: String?, onFinished: (Boolean) -> Unit) =
+        runApi(onFinished = onFinished) {
+            val profile = api.updateMemberProfile(activeTenantId(), name, plannedIncome)
+            workspaceData(memberProfile = profile)
+        }
     private fun saveNotificationPreferences(preferences: FinanceNotificationPreferences) = runApi {
         val updated = api.updateNotificationPreferences(activeTenantId(), preferences)
         workspaceData(notificationPreferences = updated)
@@ -1114,6 +1120,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun runApi(restoreReceiptCheckpoint: Boolean = false,
+                       onFinished: ((Boolean) -> Unit)? = null,
                        action: () -> FinanceWorkspaceSnapshot) {
         val receiptOperationToken = if (restoreReceiptCheckpoint) ReceiptOperationGeneration.capture() else null
         ui = ui.copy(busy = true, error = null)
@@ -1151,15 +1158,17 @@ class MainActivity : ComponentActivity() {
                 if (receiptOperationToken == null) publishSnapshot()
                 else ReceiptOperationGeneration.runIfCurrent(receiptOperationToken, publishSnapshot)
                     ?: return@onSuccess
+                if (onFinished != null) runOnUiThread { onFinished(true) }
             }
-                .onFailure { error ->
+            .onFailure { error ->
                     val publishError = {
                         if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
                         else ui = ui.copy(busy = false, error = apiErrorMessage(error))
                     }
                     if (receiptOperationToken == null) publishError()
                     else ReceiptOperationGeneration.runIfCurrent(receiptOperationToken, publishError)
-                }
+                if (onFinished != null) runOnUiThread { onFinished(false) }
+            }
         }
     }
 
@@ -1599,6 +1608,8 @@ data class FinanceTenant(val id: String, val name: String, val role: String, val
 internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: (String) -> Unit,
                           onLogin: () -> Unit, onRefresh: () -> Unit,
                           onCreate: (String, String, String?) -> Unit, onProfileSave: (String, String?) -> Unit,
+                          onRepeatProfileSave: (String, String?, (Boolean) -> Unit) -> Unit =
+                              { name, income, onFinished -> onProfileSave(name, income); onFinished(true) },
                           onCreateDraft: (String, String) -> Unit,
                           onUpdateDraft: (TransactionDraftEdit) -> Unit,
                           onConfirmDraft: (String, Long) -> Unit,
@@ -1649,6 +1660,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     var onboardingStep by androidx.compose.runtime.remember { mutableStateOf("welcome") }
     var onboardingCreatePending by androidx.compose.runtime.remember { mutableStateOf(false) }
     var onboardingIncomeForProposal by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    var onboardingProfileSavePending by androidx.compose.runtime.remember { mutableStateOf(false) }
+    var onboardingProfileIncomeForProposal by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    var repeatOnboarding by androidx.compose.runtime.remember { mutableStateOf(false) }
     var onboardingBudgetTenantId by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
     var onboardingApplyPending by androidx.compose.runtime.remember { mutableStateOf(false) }
     var transactionText by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -1673,6 +1687,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     val canManageFamilyTransactions = role == "owner" || role == "admin"
     val currentUserId = state.transactionMembers.singleOrNull()?.userId
     LaunchedEffect(state.tenants.firstOrNull()?.id, state.budgetProposal?.id, state.busy,
+        state.memberProfile?.displayName, state.memberProfile?.plannedIncome, state.memberProfile?.onboardingState,
         onboardingCreatePending, onboardingApplyPending) {
         val tenant = state.tenants.firstOrNull()
         if (onboardingCreatePending && tenant != null && !state.busy) {
@@ -1694,6 +1709,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
             onboardingApplyPending = false
             onboardingStep = "complete"
             onboardingBudgetTenantId = null
+            if (repeatOnboarding) {
+                repeatOnboarding = false
+                activeScreen = "profile"
+            }
         }
     }
     LaunchedEffect(state.transactionEditSavedToken) {
@@ -1748,25 +1767,46 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 TextButton(onClick = onRefresh) { Text(if (russian) "Обновить" else "Refresh") }
                 TextButton(onClick = onLogout) { Text(if (russian) "Выйти" else "Sign out") }
             }
-            if (state.tenants.isEmpty()) {
+            if (state.tenants.isEmpty() || (repeatOnboarding && onboardingStep != "budget")) {
                 when (onboardingStep) {
                     "welcome" -> Column(Modifier.weight(1f).testTag("onboarding-welcome"),
                         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (russian) "Добро пожаловать" else "Welcome", style = MaterialTheme.typography.titleLarge)
-                        Text(if (russian) "Сначала создадим личное пространство. Семью можно добавить позже."
+                        Text(if (repeatOnboarding) {
+                            if (russian) "Повторная настройка" else "Repeat setup"
+                        } else if (russian) "Добро пожаловать" else "Welcome",
+                            style = MaterialTheme.typography.titleLarge)
+                        Text(if (repeatOnboarding) {
+                            if (russian) "Проверьте имя и плановый доход в текущем профиле. История операций сохранится."
+                            else "Review your name and planned income in your current profile. Your transaction history stays in place."
+                        } else if (russian) "Сначала создадим личное пространство. Семью можно добавить позже."
                             else "Start with a personal workspace. You can add family later.")
                         Button(modifier = Modifier.testTag("onboarding-start"), enabled = !state.busy,
                             onClick = { onboardingStep = "identity" }) {
                             Text(if (russian) "Начать настройку" else "Start setup")
                         }
+                        if (repeatOnboarding) {
+                            TextButton(modifier = Modifier.testTag("repeat-onboarding-cancel"),
+                                enabled = !state.busy,
+                                onClick = {
+                                    repeatOnboarding = false
+                                    onboardingStep = "complete"
+                                    activeScreen = "profile"
+                                }) {
+                                Text(if (russian) "Отмена" else "Cancel")
+                            }
+                        }
                     }
                     "identity" -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState())
                         .testTag("onboarding-identity"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(if (russian) "Личное пространство" else "Personal workspace",
+                        Text(if (repeatOnboarding) {
+                            if (russian) "Ваш профиль" else "Your profile"
+                        } else if (russian) "Личное пространство" else "Personal workspace",
                             style = MaterialTheme.typography.titleLarge)
-                        OutlinedTextField(workspace, { workspace = it }, enabled = !state.busy,
-                            modifier = Modifier.fillMaxWidth().testTag("onboarding-workspace-name"),
-                            label = { Text(if (russian) "Название пространства" else "Workspace name") }, singleLine = true)
+                        if (!repeatOnboarding) {
+                            OutlinedTextField(workspace, { workspace = it }, enabled = !state.busy,
+                                modifier = Modifier.fillMaxWidth().testTag("onboarding-workspace-name"),
+                                label = { Text(if (russian) "Название пространства" else "Workspace name") }, singleLine = true)
+                        }
                         OutlinedTextField(memberName, { memberName = it }, enabled = !state.busy,
                             modifier = Modifier.fillMaxWidth().testTag("onboarding-member-name"),
                             label = { Text(if (russian) "Ваше имя" else "Your name") }, singleLine = true)
@@ -1775,7 +1815,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 Text(if (russian) "Назад" else "Back")
                             }
                             Button(modifier = Modifier.testTag("onboarding-identity-next"),
-                                enabled = !state.busy && workspace.isNotBlank() && memberName.isNotBlank(),
+                                enabled = !state.busy && (repeatOnboarding || workspace.isNotBlank()) && memberName.isNotBlank(),
                                 onClick = { onboardingStep = "income" }) {
                                 Text(if (russian) "Далее" else "Next")
                             }
@@ -1805,13 +1845,37 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                     Text(if (russian) "Назад" else "Back")
                                 }
                                 Button(modifier = Modifier.testTag("onboarding-income-next"),
-                                    enabled = !state.busy && !onboardingCreatePending && validIncome,
+                                    enabled = !state.busy && !onboardingCreatePending &&
+                                        !onboardingProfileSavePending && validIncome,
                                     onClick = {
-                                        onboardingIncomeForProposal = normalizedIncomeInput(plannedIncome)
-                                        onboardingCreatePending = true
-                                        onCreate(workspace.trim(), memberName.trim(), onboardingIncomeForProposal)
+                                        if (repeatOnboarding) {
+                                            onboardingProfileIncomeForProposal = normalizedIncomeInput(plannedIncome)
+                                            onboardingProfileSavePending = true
+                                            onRepeatProfileSave(memberName.trim(), onboardingProfileIncomeForProposal) {
+                                                onboardingProfileSavePending = false
+                                                if (!it) return@onRepeatProfileSave
+                                                val tenant = state.tenants.firstOrNull()
+                                                val income = onboardingProfileIncomeForProposal
+                                                if (income != null && tenant != null) {
+                                                    onboardingBudgetTenantId = tenant.id
+                                                    onboardingStep = "budget"
+                                                    onBudgetProposal(income)
+                                                } else {
+                                                    onboardingStep = "complete"
+                                                    onboardingBudgetTenantId = null
+                                                    repeatOnboarding = false
+                                                    activeScreen = "profile"
+                                                }
+                                            }
+                                        } else {
+                                            onboardingIncomeForProposal = normalizedIncomeInput(plannedIncome)
+                                            onboardingCreatePending = true
+                                            onCreate(workspace.trim(), memberName.trim(), onboardingIncomeForProposal)
+                                        }
                                     }) {
-                                    Text(if (russian) "Создать пространство" else "Create workspace")
+                                    Text(if (repeatOnboarding) {
+                                        if (russian) "Сохранить профиль" else "Save profile"
+                                    } else if (russian) "Создать пространство" else "Create workspace")
                                 }
                             }
                         }
@@ -1831,6 +1895,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             onBudgetKeep()
                             onboardingStep = "complete"
                             onboardingBudgetTenantId = null
+                            if (repeatOnboarding) {
+                                repeatOnboarding = false
+                                activeScreen = "profile"
+                            }
                         })
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -1891,7 +1959,15 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "budgets" -> BudgetScreen(state, language, onBudgetUpdate, onBudgetReset, onBudgetProposal, onBudgetApply)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad)
-                    "profile" -> ProfileScreen(Modifier.weight(1f), state, language, onProfileSave, onCreateTelegramLink,
+                    "profile" -> ProfileScreen(Modifier.weight(1f), state, language, onProfileSave,
+                        onRepeatSetup = { name, income ->
+                            memberName = name
+                            plannedIncome = income.orEmpty()
+                            onboardingProfileIncomeForProposal = null
+                            onboardingProfileSavePending = false
+                            repeatOnboarding = true
+                            onboardingStep = "welcome"
+                        }, onCreateTelegramLink,
                         onNotificationPreferencesSave,
                         onBack = { activeScreen = "overview" })
                     else -> {
@@ -3237,7 +3313,8 @@ private fun shoppingClipboardText(shopping: FinanceShoppingList, russian: Boolea
 
 @androidx.compose.runtime.Composable
 private fun ProfileScreen(modifier: Modifier, state: FinanceUiState, language: String,
-                          onSave: (String, String?) -> Unit, onCreateTelegramLink: () -> Unit,
+                          onSave: (String, String?) -> Unit, onRepeatSetup: (String, String?) -> Unit,
+                          onCreateTelegramLink: () -> Unit,
                           onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit, onBack: () -> Unit) {
     val russian = language == "ru"
     val profile = state.memberProfile
@@ -3281,6 +3358,10 @@ private fun ProfileScreen(modifier: Modifier, state: FinanceUiState, language: S
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(if (russian) "Мой профиль" else "My profile", style = MaterialTheme.typography.titleLarge)
+        TextButton(modifier = Modifier.testTag("profile-repeat-setup"), enabled = !state.busy,
+            onClick = { onRepeatSetup(profile.displayName, profile.plannedIncome) }) {
+            Text(if (russian) "Пройти настройку заново" else "Repeat setup")
+        }
         if (profile.onboardingState == "started") {
             Text(if (russian) "Доход можно добавить сейчас или указать позже." else "Add planned income now or leave it for later.")
         }

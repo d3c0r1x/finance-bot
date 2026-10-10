@@ -540,6 +540,36 @@ class FinanceReceiptApiTest {
         assertEquals(null, server.takeRequest(200, TimeUnit.MILLISECONDS))
     }
 
+    @Test fun updateMemberProfilePatchesCoreProfileWithoutCreatingTenantOrMutatingTransactions() {
+        server.enqueue(MockResponse().setBody(
+            """{"displayName":"Taylor Example","plannedIncome":120000.50,"onboardingState":"complete","timezone":"Europe/Moscow","currency":"RUB"}""",
+        ))
+        val api = api()
+        api.saveTokens("access-token", "refresh-token", System.currentTimeMillis() + TimeUnit.HOURS.toMillis(12))
+
+        val profile = api.updateMemberProfile("tenant-17", "Taylor Example", "120000,5")
+
+        assertEquals("Taylor Example", profile.displayName)
+        assertEquals("120000.50", profile.plannedIncome)
+        assertEquals("complete", profile.onboardingState)
+        assertEquals("Europe/Moscow", profile.timezone)
+        assertEquals("RUB", profile.currency)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PATCH", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/profile/me", request.path)
+        val body = org.json.JSONObject(request.body.readUtf8())
+        assertEquals(setOf("displayName", "plannedIncome", "onboardingState"),
+            body.keys().asSequence().toSet())
+        assertEquals("Taylor Example", body.getString("displayName"))
+        assertEquals(0, java.math.BigDecimal("120000.50").compareTo(
+            java.math.BigDecimal(body.get("plannedIncome").toString())))
+        assertEquals("complete", body.getString("onboardingState"))
+
+        // Saving a member profile must not create another tenant or mutate transaction history.
+        assertNull(server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
     @Test fun concurrentUnauthorizedRequestsRefreshRotatingTokenOnceAndKeepSession() {
         val initialRequests = CountDownLatch(2)
         val releaseUnauthorizedResponses = CountDownLatch(1)
