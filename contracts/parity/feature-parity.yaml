@@ -273,6 +273,9 @@ features:
       scenario: "Android provides an authenticated, scrollable read-only view of OCR/Vision evidence and provenance; Vision values remain explicitly unverified and missing category stays unknown."
       gap: "F14.1 receipt evidence review is implemented and tested locally. Receipt edits, reconciliation/confirmation flows and live authenticated Android-to-Core E2E remain open in later F15-F18 slices."
       evidence: "Android API 27 tests cover typed reading parsing, exact decimal strings, provenance/coordinates, nullable Vision and authenticated GET; Compose tests cover RU/EN unverified values, unknown category, unavailable reading, no transaction mutation, scroll access, and localized known/unknown fallback reasons."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
     intentional_differences: []
   - id: F15
     feature: "Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
@@ -287,9 +290,13 @@ features:
     evidence:
       - "Versioned receipt item add, edit and delete keep cash total unchanged. PostgreSQL acceptance exercises nine rows across pages of eight, adds a tenth row, edits and deletes with version checks, then changes the cash total only through explicit sync. RU Web tests cover add/delete, sync and page navigation; full Web tests/build and Core/PostgreSQL gates pass."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F15: Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
-      gap: "No Android user screen or equivalent flow is verified for F15 yet."
+      gap: "Android F15.1-F15.4 now supports owner-scoped item paging, exact-value edit and add, and explicit total sync while preserving Core's cash total. Item deletion and the remaining receipt duplicate/review/confirmation flow, plus live authenticated Android-to-Core E2E, remain open."
+      evidence: "API 27 instrumentation and Compose coverage exercise eight-row paging, exact decimal values/version guards, writer-only add/edit/sync, viewer read-only behavior, unchanged cash total, page-two item access, stale/ambiguous outcome recovery, and localized validation. F15.4 full Android instrumentation passed 141/141 locally; its APK was installed and launched on the isolated API 27 emulator."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
     intentional_differences: []
   - id: F16
     feature: "Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
@@ -1135,7 +1142,7 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
-      - "Inventory now maps all F01-F58: 28 partial, 28 missing, 2 justified platform-specific N/A. Existing 50-test Android 8.1 instrumentation passed under F57, but feature E2E remains incomplete."
+      - "Inventory maps all F01-F58: 33 partial, 23 missing, 2 justified platform-specific N/A. Existing F15.1-F15.4 receipt flows and Android 8.1/API 27 instrumentation are locally verified, but feature parity and live authenticated Core/OIDC E2E remain incomplete."
       - "Real OIDC login, live Java/Core operation, and PostgreSQL tenant-isolation E2E remain required before F59 completion."
     intentional_differences: []
   - id: F60
