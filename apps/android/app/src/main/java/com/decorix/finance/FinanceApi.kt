@@ -119,6 +119,22 @@ class FinanceApi internal constructor(
         )))
     }
 
+    fun addReceiptItem(tenantId: String, receiptId: String, version: Long, name: String,
+                       quantity: String? = "1", unitPrice: String? = null,
+                       lineSum: String? = null): FinanceReceipt {
+        require(version > 0) { "Invalid receipt version" }
+        val body = JSONObject()
+            .put("name", name)
+            .put("quantity", quantity ?: JSONObject.NULL)
+            .put("unitPrice", unitPrice ?: JSONObject.NULL)
+            .put("lineSum", lineSum ?: JSONObject.NULL)
+            .toString()
+        return FinanceModels.receipt(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/items", "POST",
+            body, ifMatchVersion = version,
+        )))
+    }
+
     fun syncReceiptTotal(tenantId: String, receiptId: String, version: Long): FinanceReceipt {
         require(version > 0) { "Invalid receipt version" }
         return FinanceModels.receipt(JSONObject(execute(

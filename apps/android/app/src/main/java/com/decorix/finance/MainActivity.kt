@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
     private val receiptReadingGeneration = AtomicLong(0L)
     private val receiptItemsGeneration = AtomicLong(0L)
     private val receiptItemEditGeneration = AtomicLong(0L)
+    private val receiptItemAddGeneration = AtomicLong(0L)
     private val receiptTotalSyncGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
@@ -143,6 +144,8 @@ class MainActivity : ComponentActivity() {
                         onReceiptItemsPage = ::loadReceiptItems,
                         onReceiptItemUpdate = ::updateReceiptItem,
                         onReceiptItemRefresh = ::refreshReceiptAfterItemConflict,
+                        onReceiptItemAdd = ::addReceiptItem,
+                        onReceiptItemAddRefresh = ::refreshReceiptItemAdd,
                         onReceiptTotalSync = ::syncReceiptTotal,
                         onReceiptTotalSyncRefresh = ::refreshReceiptTotalSync)
                 }
@@ -452,6 +455,192 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun addReceiptItem(receiptId: String, receiptVersion: Long, name: String, quantity: String,
+                               unitPrice: String, lineSum: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || ui.busy) return
+        if (receipt.itemCount >= 200) {
+            ui = ui.copy(receiptItemAddError = "item_limit", receiptItemAddNeedsRefresh = false)
+            return
+        }
+        val explicitAmbiguousRetry = ui.receiptItemAddNeedsRefresh && ui.receiptItemAddError == "ambiguous"
+        if (ui.receiptItemAddNeedsRefresh && !explicitAmbiguousRetry) return
+        val baseline = pendingReceiptItemAdd?.takeIf { it.receiptId == receiptId }
+        val attempt = if (explicitAmbiguousRetry && baseline != null) baseline.copy(
+            baselineVersion = receiptVersion,
+            baselineItemCount = receipt.itemCount,
+            baselineItemIds = (baseline.baselineItemIds + receipt.items.map { it.id } + ui.receiptItemsPage
+                ?.takeIf { ui.receiptItemsReceiptId == receiptId }?.items.orEmpty().map { it.id }).toSet(),
+            name = name, quantity = quantity, unitPrice = unitPrice, lineSum = lineSum,
+        ) else ReceiptItemAddAttempt(tenant.id, receiptId, receiptVersion, receipt.itemCount,
+            (receipt.items + ui.receiptItemsPage
+                ?.takeIf { ui.receiptItemsReceiptId == receiptId }?.items.orEmpty()).mapTo(mutableSetOf()) { it.id },
+            name, quantity, unitPrice, lineSum)
+        pendingReceiptItemAdd = attempt
+        val generation = receiptItemAddGeneration.incrementAndGet()
+        val page = ui.receiptItemsPage?.page?.takeIf { ui.receiptItemsReceiptId == receiptId } ?: 1
+        ui = ui.copy(busy = true, receiptItemAddError = null, receiptItemAddNeedsRefresh = false,
+            receiptItemAddSavedToken = null, receiptItemsError = null)
+        executor.execute {
+            if (receiptItemAddGeneration.get() != generation) return@execute
+            var postStarted = false
+            try {
+                val baselineItems = loadAllReceiptItems(tenant.id, receipt, generation)
+                val observedAttempt = attempt.copy(baselineItemIds =
+                    (attempt.baselineItemIds + baselineItems.map { it.id }).toSet())
+                pendingReceiptItemAdd = observedAttempt
+                postStarted = true
+                val updated = api.addReceiptItem(tenant.id, receiptId, receiptVersion, name,
+                    quantity.takeIf { it.isNotBlank() },
+                    unitPrice.takeIf { it.isNotBlank() },
+                    lineSum.takeIf { it.isNotBlank() })
+                if (!isCurrentReceiptItemAdd(generation, tenant.id, receiptId)) return@execute
+                val firstPage = FinanceReceiptItemPage(updated.items.take(8), 1, updated.itemCount,
+                    updated.itemCount > 8)
+                val previousPage = ui.receiptItemsPage?.takeIf { ui.receiptItemsReceiptId == receiptId }
+                ui = ui.copy(busy = false, receiptDraft = updated,
+                    receiptItemsPage = if (page == 1) firstPage else previousPage,
+                    receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = page,
+                    receiptItemsLoading = page > 1, receiptItemsError = null,
+                    receiptItemAddError = null, receiptItemAddNeedsRefresh = false,
+                    receiptItemAddSavedToken = "$receiptId:${updated.version}")
+                pendingReceiptItemAdd = null
+                if (page > 1) {
+                    runCatching { api.receiptItems(tenant.id, receiptId, page) }
+                        .onSuccess { currentPage ->
+                            if (isCurrentReceiptItemAdd(generation, tenant.id, receiptId)) {
+                                ui = ui.copy(receiptItemsPage = currentPage, receiptItemsReceiptId = receiptId,
+                                    receiptItemsRequestedPage = page, receiptItemsLoading = false,
+                                    receiptItemsError = null)
+                            }
+                        }
+                        .onFailure {
+                            if (isCurrentReceiptItemAdd(generation, tenant.id, receiptId)) {
+                                ui = ui.copy(receiptItemsLoading = false, receiptItemsError = "unavailable")
+                            }
+                        }
+                }
+            } catch (error: Throwable) {
+                if (!isCurrentReceiptItemAdd(generation, tenant.id, receiptId)) return@execute
+                val status = (error as? ApiFailure)?.status
+                val baselineReadFailed = !postStarted
+                val requiresRefresh = !baselineReadFailed &&
+                    (status == 409 || status == 412 || status == null || status >= 500)
+                ui = ui.copy(busy = false,
+                    receiptItemAddError = when (status) {
+                        400, 422 -> "invalid_item"
+                        409 -> "conflict"
+                        412 -> "stale_version"
+                        else -> "network_unavailable"
+                    }, receiptItemAddNeedsRefresh = requiresRefresh)
+                if (!requiresRefresh) pendingReceiptItemAdd = null
+            }
+        }
+    }
+
+    private var pendingReceiptItemAdd: ReceiptItemAddAttempt? = null
+
+    private fun isCurrentReceiptItemAdd(generation: Long, tenantId: String, receiptId: String): Boolean =
+        receiptItemAddGeneration.get() == generation && ui.authenticated &&
+            ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId
+
+    private fun refreshReceiptItemAdd(receiptId: String) {
+        val attempt = pendingReceiptItemAdd?.takeIf { it.receiptId == receiptId } ?: return
+        if (!ui.authenticated || ui.receiptDraft?.id != receiptId || ui.busy) return
+        val generation = receiptItemAddGeneration.incrementAndGet()
+        ui = ui.copy(busy = true)
+        executor.execute {
+            if (!isCurrentReceiptItemAdd(generation, attempt.tenantId, receiptId)) return@execute
+            val refreshed = runCatching { api.receipt(attempt.tenantId, receiptId) }
+            if (refreshed.isFailure) {
+                if (isCurrentReceiptItemAdd(generation, attempt.tenantId, receiptId)) {
+                    ui = ui.copy(busy = false, receiptItemAddError = "refresh_unavailable",
+                        receiptItemAddNeedsRefresh = true)
+                }
+                return@execute
+            }
+            val receipt = refreshed.getOrThrow()
+            val currentPage = ui.receiptItemsPage?.page?.takeIf { ui.receiptItemsReceiptId == receiptId } ?: 1
+            val observedItems = runCatching { loadAllReceiptItems(attempt.tenantId, receipt, generation) }
+            if (receiptItemAddGeneration.get() != generation || !ui.authenticated ||
+                ui.tenants.firstOrNull()?.id != attempt.tenantId || ui.receiptDraft?.id != receiptId) return@execute
+            if (observedItems.isFailure) {
+                ui = ui.copy(busy = false, receiptDraft = receipt, receiptItemAddError = "refresh_unavailable",
+                    receiptItemAddNeedsRefresh = true, receiptItemsError = "unavailable")
+                return@execute
+            }
+            val allObservedItems = observedItems.getOrThrow()
+            val observedIds = allObservedItems.mapTo(mutableSetOf()) { it.id }
+            val newItems = allObservedItems.filterNot { it.id in attempt.baselineItemIds }
+            val matchingAddedItems = newItems.filter { it.matches(attempt) }
+            val committed = receipt.itemCount == attempt.baselineItemCount + 1 && matchingAddedItems.size == 1
+            val unchanged = receipt.itemCount == attempt.baselineItemCount &&
+                newItems.isEmpty() && observedIds == attempt.baselineItemIds
+            val pageCount = (receipt.itemCount + 7) / 8
+            val pageItems = allObservedItems.drop((currentPage - 1) * 8).take(8)
+            val page = FinanceReceiptItemPage(pageItems, currentPage, receipt.itemCount, currentPage < pageCount)
+            if (committed) {
+                pendingReceiptItemAdd = null
+                ui = ui.copy(busy = false, receiptDraft = receipt, receiptItemsPage = page,
+                    receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = currentPage,
+                    receiptItemsLoading = false, receiptItemsError = null, receiptItemAddError = null,
+                    receiptItemAddNeedsRefresh = false,
+                    receiptItemAddSavedToken = "$receiptId:${receipt.version}")
+            } else if (unchanged) {
+                pendingReceiptItemAdd = attempt.copy(baselineVersion = receipt.version,
+                    baselineItemCount = receipt.itemCount,
+                    baselineItemIds = observedIds)
+                ui = ui.copy(busy = false, receiptDraft = receipt, receiptItemsPage = page,
+                    receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = currentPage,
+                    receiptItemsLoading = false, receiptItemsError = null, receiptItemAddError = null,
+                    receiptItemAddNeedsRefresh = false)
+            } else {
+                pendingReceiptItemAdd = attempt.copy(baselineVersion = receipt.version,
+                    baselineItemCount = receipt.itemCount,
+                    baselineItemIds = observedIds)
+                ui = ui.copy(busy = false, receiptDraft = receipt, receiptItemsPage = page,
+                    receiptItemsReceiptId = receiptId, receiptItemsRequestedPage = currentPage,
+                    receiptItemsLoading = false, receiptItemsError = null,
+                    receiptItemAddError = "ambiguous", receiptItemAddNeedsRefresh = true)
+            }
+        }
+    }
+
+    private data class ReceiptItemAddAttempt(
+        val tenantId: String,
+        val receiptId: String,
+        val baselineVersion: Long,
+        val baselineItemCount: Int,
+        val baselineItemIds: Set<String>,
+        val name: String,
+        val quantity: String,
+        val unitPrice: String,
+        val lineSum: String,
+    )
+
+    private fun loadAllReceiptItems(tenantId: String, receipt: FinanceReceipt, generation: Long): List<FinanceReceiptItem> {
+        val items = receipt.items.toMutableList()
+        val pageCount = (receipt.itemCount + 7) / 8
+        for (page in 2..pageCount) {
+            if (receiptItemAddGeneration.get() != generation) throw java.util.concurrent.CancellationException()
+            items += api.receiptItems(tenantId, receipt.id, page).items
+        }
+        return items.distinctBy { it.id }
+    }
+
+    private fun FinanceReceiptItem.matches(attempt: ReceiptItemAddAttempt): Boolean =
+        name == attempt.name.trim() && quantity.sameReceiptNumber(attempt.quantity) &&
+            unitPrice.sameReceiptNumber(attempt.unitPrice) && lineSum.sameReceiptNumber(attempt.lineSum)
+
+    private fun String?.sameReceiptNumber(input: String): Boolean {
+        val expected = input.takeIf { it.isNotBlank() }
+        if (this == null || expected == null) return this == expected
+        val actualNumber = toBigDecimalOrNull() ?: return false
+        val expectedNumber = expected.toBigDecimalOrNull() ?: return false
+        return actualNumber.compareTo(expectedNumber) == 0
     }
 
     private fun refreshReceiptAfterItemConflict(receiptId: String) {
@@ -1238,6 +1427,8 @@ class MainActivity : ComponentActivity() {
         ReceiptOperationGeneration.invalidate()
         receiptReadingGeneration.incrementAndGet()
         receiptItemsGeneration.incrementAndGet()
+        receiptItemAddGeneration.incrementAndGet()
+        pendingReceiptItemAdd = null
         receiptPickerOperationToken = null
         invalidateReceiptPoll()
         ui = ui.copy(busy = true, error = null)
@@ -1322,6 +1513,9 @@ data class FinanceUiState(
     val receiptItemsError: String? = null,
     val receiptItemEditError: String? = null,
     val receiptItemEditSavedToken: String? = null,
+    val receiptItemAddError: String? = null,
+    val receiptItemAddNeedsRefresh: Boolean = false,
+    val receiptItemAddSavedToken: String? = null,
     val receiptTotalSyncError: String? = null,
     val receiptTotalSyncInProgress: Boolean = false,
     val receiptUploadInProgress: Boolean = false,
@@ -1444,7 +1638,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                               { _, _, _, _, _, _, _ -> },
                           onReceiptItemRefresh: (String) -> Unit = {},
                           onReceiptTotalSync: (String, Long) -> Unit = { _, _ -> },
-                          onReceiptTotalSyncRefresh: (String) -> Unit = {}) {
+                          onReceiptTotalSyncRefresh: (String) -> Unit = {},
+                          onReceiptItemAdd: (String, Long, String, String, String, String) -> Unit =
+                              { _, _, _, _, _, _ -> },
+                          onReceiptItemAddRefresh: (String) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -1678,9 +1875,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptItemsLoading, state.receiptItemsError,
                         state.receiptItemEditError, state.receiptItemEditSavedToken,
                         state.receiptTotalSyncError, state.receiptTotalSyncInProgress,
+                        state.receiptItemAddError, state.receiptItemAddNeedsRefresh,
+                        state.receiptItemAddSavedToken,
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
                         onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
-                        onReceiptTotalSync, onReceiptTotalSyncRefresh)
+                        onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -1890,6 +2089,8 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 receiptItemsError: String?, receiptItemEditError: String?,
                                 receiptItemEditSavedToken: String?,
                                 receiptTotalSyncError: String?, receiptTotalSyncInProgress: Boolean,
+                                receiptItemAddError: String?, receiptItemAddNeedsRefresh: Boolean,
+                                receiptItemAddSavedToken: String?,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
                                 onLoadReading: (String) -> Unit,
@@ -1897,7 +2098,9 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onUpdateItem: (String, String, Long, String, String, String, String) -> Unit,
                                 onRefreshItem: (String) -> Unit,
                                 onSyncTotal: (String, Long) -> Unit,
-                                onRefreshTotalSync: (String) -> Unit) {
+                                onRefreshTotalSync: (String) -> Unit,
+                                onAddItem: (String, Long, String, String, String, String) -> Unit,
+                                onRefreshAddItem: (String) -> Unit) {
     var pageNumber by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableIntStateOf(1)
     }
@@ -1915,6 +2118,22 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
     }
     var editLineSum by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableStateOf("")
+    }
+    var addingItem by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf(false)
+    }
+    var addName by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("") }
+    var addQuantity by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("1") }
+    var addUnitPrice by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("") }
+    var addLineSum by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(receiptItemAddSavedToken) {
+        if (receiptItemAddSavedToken != null) {
+            addingItem = false
+            addName = ""
+            addQuantity = "1"
+            addUnitPrice = ""
+            addLineSum = ""
+        }
     }
     androidx.compose.runtime.LaunchedEffect(receiptItemEditSavedToken) {
         if (receiptItemEditSavedToken != null) editingItemId = null
@@ -2061,6 +2280,85 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 enabled = !receiptTotalSyncInProgress && !busy,
                                 onClick = { onSyncTotal(draft.id, draft.version) }) {
                                 Text(if (russian) "Синхронизировать итог" else "Sync receipt total")
+                            }
+                        }
+                    }
+                }
+            }
+            receipt?.let { draft ->
+                val addAllowed = canWrite && draft.transactionId == null &&
+                    draft.state in setOf("draft", "review_required")
+                if (addAllowed) {
+                    if (draft.itemCount >= 200) {
+                        Text(if (russian) "Нельзя добавить больше 200 позиций в чек."
+                            else "A receipt cannot have more than 200 items.",
+                            modifier = Modifier.testTag("receipt-item-add-limit"),
+                            color = MaterialTheme.colorScheme.error)
+                    } else {
+                        TextButton(modifier = Modifier.testTag("receipt-item-add-open"),
+                            enabled = !busy, onClick = { addingItem = true }) {
+                            Text(if (russian) "Добавить позицию" else "Add item")
+                        }
+                    }
+                    if (addingItem && draft.itemCount < 200) {
+                        Column(Modifier.fillMaxWidth().testTag("receipt-item-add-form"),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(addName, { addName = it }, modifier = Modifier.fillMaxWidth()
+                                .testTag("receipt-item-add-name"),
+                                label = { Text(if (russian) "Название" else "Name") }, singleLine = true)
+                            OutlinedTextField(addQuantity, { addQuantity = it }, modifier = Modifier.fillMaxWidth()
+                                .testTag("receipt-item-add-quantity"),
+                                label = { Text(if (russian) "Количество" else "Quantity") }, singleLine = true)
+                            OutlinedTextField(addUnitPrice, { addUnitPrice = it }, modifier = Modifier.fillMaxWidth()
+                                .testTag("receipt-item-add-unit-price"),
+                                label = { Text(if (russian) "Цена за единицу" else "Unit price") }, singleLine = true)
+                            OutlinedTextField(addLineSum, { addLineSum = it }, modifier = Modifier.fillMaxWidth()
+                                .testTag("receipt-item-add-line-sum"),
+                                label = { Text(if (russian) "Сумма позиции" else "Line total") }, singleLine = true)
+                            if (receiptItemAddError != null) {
+                                val message = when (receiptItemAddError) {
+                                    "item_limit" -> if (russian) "Нельзя добавить больше 200 позиций в чек." else "A receipt cannot have more than 200 items."
+                                    "invalid_item" -> if (russian) "Проверьте название и суммы позиции." else "Check the item name and amounts."
+                                    "conflict" -> if (russian) "Чек изменился. Обновите его перед повторной отправкой." else "The receipt changed. Refresh it before submitting again."
+                                    "stale_version" -> if (russian) "Чек изменился. Значения формы сохранены. Обновите чек." else "The receipt changed. Form values are preserved. Refresh the receipt."
+                                    "refresh_unavailable" -> if (russian) "Не удалось проверить чек. Повторите обновление." else "Could not verify the receipt. Retry refresh."
+                                    "ambiguous" -> if (russian) "Изменения не удалось подтвердить. Проверьте позиции перед повторной отправкой." else "The result is unclear. Check the items before submitting again."
+                                    else -> if (russian) "Не удалось проверить отправку. Обновите чек перед повтором." else "Submission could not be confirmed. Refresh the receipt before retrying."
+                                }
+                                Text(message, modifier = Modifier.testTag("receipt-item-add-error"),
+                                    color = MaterialTheme.colorScheme.error)
+                                if (receiptItemAddNeedsRefresh) {
+                                    TextButton(modifier = Modifier.testTag("receipt-item-add-refresh"),
+                                        enabled = !busy, onClick = { onRefreshAddItem(draft.id) }) {
+                                        Text(if (russian) "Обновить чек" else "Refresh receipt")
+                                    }
+                                }
+                                if (receiptItemAddError == "ambiguous" && receiptItemAddNeedsRefresh) {
+                                    TextButton(modifier = Modifier.testTag("receipt-item-add-retry-confirm"),
+                                        enabled = !busy && addName.isNotBlank(), onClick = {
+                                            onAddItem(draft.id, draft.version, addName, addQuantity, addUnitPrice, addLineSum)
+                                        }) {
+                                        Text(if (russian) "Проверил: позиции нет, повторить" else "I checked: item is missing, retry")
+                                    }
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(modifier = Modifier.testTag("receipt-item-add-save"),
+                                    enabled = !busy && !receiptItemAddNeedsRefresh && addName.isNotBlank(), onClick = {
+                                        onAddItem(draft.id, draft.version, addName, addQuantity, addUnitPrice, addLineSum)
+                                    }) {
+                                    Text(if (russian) "Сохранить" else "Save")
+                                }
+                                TextButton(modifier = Modifier.testTag("receipt-item-add-cancel"), enabled = !busy,
+                                    onClick = {
+                                        addingItem = false
+                                        addName = ""
+                                        addQuantity = "1"
+                                        addUnitPrice = ""
+                                        addLineSum = ""
+                                    }) {
+                                    Text(if (russian) "Отмена" else "Cancel")
+                                }
                             }
                         }
                     }

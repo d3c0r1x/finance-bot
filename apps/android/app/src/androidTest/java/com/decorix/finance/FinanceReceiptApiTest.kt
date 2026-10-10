@@ -8,9 +8,11 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -346,6 +348,118 @@ class FinanceReceiptApiTest {
         }
     }
 
+    @Test fun addReceiptItemPostsExactDecimalStringsWithReceiptVersionAndKeepsCashTotal() {
+        val responseJson = org.json.JSONObject(receiptJson()).apply {
+            put("version", 9)
+            put("itemsTotal", "276.30")
+            put("itemCount", 2)
+            getJSONArray("items").put(org.json.JSONObject(receiptItemJson(10)).apply {
+                put("name", "Сыр")
+                put("quantity", "2.500")
+                put("unitPrice", "12.24")
+                put("lineSum", "30.60")
+                put("version", 1)
+            })
+        }
+        server.enqueue(MockResponse().setResponseCode(201).setBody(responseJson.toString()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val updated = api.addReceiptItem("tenant-17", "receipt-42", 8,
+            name = "Сыр", quantity = "2.500", unitPrice = "12.24", lineSum = "30.60")
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/items", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"8\"", request.getHeader("If-Match"))
+        assertTrue(request.getHeader("Content-Type").orEmpty().startsWith("application/json"))
+        val body = org.json.JSONObject(request.body.readUtf8())
+        assertEquals(setOf("name", "quantity", "unitPrice", "lineSum"), body.keys().asSequence().toSet())
+        assertEquals("Сыр", body.getString("name"))
+        assertEquals("2.500", body.getString("quantity"))
+        assertEquals("12.24", body.getString("unitPrice"))
+        assertEquals("30.60", body.getString("lineSum"))
+        assertEquals("245.70", updated.cashTotal)
+        assertEquals("276.30", updated.itemsTotal)
+        assertEquals(9L, updated.version)
+        assertEquals(2, updated.itemCount)
+        assertNull(updated.transactionId)
+        val added = updated.items.last()
+        assertEquals("Сыр", added.name)
+        assertEquals("2.500", added.quantity)
+        assertEquals("12.24", added.unitPrice)
+        assertEquals("30.60", added.lineSum)
+    }
+
+    @Test fun addReceiptItemDefaultsQuantityAndPreservesNullableAmounts() {
+        repeat(2) { server.enqueue(MockResponse().setResponseCode(201).setBody(receiptJson())) }
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        api.addReceiptItem("tenant-17", "receipt-42", 8, name = "Свеча")
+
+        val defaultRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        val defaultBody = org.json.JSONObject(defaultRequest.body.readUtf8())
+        assertEquals("Свеча", defaultBody.getString("name"))
+        assertEquals("1", defaultBody.getString("quantity"))
+        assertTrue(defaultBody.isNull("unitPrice"))
+        assertTrue(defaultBody.isNull("lineSum"))
+
+        api.addReceiptItem("tenant-17", "receipt-42", 9, name = "Свеча без количества", quantity = null)
+
+        val nullableRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        val nullableBody = org.json.JSONObject(nullableRequest.body.readUtf8())
+        assertEquals("Свеча без количества", nullableBody.getString("name"))
+        assertTrue(nullableBody.isNull("quantity"))
+        assertTrue(nullableBody.isNull("unitPrice"))
+        assertTrue(nullableBody.isNull("lineSum"))
+    }
+
+    @Test fun addReceiptItemPreservesValidationConflictAndStaleFailures() {
+        listOf(400, 409, 412).forEach { status ->
+            server.enqueue(MockResponse().setResponseCode(status).setBody("""{"detail":"item_add_failed"}"""))
+        }
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        listOf(400, 409, 412).forEach { status ->
+            val failure = runCatching {
+                api.addReceiptItem("tenant-17", "receipt-42", 8,
+                    name = "Сыр", quantity = "2.500", unitPrice = "12.24", lineSum = "30.60")
+            }.exceptionOrNull()
+            assertTrue("HTTP $status must remain an API failure", failure is ApiFailure)
+            assertEquals(status, (failure as ApiFailure).status)
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/items", request.path)
+            assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+            assertEquals("\"8\"", request.getHeader("If-Match"))
+        }
+    }
+
+    @Test fun ambiguousAddFailureIsNotAutomaticallyRetried() {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val failure = runCatching {
+            api.addReceiptItem("tenant-17", "receipt-42", 8,
+                name = "Сыр", quantity = "2.500", unitPrice = "12.24", lineSum = "30.60")
+        }.exceptionOrNull()
+
+        assertNotNull("A dropped response must remain ambiguous to the caller", failure)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/items", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"8\"", request.getHeader("If-Match"))
+        val body = org.json.JSONObject(request.body.readUtf8())
+        assertEquals("Сыр", body.getString("name"))
+        assertEquals("2.500", body.getString("quantity"))
+        assertEquals(1, server.requestCount)
+    }
+
     @Test fun budgetProposalAndApplyReuseCallerSuppliedIdempotencyKeys() {
         repeat(2) { server.enqueue(MockResponse().setBody(budgetProposalJson())) }
         repeat(2) { server.enqueue(MockResponse().setBody(budgetOverviewJson())) }
@@ -353,6 +467,8 @@ class FinanceReceiptApiTest {
         val api = api()
         val proposalKey = "budget-proposal-stable-key-0001"
         val applyKey = "budget-apply-stable-key-0002"
+        api.saveTokens("budget-test-token", "refresh-token",
+            System.currentTimeMillis() + TimeUnit.HOURS.toMillis(12))
         repeat(2) { api.proposeBudget("tenant-17", "100000.00", idempotencyKey = proposalKey) }
         repeat(2) { api.applyBudgetProposal("tenant-17", "proposal-7", idempotencyKey = applyKey) }
 
