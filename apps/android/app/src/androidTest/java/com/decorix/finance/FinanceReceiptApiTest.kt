@@ -283,6 +283,58 @@ class FinanceReceiptApiTest {
         assertEquals("", confirm.body.readUtf8())
     }
 
+    @Test fun selectReceiptCategoryPatchesExactChoiceWithVersionAndPreservesProvenance() {
+        val response = org.json.JSONObject(receiptJson())
+            .put("categoryCode", "еда")
+            .put("categorySource", "human")
+            .put("categoryAlgorithmVersion", "receipt-category.v1")
+            .put("alcoholShare", "0.2000")
+            .put("leisureShare", "0.2500")
+            .put("leisure", true)
+            .put("version", 7)
+        server.enqueue(MockResponse().setBody(response.toString()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val updated = api.selectReceiptCategory("tenant-17", "receipt-42", 6, "еда")
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PATCH", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/category", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"6\"", request.getHeader("If-Match"))
+        val body = org.json.JSONObject(request.body.readUtf8())
+        assertEquals(setOf("categoryCode"), body.keys().asSequence().toSet())
+        assertEquals("еда", body.getString("categoryCode"))
+        assertEquals("еда", updated.categoryCode)
+        assertEquals("human", updated.categorySource)
+        assertEquals("receipt-category.v1", updated.categoryAlgorithmVersion)
+        assertEquals("0.2000", updated.alcoholShare)
+        assertEquals("0.2500", updated.leisureShare)
+        assertTrue(updated.leisure)
+        assertEquals(7L, updated.version)
+        assertNull(updated.transactionId)
+    }
+
+    @Test fun selectReceiptCategoryPreservesStaleVersionFailure() {
+        server.enqueue(MockResponse().setResponseCode(412).setBody("""{"detail":"stale_version"}"""))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val failure = runCatching {
+            api.selectReceiptCategory("tenant-17", "receipt-42", 6, "еда")
+        }.exceptionOrNull()
+
+        assertTrue("Category selection 412 must remain an API failure", failure is ApiFailure)
+        assertEquals(412, (failure as ApiFailure).status)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PATCH", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/category", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"6\"", request.getHeader("If-Match"))
+        assertEquals("еда", org.json.JSONObject(request.body.readUtf8()).getString("categoryCode"))
+    }
+
     @Test fun receiptItemsFetchesOrderedPagesOfEightWithExactValuesAndOwnerAuthorization() {
         val pageOneItems = (1..8).map(::receiptItemJson)
         val pageTwoItems = listOf(receiptItemJson(9))

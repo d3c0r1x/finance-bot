@@ -82,6 +82,7 @@ class MainActivity : ComponentActivity() {
     private val receiptTotalSyncGeneration = AtomicLong(0L)
     private val receiptDuplicateGeneration = AtomicLong(0L)
     private val receiptConfirmGeneration = AtomicLong(0L)
+    private val receiptCategoryGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -153,7 +154,8 @@ class MainActivity : ComponentActivity() {
                         onReceiptTotalSyncRefresh = ::refreshReceiptTotalSync,
                         onReceiptDuplicateCandidates = ::loadReceiptDuplicateCandidates,
                         onReceiptDuplicateDecision = ::decideReceiptDuplicate,
-                        onReceiptConfirm = ::confirmReceipt)
+                        onReceiptConfirm = ::confirmReceipt,
+                        onReceiptCategorySelect = ::selectReceiptCategory)
                 }
             }
         }
@@ -497,6 +499,52 @@ class MainActivity : ComponentActivity() {
                             confirmationAttempt = true)
                     } else {
                         ui = ui.copy(receiptConfirming = false, receiptConfirmError = "unavailable")
+                    }
+                }
+        }
+    }
+
+    private fun selectReceiptCategory(receiptId: String, version: Long, categoryCode: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        val allowedCategories = setOf("еда", "транспорт", "жилье", "досуг", "одежда", "здоровье",
+            "работа", "техника", "долги", "прочее")
+        if (!ui.authenticated || !canWriteReceiptCategory(tenant.role) || ui.busy || ui.receiptCategorySaving ||
+            receipt.state !in setOf("draft", "review_required") || receipt.version != version ||
+            categoryCode !in allowedCategories) return
+        val generation = receiptCategoryGeneration.incrementAndGet()
+        ui = ui.copy(receiptCategorySaving = true, receiptCategoryError = null)
+        executor.execute {
+            runCatching { api.selectReceiptCategory(tenant.id, receiptId, version, categoryCode) }
+                .onSuccess { updated ->
+                    if (receiptCategoryGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptDraft = updated, receiptCategorySaving = false,
+                            receiptCategoryError = null)
+                    }
+                }
+                .onFailure { failure ->
+                    if (receiptCategoryGeneration.get() != generation || !ui.authenticated ||
+                        ui.tenants.firstOrNull()?.id != tenant.id || ui.receiptDraft?.id != receiptId) return@onFailure
+                    val status = (failure as? ApiFailure)?.status
+                    if (status == 409 || status == 412) {
+                        runCatching { api.receipt(tenant.id, receiptId) }
+                            .onSuccess { latest ->
+                                if (receiptCategoryGeneration.get() == generation && ui.authenticated &&
+                                    ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                                    ui = ui.copy(receiptDraft = latest, receiptCategorySaving = false,
+                                        receiptCategoryError = "category_conflict")
+                                }
+                            }
+                            .onFailure {
+                                if (receiptCategoryGeneration.get() == generation && ui.authenticated &&
+                                    ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                                    ui = ui.copy(receiptCategorySaving = false,
+                                        receiptCategoryError = "category_refresh_unavailable")
+                                }
+                            }
+                    } else {
+                        ui = ui.copy(receiptCategorySaving = false, receiptCategoryError = "unavailable")
                     }
                 }
         }
@@ -1679,11 +1727,47 @@ data class FinanceUiState(
     val receiptDuplicateDecisionError: String? = null,
     val receiptConfirming: Boolean = false,
     val receiptConfirmError: String? = null,
+    val receiptCategorySaving: Boolean = false,
+    val receiptCategoryError: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
     val receiptCheckpointUnresolved: Boolean = false,
 )
+
+internal fun canWriteReceiptCategory(role: String?): Boolean = role != null && role != "viewer"
+
+private val RECEIPT_CATEGORY_CODES = listOf(
+    "еда", "транспорт", "жилье", "досуг", "одежда", "здоровье", "работа", "техника", "долги", "прочее",
+)
+
+private fun receiptCategoryLabel(code: String, language: String): String {
+    val russian = language == "ru"
+    return when (code) {
+        "еда" -> if (russian) "Еда" else "Food"
+        "транспорт" -> if (russian) "Транспорт" else "Transport"
+        "жилье" -> if (russian) "Жильё" else "Housing"
+        "досуг" -> if (russian) "Досуг" else "Leisure"
+        "одежда" -> if (russian) "Одежда" else "Clothing"
+        "здоровье" -> if (russian) "Здоровье" else "Health"
+        "работа" -> if (russian) "Работа" else "Work"
+        "техника" -> if (russian) "Техника" else "Technology"
+        "долги" -> if (russian) "Долги" else "Debt"
+        "прочее" -> if (russian) "Прочее" else "Other"
+        else -> code
+    }
+}
+
+private fun receiptCategoryErrorMessage(code: String, language: String): String = when (code) {
+    "category_conflict" -> if (language == "ru")
+        "Категория чека изменилась. Проверьте данные и выберите категорию снова."
+    else "Receipt category changed. Review the receipt and choose a category again."
+    "category_refresh_unavailable" -> if (language == "ru")
+        "Не удалось обновить чек после конфликта. Проверьте связь и обновите чек."
+    else "Could not refresh the receipt after a conflict. Check your connection and refresh it."
+    else -> if (language == "ru") "Не удалось сохранить категорию. Проверьте связь и повторите попытку."
+    else "Could not save category. Check your connection and retry."
+}
 
 private data class FinanceWorkspaceSnapshot(
     val tenants: List<FinanceTenant>,
@@ -1819,7 +1903,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptItemAddRefresh: (String) -> Unit = {},
                           onReceiptDuplicateCandidates: (String) -> Unit = {},
                           onReceiptDuplicateDecision: (String, Long, String, String?) -> Unit = { _, _, _, _ -> },
-                          onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> }) {
+                          onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
+                          onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> }) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -2102,6 +2187,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "overview" -> DashboardScreen(state, language)
                     "receipts" -> ReceiptUploadScreen(Modifier.weight(1f), language,
                         state.tenants.firstOrNull()?.role != "viewer",
+                        canWriteReceiptCategory(state.tenants.firstOrNull()?.role),
                         state.receiptJob, state.receiptDraft, state.receiptUploadInProgress,
                         state.receiptUploadError, state.receiptCanRetryUpload, state.busy,
                         state.receiptCheckpointUnresolved, state.receiptReading,
@@ -2115,10 +2201,12 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptDuplicateCandidatesReceiptId, state.receiptDuplicateCandidatesLoading,
                         state.receiptDuplicateCandidatesError, state.receiptDuplicateDecisionInProgress,
                         state.receiptDuplicateDecisionError, state.receiptConfirming, state.receiptConfirmError,
+                        state.receiptCategorySaving, state.receiptCategoryError,
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
                         onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
                         onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh,
-                        onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm)
+                        onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm,
+                        onReceiptCategorySelect)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -2326,7 +2414,8 @@ private fun OnboardingBudgetChoiceScreen(language: String, proposal: BudgetPropo
 }
 
 @androidx.compose.runtime.Composable
-private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: Boolean, job: FinanceReceiptProcessingJob?,
+private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: Boolean,
+                                canEditCategory: Boolean, job: FinanceReceiptProcessingJob?,
                                 receipt: FinanceReceipt?, uploading: Boolean, errorCode: String?,
                                 canRetryUpload: Boolean, busy: Boolean, checkpointUnresolved: Boolean,
                                 reading: FinanceReceiptReading?, readingReceiptId: String?, readingLoading: Boolean,
@@ -2343,6 +2432,7 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 duplicateCandidatesError: String?, duplicateDecisionInProgress: Boolean,
                                 duplicateDecisionError: String?, receiptConfirming: Boolean,
                                 receiptConfirmError: String?,
+                                categorySaving: Boolean, categoryError: String?,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
                                 onLoadReading: (String) -> Unit,
@@ -2355,7 +2445,8 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onRefreshAddItem: (String) -> Unit,
                                 onLoadDuplicateCandidates: (String) -> Unit,
                                 onDuplicateDecision: (String, Long, String, String?) -> Unit,
-                                onConfirmReceipt: (String, Long, String) -> Unit) {
+                                onConfirmReceipt: (String, Long, String) -> Unit,
+                                onSelectCategory: (String, Long, String) -> Unit) {
     val confirmationIdempotencyKey = androidx.compose.runtime.remember(receipt?.tenantId, receipt?.id) {
         receipt?.let { receiptConfirmationIdempotencyKey(it.tenantId, it.id) }.orEmpty()
     }
@@ -2384,6 +2475,10 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
     var addQuantity by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("1") }
     var addUnitPrice by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("") }
     var addLineSum by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("") }
+    var categoryMenuExpanded by androidx.compose.runtime.remember(receipt?.id) { mutableStateOf(false) }
+    var selectedCategory by androidx.compose.runtime.remember(receipt?.id, receipt?.version, receipt?.categoryCode) {
+        mutableStateOf(receipt?.categoryCode)
+    }
     LaunchedEffect(receipt?.id, canWrite, duplicateCandidatesReceiptId,
         duplicateCandidatesLoading, duplicateCandidatesError) {
         val draft = receipt ?: return@LaunchedEffect
@@ -2904,13 +2999,65 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                     "default" -> if (russian) "по умолчанию" else "default"
                     else -> if (russian) "не определён" else "unknown"
                 }
-                if (draft.categoryCode == null || draft.categorySource == "unknown") {
-                    Text(if (russian) "Категория не определена · источник: $sourceLabel · ${draft.categoryAlgorithmVersion}"
-                        else "Category unknown · source: $sourceLabel · ${draft.categoryAlgorithmVersion}",
-                        modifier = Modifier.testTag("receipt-reading-category-unknown"))
-                } else {
-                    Text(if (russian) "Категория: ${draft.categoryCode} · источник: $sourceLabel · ${draft.categoryAlgorithmVersion}"
-                        else "Category: ${draft.categoryCode} · source: $sourceLabel · ${draft.categoryAlgorithmVersion}")
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val categoryLabel = draft.categoryCode?.let { receiptCategoryLabel(it, language) }
+                    if (draft.categoryCode == null || draft.categorySource == "unknown") {
+                        Text(if (russian) "Категория не определена"
+                            else "Category unknown", modifier = Modifier.testTag("receipt-reading-category-unknown"))
+                    } else {
+                        Text(if (russian) "Категория: $categoryLabel (${draft.categoryCode})"
+                            else "Category: $categoryLabel (${draft.categoryCode})",
+                            modifier = Modifier.testTag("receipt-category-value"))
+                    }
+                    Text(if (russian) "Источник категории: $sourceLabel · ${draft.categoryAlgorithmVersion}"
+                        else "Category source: $sourceLabel · ${draft.categoryAlgorithmVersion}",
+                        modifier = Modifier.testTag("receipt-category-source"))
+                    draft.alcoholShare?.let { share ->
+                        Text(if (russian) "Доля алкоголя: $share" else "Alcohol share: $share",
+                            modifier = Modifier.testTag("receipt-alcohol-share"))
+                    }
+                    draft.leisureShare?.let { share ->
+                        Text(if (russian) "Доля досуга: $share" else "Leisure share: $share",
+                            modifier = Modifier.testTag("receipt-leisure-share"))
+                    }
+                    if (draft.leisure) {
+                        Text(if (russian) "Отнесено к досуговым расходам"
+                            else "Classified as leisure spending",
+                            modifier = Modifier.testTag("receipt-leisure-status"))
+                    }
+                    if (canEditCategory && draft.state in setOf("draft", "review_required")) {
+                        Box {
+                            TextButton(modifier = Modifier.testTag("receipt-category-select"),
+                                enabled = !categorySaving && !busy, onClick = { categoryMenuExpanded = true }) {
+                                Text(if (russian) "Изменить категорию" else "Change category")
+                            }
+                            DropdownMenu(expanded = categoryMenuExpanded,
+                                onDismissRequest = { categoryMenuExpanded = false }) {
+                                RECEIPT_CATEGORY_CODES.forEach { code ->
+                                    DropdownMenuItem(
+                                        modifier = Modifier.testTag("receipt-category-option-$code"),
+                                        text = { Text(receiptCategoryLabel(code, language)) },
+                                        onClick = {
+                                            selectedCategory = code
+                                            categoryMenuExpanded = false
+                                        })
+                                }
+                            }
+                        }
+                        Button(modifier = Modifier.testTag("receipt-category-save"),
+                            enabled = selectedCategory != null && selectedCategory != draft.categoryCode &&
+                                !categorySaving && !busy,
+                            onClick = { selectedCategory?.let { onSelectCategory(draft.id, draft.version, it) } }) {
+                            Text(if (categorySaving) {
+                                if (russian) "Сохраняем…" else "Saving…"
+                            } else if (russian) "Сохранить категорию" else "Save category")
+                        }
+                        categoryError?.let { code ->
+                            Text(receiptCategoryErrorMessage(code, language),
+                                modifier = Modifier.testTag("receipt-category-error"),
+                                color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 }
 
                 if (draft.documentId != null && draft.selectedReader != "manual") {

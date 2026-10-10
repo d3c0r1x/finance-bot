@@ -95,6 +95,18 @@ class FinanceApi internal constructor(
         JSONObject(execute("/api/v1/tenants/$tenantId/receipts/$receiptId", "GET")),
     )
 
+    fun selectReceiptCategory(tenantId: String, receiptId: String, version: Long,
+                              categoryCode: String): FinanceReceipt {
+        require(version > 0) { "Invalid receipt version" }
+        require(categoryCode in setOf("еда", "транспорт", "жилье", "досуг", "одежда", "здоровье",
+            "работа", "техника", "долги", "прочее")) { "Receipt category is not allowed" }
+        val body = JSONObject().put("categoryCode", categoryCode).toString()
+        return FinanceModels.receipt(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/category", "PATCH",
+            body, ifMatchVersion = version,
+        )))
+    }
+
     fun receiptDuplicateCandidates(tenantId: String, receiptId: String): FinanceReceiptDuplicateCandidates =
         FinanceModels.receiptDuplicateCandidates(JSONObject(execute(
             "/api/v1/tenants/$tenantId/receipts/$receiptId/duplicate-candidates", "GET",

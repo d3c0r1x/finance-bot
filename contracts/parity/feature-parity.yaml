@@ -336,9 +336,14 @@ features:
     evidence:
       - "The Java category policy covers exact 10% alcohol and 25% leisure thresholds, unknown amounts, and manual override. PostgreSQL acceptance persists rule-derived shares and human selection with version checks; RU/EN Web displays category provenance and accepts manual choice. Focused PostgreSQL, policy, Web and prior full contract/build gates pass."
     android:
-      status: missing
-      scenario: "Android counterpart for F17: Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"
-      gap: "No Android user screen or equivalent flow is verified for F17 yet."
+      status: partial
+      scenario: "Android displays Core-owned alcohol/leisure shares and category provenance in RU/EN, allows a writer to explicitly save a versioned manual category, and keeps viewers read-only."
+      gap: "Local Android API, Compose, JVM, build, install, and launch checks pass. Live authenticated Android-to-Core OIDC end-to-end verification remains open."
+      evidence: "API 27 full instrumentation 162/162; FinanceReceiptApiTest 27/27; FinanceReceiptScreensTest 46/46; JVM unit tests 19/19; parity contracts 63/63. Debug and Android-test APKs built; debug APK installed on isolated API 27 emulator and MainActivity resumed. Exact Core share strings and null omission verified; Android does not calculate category thresholds."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/ReceiptCategoryPermissionTest.kt
     intentional_differences: []
   - id: F18
     feature: "Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"

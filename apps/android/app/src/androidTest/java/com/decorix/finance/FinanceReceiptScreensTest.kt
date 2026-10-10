@@ -1010,6 +1010,145 @@ class FinanceReceiptScreensTest {
         assertEquals(emptyList<String>(), confirmed)
     }
 
+    @Test fun receiptCategorySharesLeisureAndProvenanceRenderExactCoreValuesInRussianAndEnglish() {
+        val populated = receiptDraft().copy(categoryCode = "еда", categorySource = "rule",
+            categoryAlgorithmVersion = "receipt-category.v1", alcoholShare = "0.1000",
+            leisureShare = "0.2500", leisure = true)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = populated))
+        show(state.value, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-category-source").performScrollTo()
+            .assertTextContains("правило", substring = true)
+        compose.onNodeWithTag("receipt-alcohol-share").performScrollTo()
+            .assertTextContains("Доля алкоголя: 0.1000", substring = true)
+        compose.onNodeWithTag("receipt-leisure-share").performScrollTo()
+            .assertTextContains("Доля досуга: 0.2500", substring = true)
+        compose.onNodeWithTag("receipt-leisure-status").performScrollTo()
+            .assertTextContains("досугов", substring = true)
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-category-source").performScrollTo()
+            .assertTextContains("rule", substring = true)
+        compose.onNodeWithTag("receipt-alcohol-share").performScrollTo()
+            .assertTextContains("Alcohol share: 0.1000", substring = true)
+        compose.onNodeWithTag("receipt-leisure-share").performScrollTo()
+            .assertTextContains("Leisure share: 0.2500", substring = true)
+        compose.onNodeWithTag("receipt-leisure-status").performScrollTo()
+            .assertTextContains("leisure", substring = true)
+
+        state.value = state.value.copy(receiptDraft = populated.copy(alcoholShare = null,
+            leisureShare = null, leisure = false, categoryCode = null, categorySource = "unknown"))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-alcohol-share").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-leisure-share").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-leisure-status").assertDoesNotExist()
+        compose.onNodeWithText("0.0000").assertDoesNotExist()
+    }
+
+    @Test fun ownerReceiptCategorySelectionOnlySavesOnTapAndKeepsCoreShares() {
+        val receipt = receiptDraft().copy(version = 12, categoryCode = "транспорт", categorySource = "rule",
+            alcoholShare = "0.1000", leisureShare = "0.2500", leisure = true)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt))
+        val saves = mutableListOf<Triple<String, Long, String>>()
+        show(state.value, stateHolder = state,
+            onReceiptCategorySelect = { receiptId, version, categoryCode ->
+                saves += Triple(receiptId, version, categoryCode)
+                state.value = state.value.copy(receiptDraft = receipt.copy(version = version + 1,
+                    categoryCode = categoryCode, categorySource = "human"))
+            })
+
+        compose.onNodeWithTag("receipt-category-select").performScrollTo().performClick()
+        compose.onNodeWithTag("receipt-category-option-еда").performScrollTo().performClick()
+        assertEquals(emptyList<Triple<String, Long, String>>(), saves)
+        compose.onNodeWithTag("receipt-category-save").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(Triple(receipt.id, 12L, "еда")), saves)
+        compose.onNodeWithTag("receipt-category-value").performScrollTo()
+            .assertTextContains("еда", substring = true)
+        compose.onNodeWithTag("receipt-category-source").performScrollTo()
+            .assertTextContains("вручную", substring = true)
+        compose.onNodeWithTag("receipt-alcohol-share")
+            .assertTextContains("Доля алкоголя: 0.1000", substring = true)
+        compose.onNodeWithTag("receipt-leisure-share")
+            .assertTextContains("Доля досуга: 0.2500", substring = true)
+        compose.onNodeWithTag("receipt-leisure-status").assertIsDisplayed()
+        assertEquals(13L, state.value.receiptDraft?.version)
+    }
+
+    @Test fun viewerSeesReceiptCategoryDetailsWithoutSelectionOrSaveControls() {
+        val receipt = receiptDraft().copy(categoryCode = "досуг", categorySource = "human",
+            alcoholShare = "0.1000", leisureShare = "0.2500", leisure = true)
+        var saves = 0
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")), receiptDraft = receipt),
+            onReceiptCategorySelect = { _, _, _ -> saves++ })
+
+        compose.onNodeWithTag("receipt-category-value").performScrollTo()
+            .assertTextContains("досуг", substring = true)
+        compose.onNodeWithTag("receipt-alcohol-share").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-leisure-share").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-category-select").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-category-save").assertDoesNotExist()
+        assertEquals(0, saves)
+    }
+
+    @Test fun memberCanChooseReceiptCategoryAndEnableExplicitSave() {
+        val receipt = receiptDraft().copy(categoryCode = "транспорт", categorySource = "rule")
+        val state = mutableStateOf(FinanceUiState(authenticated = true,
+            tenants = listOf(tenant("member")), receiptDraft = receipt))
+        val saves = mutableListOf<Triple<String, Long, String>>()
+        show(state.value, stateHolder = state, onReceiptCategorySelect = { receiptId, version, categoryCode ->
+            saves += Triple(receiptId, version, categoryCode)
+            state.value = state.value.copy(receiptDraft = receipt.copy(version = version + 1,
+                categoryCode = categoryCode, categorySource = "human"))
+        })
+
+        compose.onNodeWithTag("receipt-category-select").performScrollTo().performClick()
+        compose.onNodeWithTag("receipt-category-option-еда").performScrollTo().performClick()
+        assertEquals(emptyList<Triple<String, Long, String>>(), saves)
+        compose.onNodeWithTag("receipt-category-save").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(Triple(receipt.id, receipt.version, "еда")), saves)
+        compose.onNodeWithTag("receipt-category-source").performScrollTo()
+            .assertTextContains("вручную", substring = true)
+        assertEquals(receipt.version + 1, state.value.receiptDraft?.version)
+    }
+
+    @Test fun staleCategoryRefreshRequiresReselectionAndUsesLatestVersion() {
+        val receipt = receiptDraft().copy(version = 12, categoryCode = "транспорт", categorySource = "rule")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt))
+        val saves = mutableListOf<Triple<String, Long, String>>()
+        show(state.value, stateHolder = state,
+            onReceiptCategorySelect = { receiptId, version, categoryCode ->
+                saves += Triple(receiptId, version, categoryCode)
+                state.value = state.value.copy(receiptDraft = state.value.receiptDraft!!.copy(
+                    version = version + 1, categoryCode = categoryCode, categorySource = "human"),
+                    receiptCategoryError = null)
+            })
+
+        compose.onNodeWithTag("receipt-category-select").performScrollTo().performClick()
+        compose.onNodeWithTag("receipt-category-option-еда").performScrollTo().performClick()
+        state.value = state.value.copy(receiptDraft = receipt.copy(version = 13,
+            categoryCode = "досуг", categorySource = "rule"), receiptCategoryError = "category_conflict")
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("receipt-category-error").performScrollTo()
+            .assertTextContains("Категория чека изменилась", substring = true)
+        compose.onNodeWithTag("receipt-category-save").performScrollTo().assertIsNotEnabled()
+        assertEquals(emptyList<Triple<String, Long, String>>(), saves)
+
+        compose.onNodeWithTag("receipt-category-select").performScrollTo().performClick()
+        compose.onNodeWithTag("receipt-category-option-еда").performScrollTo().performClick()
+        compose.onNodeWithTag("receipt-category-save").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(Triple(receipt.id, 13L, "еда")), saves)
+        assertEquals(14L, state.value.receiptDraft?.version)
+    }
+
     @Test fun missingReceiptReadingShowsUnavailableStateWithoutFillingVerifiedFields() {
         val draft = receiptDraft().copy(merchant = null, receiptDate = null, cashTotal = null,
             categoryCode = null, categorySource = "unknown")
@@ -1269,6 +1408,7 @@ class FinanceReceiptScreensTest {
                      onReceiptDuplicateDecision: (String, Long, String, String?) -> Unit =
                          { _, _, _, _ -> },
                      onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
+                     onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> },
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
         val language = mutableStateOf("ru")
         compose.setContent {
@@ -1288,7 +1428,8 @@ class FinanceReceiptScreensTest {
                     onReceiptItemAdd = onReceiptItemAdd,
                     onReceiptItemAddRefresh = onReceiptItemAddRefresh,
                     onReceiptDuplicateDecision = onReceiptDuplicateDecision,
-                    onReceiptConfirm = onReceiptConfirm)
+                    onReceiptConfirm = onReceiptConfirm,
+                    onReceiptCategorySelect = onReceiptCategorySelect)
             }
         }
         compose.waitForIdle()
