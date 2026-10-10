@@ -519,12 +519,14 @@ features:
       - services/python/telegram_gateway/tests/test_commands.py
     evidence:
       - "Java exposes one rolling-food status DTO from budgets, dashboard and reports; Web, Android, Python reports, Telegram report captions, and scheduled digests display Core amounts through the shared `rolling_food_lines` renderer. Insufficient history never invents a baseline; disabled limits omit remaining amount. Python report/digest/worker/Telegram command regression: 71 passed; contracts: 46 passed, 2 skipped; full Core: 200 passed, 2 skipped; Web: 36 passed; Android instrumentation: 26 passed."
+      - "Android F25 now presents the Core date window, exact spend/limit/remaining, limit status and independent pace in RU/EN on overview, report, personal budget and family budget. Family data comes from a separately guarded family report request and never replaces the personal monthly report used by F24. Full `FinanceScreensTest`: 62/62 on Android 8.1/API 27; Android unit tests: 35/35; APK builds pass; live authenticated OIDC E2E remains pending."
     android:
       status: partial
       scenario: "Android counterpart for F25: Недельный food limit и скользящие 7 дней; `services/forecast.py`"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F25 acceptance condition or live Core integration."
+        - "apps/android/app/src/test/java/com/decorix/finance/FinanceReportResponsePolicyTest.kt"
+      gap: "Local UI parity is verified; live authenticated Android-to-Core OIDC E2E remains unverified."
     intentional_differences: []
   - id: F26
     feature: "«Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"

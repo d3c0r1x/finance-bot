@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
     private val receiptDisputedItemsGeneration = AtomicLong(0L)
     private val receiptRepeatWarningsGeneration = AtomicLong(0L)
     private val reportRequestGeneration = AtomicLong(0L)
+    private val familyBudgetFoodRequestGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -137,6 +138,7 @@ class MainActivity : ComponentActivity() {
                         onBudgetProposal = ::createBudgetProposal, onBudgetApply = ::applyBudgetProposal,
                         onDebtCreate = ::createDebt, onDebtPay = ::payDebt, onDebtAdjust = ::adjustDebt,
                         onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
+                        onFamilyBudgetFoodStatusLoad = ::loadFamilyBudgetFoodStatus,
                         onShoppingLoad = ::loadShoppingCandidates, onShoppingDecision = ::applyShoppingDecision,
                         onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation,
                         onDoNotBuyLoad = ::loadDoNotBuy, onDoNotBuyDecision = ::applyDoNotBuyDecision,
@@ -1592,6 +1594,7 @@ class MainActivity : ComponentActivity() {
             }
             runCatching(action).onSuccess { snapshot ->
                 val publishSnapshot = {
+                    familyBudgetFoodRequestGeneration.incrementAndGet()
                     if (snapshot.transactionEditSavedToken != null) {
                         pendingTransactionEdit = null
                         pendingTransactionEditKey = null
@@ -1609,6 +1612,7 @@ class MainActivity : ComponentActivity() {
                         memberProfile = snapshot.memberProfile, notificationPreferences = snapshot.notificationPreferences,
                         budgetAlerts = snapshot.budgetAlerts, transactionEditSavedToken = snapshot.transactionEditSavedToken,
                         error = null,
+                        familyBudgetFoodRefreshToken = ui.familyBudgetFoodRefreshToken + 1,
                         doNotBuy = ui.doNotBuy.takeIf { sameTenant },
                         productDecisions = ui.productDecisions.takeIf { sameTenant },
                         doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
@@ -1762,6 +1766,76 @@ class MainActivity : ComponentActivity() {
                         )) {
                         if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
                         else ui = ui.copy(busy = false, error = error.message ?: "Request failed")
+                    }
+                }
+        }
+    }
+
+    private fun loadFamilyBudgetFoodStatus(month: String) {
+        val tenantId = activeTenantId()
+        val requestGeneration = familyBudgetFoodRequestGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(familyBudgetFoodStatus = null, familyBudgetFoodMonth = month,
+            familyBudgetFoodTenantId = tenantId, familyBudgetFoodLoading = true, familyBudgetFoodError = null)
+        executor.execute {
+            runCatching { api.report(tenantId, "month", "family", month, "", "") }
+                .onSuccess { report ->
+                    if (FamilyBudgetFoodResponsePolicy.isCurrentRequest(
+                            requestTenantId = tenantId,
+                            activeTenantId = ui.tenants.firstOrNull()?.id,
+                            authenticated = ui.authenticated,
+                            requestMonth = month,
+                            currentMonth = ui.budgets?.month,
+                            requestGeneration = requestGeneration,
+                            currentRequestGeneration = familyBudgetFoodRequestGeneration.get(),
+                            sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
+                        )) {
+                        if (FamilyBudgetFoodResponsePolicy.canApply(
+                                requestTenantId = tenantId,
+                                activeTenantId = ui.tenants.firstOrNull()?.id,
+                                authenticated = ui.authenticated,
+                                requestMonth = month,
+                                currentMonth = ui.budgets?.month,
+                                responsePeriod = report.period,
+                                responseScope = report.scope,
+                                responseMonth = report.fromDate.take(7),
+                                requestGeneration = requestGeneration,
+                                currentRequestGeneration = familyBudgetFoodRequestGeneration.get(),
+                                sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
+                            )) {
+                            ui = ui.copy(familyBudgetFoodStatus = report.rolling7FoodStatus,
+                                familyBudgetFoodMonth = month, familyBudgetFoodTenantId = tenantId,
+                                familyBudgetFoodLoading = false, familyBudgetFoodError = null)
+                        } else if (FamilyBudgetFoodResponsePolicy.isCurrentRequest(
+                                requestTenantId = tenantId,
+                                activeTenantId = ui.tenants.firstOrNull()?.id,
+                                authenticated = ui.authenticated,
+                                requestMonth = month,
+                                currentMonth = ui.budgets?.month,
+                                requestGeneration = requestGeneration,
+                                currentRequestGeneration = familyBudgetFoodRequestGeneration.get(),
+                                sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
+                            )) {
+                            ui = ui.copy(familyBudgetFoodStatus = null, familyBudgetFoodLoading = false,
+                                familyBudgetFoodError = "Family report scope did not match the request")
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    if (FamilyBudgetFoodResponsePolicy.isCurrentRequest(
+                            requestTenantId = tenantId,
+                            activeTenantId = ui.tenants.firstOrNull()?.id,
+                            authenticated = ui.authenticated,
+                            requestMonth = month,
+                            currentMonth = ui.budgets?.month,
+                            requestGeneration = requestGeneration,
+                            currentRequestGeneration = familyBudgetFoodRequestGeneration.get(),
+                            sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
+                        )) {
+                        if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                        else ui = ui.copy(familyBudgetFoodStatus = null, familyBudgetFoodMonth = month,
+                            familyBudgetFoodTenantId = tenantId, familyBudgetFoodLoading = false,
+                            familyBudgetFoodError = error.message ?: "Request failed")
                     }
                 }
         }
@@ -1980,6 +2054,12 @@ data class FinanceUiState(
     val debtForecasts: Map<String, DebtForecast> = emptyMap(),
     val dashboardSummary: DashboardSummary? = null,
     val report: FinanceReport? = null,
+    val familyBudgetFoodStatus: RollingFoodStatus? = null,
+    val familyBudgetFoodMonth: String? = null,
+    val familyBudgetFoodTenantId: String? = null,
+    val familyBudgetFoodLoading: Boolean = false,
+    val familyBudgetFoodError: String? = null,
+    val familyBudgetFoodRefreshToken: Long = 0L,
     val transactionDraft: FinanceTransactionDraft? = null,
     val memberProfile: FinanceMemberProfile? = null,
     val telegramLinkCode: FinanceTelegramLinkCode? = null,
@@ -2280,6 +2360,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onDebtAdjust: (String, String, Long) -> Unit,
                           onDebtForecast: (String) -> Unit,
                           onReportLoad: (String, String, String, String, String) -> Unit,
+                          onFamilyBudgetFoodStatusLoad: (String) -> Unit = {},
                           onCreateTelegramLink: () -> Unit = {},
                           onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
                           onShoppingLoad: () -> Unit = {},
@@ -2640,7 +2721,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "recurring" -> RecurringScreen(Modifier.weight(1f), state, language, onRetry = onRecurringLoad,
                         onRecurringDecision = onRecurringDecision)
                     "budgets" -> BudgetScreen(Modifier.weight(1f), state, language, onBudgetUpdate, onBudgetReset,
-                        onBudgetProposal, onBudgetApply)
+                        onBudgetProposal, onBudgetApply, onFamilyBudgetFoodStatusLoad)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad)
                     "profile" -> ProfileScreen(Modifier.weight(1f), state, language, onProfileSave,
@@ -4978,10 +5059,7 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
                     modifier = Modifier.fillMaxWidth().testTag("dashboard-month-budget-progress"))
             }
             val food = summary.rolling7FoodStatus
-            Text(if (russian) "Еда за 7 дней: ${formatMoney(food.spent, language)} / ${formatMoney(food.limit, language)} · " +
-                formatSemanticStatus("paceStatus", food.paceStatus, language)
-            else "Food over 7 days: ${formatMoney(food.spent, language)} / ${formatMoney(food.limit, language)} · " +
-                formatSemanticStatus("paceStatus", food.paceStatus, language))
+            Text(formatRollingFoodStatus(food, language))
         }
     }
 }
@@ -5045,7 +5123,10 @@ private fun ReportScreen(state: FinanceUiState, language: String,
             OutlinedTextField(to, { to = it }, singleLine = true,
                 label = { Text(if (russian) "По дату, ГГГГ-ММ-ДД" else "To, YYYY-MM-DD") })
         }
-        Button(onClick = { onLoad(period, scope, month, from, to) },
+        Button(onClick = {
+            onLoad(period, scope, month, if (period == "custom") from else "",
+                if (period == "custom") to else "")
+        },
             enabled = !state.busy && customValid && (period != "month" || month.matches(Regex("^\\d{4}-\\d{2}$")))) {
             Text(if (russian) "Показать отчёт" else "Show report")
         }
@@ -5085,13 +5166,9 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                                 else "Monthly budget: ${formatMoney(limit, language, report.currency)} · remaining " +
                                     formatMoney(report.monthlyBudgetRemaining, language, report.currency))
                             }
-                            val food = report.rolling7FoodStatus
-                            Text(if (russian) "Еда за 7 дней: ${formatMoney(food.spent, language, report.currency)} / " +
-                                "${formatMoney(food.limit, language, report.currency)} · " +
-                                formatSemanticStatus("paceStatus", food.paceStatus, language)
-                            else "Food over 7 days: ${formatMoney(food.spent, language, report.currency)} / " +
-                                "${formatMoney(food.limit, language, report.currency)} · " +
-                                formatSemanticStatus("paceStatus", food.paceStatus, language))
+                            if (report.scope == scope) {
+                                Text(formatRollingFoodStatus(report.rolling7FoodStatus, language, report.currency))
+                            }
                         }
                     }
                 }
@@ -5187,7 +5264,8 @@ private fun normalizedIncomeInput(value: String): String? {
 @androidx.compose.runtime.Composable
 private fun BudgetScreen(modifier: Modifier, state: FinanceUiState, language: String,
                          onUpdate: (String, String, String, String, Long) -> Unit,
-                         onReset: () -> Unit, onPropose: (String?) -> Unit, onApply: (String) -> Unit) {
+                         onReset: () -> Unit, onPropose: (String?) -> Unit, onApply: (String) -> Unit,
+                         onFamilyFoodStatusLoad: (String) -> Unit) {
     val russian = language == "ru"
     val budget = state.budgets
     val tenant = state.tenants.firstOrNull()
@@ -5205,10 +5283,13 @@ private fun BudgetScreen(modifier: Modifier, state: FinanceUiState, language: St
         return
     }
     val familyScope = scope == "family"
+    androidx.compose.runtime.LaunchedEffect(familyScope, budget.month, tenant?.id,
+        state.familyBudgetFoodRefreshToken) {
+        if (familyScope && tenant != null) onFamilyFoodStatusLoad(budget.month)
+    }
     val displayedTotalLimit = if (familyScope) budget.familyTotalLimit else budget.effectiveTotalLimit
     val displayedCategoryLimits = if (familyScope) budget.familyLimits else budget.effectiveLimits
     val rollingFoodLimit = if (familyScope) budget.rolling7FoodLimit else budget.rolling7FoodStatus.limit
-    val rollingFoodStatus = if (familyScope) "" else " · ${formatSemanticStatus("paceStatus", budget.rolling7FoodStatus.paceStatus, language)}"
     val totalLimitStatus = if (familyScope) "" else " · ${formatSemanticStatus("limitStatus", budget.totalLimitStatus, language)}"
     Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -5223,15 +5304,17 @@ private fun BudgetScreen(modifier: Modifier, state: FinanceUiState, language: St
                 "${formatMoney(budget.totalMonthlySpent, language)}$totalLimitStatus"
         })
         if (familyScope) {
-            Text(if (russian) "Семейный лимит еды за 7 дней: ${formatMoney(rollingFoodLimit, language)}"
-                else "Family 7-day food limit: ${formatMoney(rollingFoodLimit, language)}")
+            val familyFood = state.familyBudgetFoodStatus?.takeIf {
+                state.familyBudgetFoodTenantId == tenant?.id && state.familyBudgetFoodMonth == budget.month
+            }
+            if (familyFood != null) Text(formatRollingFoodStatus(familyFood, language))
+            else Text(if (state.familyBudgetFoodLoading) {
+                if (russian) "Загружаем семейный отчёт по еде…" else "Loading family food report…"
+            } else if (state.familyBudgetFoodError != null) {
+                if (russian) "Семейный отчёт по еде недоступен" else "Family food report is unavailable"
+            } else if (russian) "Семейный отчёт по еде недоступен" else "Family food report is unavailable")
         } else {
-            Text(if (russian) "Расход еды за 7 дней: " +
-                "${formatMoney(budget.rolling7FoodStatus.spent, language)} / " +
-                "${formatMoney(rollingFoodLimit, language)}$rollingFoodStatus"
-                else "Food over 7 days: " +
-                    "${formatMoney(budget.rolling7FoodStatus.spent, language)} / " +
-                    "${formatMoney(rollingFoodLimit, language)}$rollingFoodStatus")
+            Text(formatRollingFoodStatus(budget.rolling7FoodStatus, language))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { scope = "family" }) { Text(if (russian) "Семейный" else "Family") }

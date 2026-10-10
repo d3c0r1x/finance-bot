@@ -51,19 +51,175 @@ class FinanceScreensTest {
     }
 
     @Test fun budgetAndDebtScreensLoadForOwnerInRussian() {
-        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
-            budgets = budget(), debts = listOf(debt())))
+        val owner = tenant("owner")
+        show(FinanceUiState(authenticated = true, tenants = listOf(owner), budgets = budget(), debts = listOf(debt()),
+            familyBudgetFoodStatus = budget().rolling7FoodStatus, familyBudgetFoodMonth = budget().month,
+            familyBudgetFoodTenantId = owner.id))
 
         compose.onNodeWithText("Бюджеты").performClick()
         compose.onNodeWithText("Лимиты · 2026-10").assertIsDisplayed()
-        compose.onNodeWithText("Семейный лимит еды за 7 дней: 1 000,00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Еда за 7 дней (2026-09-25–2026-10-01): потрачено 350,25 ₽ / " +
+            "1 000,00 ₽ · остаток 649,75 ₽ · В норме · Недостаточно истории").assertIsDisplayed()
         compose.onNodeWithText("Личный").performClick()
-        compose.onNodeWithText("Расход еды за 7 дней: 350,25 ₽ / 1 000,00 ₽ · Недостаточно истории").assertIsDisplayed()
+        compose.onNodeWithText("Еда за 7 дней (2026-09-25–2026-10-01): потрачено 350,25 ₽ / " +
+            "1 000,00 ₽ · остаток 649,75 ₽ · В норме · Недостаточно истории").assertIsDisplayed()
 
         compose.onNodeWithText("Долги").performScrollTo().performClick()
         compose.onNodeWithText("Кредитная карта").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Записать платёж").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Прогноз выплаты").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun rollingFoodStatusUsesSameCoreWindowAmountsAndStatusesAcrossScreensInRussianAndEnglish() {
+        val food = RollingFoodStatus(
+            fromDate = "2026-10-02", toDate = "2026-10-08", limit = "1000.00", spent = "950.00",
+            remaining = "50.00", limitStatus = "near", usualWeeklySpend = null, historyWeeks = 0,
+            paceStatus = "insufficient_history", paceShare = null,
+        )
+        val budgets = budget().copy(
+            rolling7FoodLimit = food.limit, effectiveRolling7FoodLimit = food.limit,
+            rolling7FoodSpent = food.spent, rolling7FoodLimitStatus = food.limitStatus,
+            rolling7FoodStatus = food,
+        )
+        val summary = DashboardSummary(
+            month = "2026-10", incomeTotal = "0.00", expenseTotal = food.spent, transactionCount = 1,
+            asOfDate = food.toDate, daysElapsed = 8, daysInMonth = 31, daysRemaining = 23,
+            dailyExpensePace = null, projectedExpenseTotal = null, rolling7FoodStatus = food,
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budgets,
+            dashboardSummary = summary, report = report().copy(rolling7FoodStatus = food)))
+
+        val russianLine = "Еда за 7 дней (2026-10-02–2026-10-08): потрачено 950,00 ₽ / 1 000,00 ₽ · " +
+            "остаток 50,00 ₽ · Почти достигнут · Недостаточно истории"
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText(russianLine).assertIsDisplayed()
+        compose.onNodeWithText("Бюджеты").performClick()
+        compose.onNodeWithText("Личный").performClick()
+        compose.onNodeWithText(russianLine).assertIsDisplayed()
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithText(russianLine).performScrollTo().assertIsDisplayed()
+
+        val englishLine = "Food over 7 days (2026-10-02–2026-10-08): spent 950.00 RUB / 1,000.00 RUB · " +
+            "remaining 50.00 RUB · Near limit · Insufficient history"
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText(englishLine).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Overview").performClick()
+        compose.onNodeWithText(englishLine).assertIsDisplayed()
+        compose.onNodeWithText("Budgets").performClick()
+        compose.onNodeWithText("Personal").performClick()
+        compose.onNodeWithText(englishLine).assertIsDisplayed()
+    }
+
+    @Test fun rollingFoodStatusDoesNotInventBaselineOrRemainingWhenCoreReturnsNullInRussianAndEnglish() {
+        val food = RollingFoodStatus(
+            fromDate = "2026-10-02", toDate = "2026-10-08", limit = "0.00", spent = "350.25",
+            remaining = null, limitStatus = "disabled", usualWeeklySpend = null, historyWeeks = 0,
+            paceStatus = "insufficient_history", paceShare = null,
+        )
+        val budgets = budget().copy(
+            rolling7FoodLimit = "0.00", effectiveRolling7FoodLimit = "0.00", rolling7FoodSpent = food.spent,
+            rolling7FoodLimitStatus = "disabled", rolling7FoodStatus = food,
+        )
+        val summary = DashboardSummary(
+            month = "2026-10", incomeTotal = "0.00", expenseTotal = food.spent, transactionCount = 1,
+            asOfDate = food.toDate, daysElapsed = 8, daysInMonth = 31, daysRemaining = 23,
+            dailyExpensePace = null, projectedExpenseTotal = null, rolling7FoodStatus = food,
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budgets,
+            dashboardSummary = summary, report = report().copy(rolling7FoodStatus = food)))
+
+        val russianLine = "Еда за 7 дней (2026-10-02–2026-10-08): потрачено 350,25 ₽ · " +
+            "Лимит отключён · Недостаточно истории"
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText(russianLine).assertIsDisplayed()
+        compose.onNodeWithText("Бюджеты").performClick()
+        compose.onNodeWithText("Личный").performClick()
+        compose.onNodeWithText(russianLine).assertIsDisplayed()
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithText(russianLine).performScrollTo().assertIsDisplayed()
+
+        val englishLine = "Food over 7 days (2026-10-02–2026-10-08): spent 350.25 RUB · " +
+            "Limit disabled · Insufficient history"
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText(englishLine).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Overview").performClick()
+        compose.onNodeWithText(englishLine).assertIsDisplayed()
+        compose.onNodeWithText("Budgets").performClick()
+        compose.onNodeWithText("Personal").performClick()
+        compose.onNodeWithText(englishLine).assertIsDisplayed()
+    }
+
+    @Test fun familyFoodStatusUsesFamilyReportAndRequestsMonthlyFamilyReport() {
+        var reportRequest: List<String>? = null
+        val personalFood = RollingFoodStatus(
+            fromDate = "2026-10-02", toDate = "2026-10-08", limit = "1000.00", spent = "111.11",
+            remaining = "888.89", limitStatus = "normal", usualWeeklySpend = "200.00", historyWeeks = 3,
+            paceStatus = "under", paceShare = "0.555550",
+        )
+        val familyFood = RollingFoodStatus(
+            fromDate = "2026-10-03", toDate = "2026-10-09", limit = "2000.00", spent = "1750.00",
+            remaining = "250.00", limitStatus = "near", usualWeeklySpend = "1200.00", historyWeeks = 4,
+            paceStatus = "over", paceShare = "1.458333",
+        )
+        val budgets = budget().copy(
+            rolling7FoodLimit = "2000.00", effectiveRolling7FoodLimit = "1000.00",
+            rolling7FoodSpent = personalFood.spent, rolling7FoodLimitStatus = personalFood.limitStatus,
+            rolling7FoodStatus = personalFood,
+        )
+        val personalReport = report().copy(
+            period = "month", scope = "personal", fromDate = "2026-10-01", toDate = "2026-10-09",
+            monthlyBudgetLimit = "50000.00", monthlyBudgetRemaining = "12345.67",
+            rolling7FoodStatus = personalFood,
+        )
+        val familyReport = report().copy(
+            period = "month", scope = "family", fromDate = "2026-10-01", toDate = "2026-10-09",
+            rolling7FoodStatus = familyFood,
+        )
+        var familyBudgetRequests = emptyList<String>()
+        val owner = tenant("owner")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(owner), budgets = budgets,
+            report = personalReport))
+        show(state.value, stateHolder = state, onReportLoad = { period, scope, month, from, to ->
+            reportRequest = listOf(period, scope, month, from, to)
+            state.value = state.value.copy(report = if (scope == "family") familyReport else personalReport)
+        }, onFamilyBudgetFoodStatusLoad = { requestedMonth ->
+            familyBudgetRequests = familyBudgetRequests + requestedMonth
+            state.value = state.value.copy(familyBudgetFoodStatus = familyFood,
+                familyBudgetFoodMonth = requestedMonth, familyBudgetFoodTenantId = owner.id)
+        })
+
+        val russianFamilyLine = "Еда за 7 дней (2026-10-03–2026-10-09): потрачено 1 750,00 ₽ / 2 000,00 ₽ · " +
+            "остаток 250,00 ₽ · Почти достигнут · Быстрее обычного"
+        compose.onNodeWithText("Бюджеты").performClick()
+        compose.onNodeWithText("Личный").performClick()
+        compose.onNodeWithText("Семейный").performClick()
+        compose.onNodeWithText(russianFamilyLine).assertIsDisplayed()
+        state.value = state.value.copy(familyBudgetFoodRefreshToken = 1L)
+        compose.waitForIdle()
+        assertEquals(listOf(budgets.month, budgets.month, budgets.month), familyBudgetRequests)
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        assertEquals("personal", state.value.report?.scope)
+        compose.onNodeWithText("Лимит месяца: 50 000,00 ₽ · остаток 12 345,67 ₽")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Еда за 7 дней (2026-10-02–2026-10-08): потрачено 111,11 ₽ / 1 000,00 ₽ · " +
+            "остаток 888,89 ₽ · В норме · Медленнее обычного").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Личные").performClick()
+        compose.onNodeWithText(russianFamilyLine).assertDoesNotExist()
+        compose.onNodeWithText("Показать отчёт").performClick()
+        compose.onNodeWithText("Семейные").performClick()
+        compose.onNodeWithText("Личные").performClick()
+        compose.onNodeWithText(russianFamilyLine).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Показать отчёт").performClick()
+        assertEquals(listOf("month", "family", budgets.month, "", ""), reportRequest)
+
+        val englishFamilyLine = "Food over 7 days (2026-10-03–2026-10-09): spent 1,750.00 RUB / 2,000.00 RUB · " +
+            "remaining 250.00 RUB · Near limit · Faster than usual"
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText(englishFamilyLine).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Budgets").performClick()
+        compose.onNodeWithText("Personal").performClick()
+        compose.onNodeWithText("Family").performClick()
+        compose.onNodeWithText(englishFamilyLine).assertIsDisplayed()
     }
 
     @Test fun personalBudgetOverrideUsesPersonalVersionAndShowsInheritedCategories() {
@@ -79,7 +235,10 @@ class FinanceScreensTest {
             personalVersions = mapOf("еда" to 3L),
             familyTotalLimit = "50000.00", effectiveTotalLimit = "50000.00",
         )
-        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budgets),
+        val owner = tenant("owner")
+        show(FinanceUiState(authenticated = true, tenants = listOf(owner), budgets = budgets,
+            familyBudgetFoodStatus = budgets.rolling7FoodStatus, familyBudgetFoodMonth = budgets.month,
+            familyBudgetFoodTenantId = owner.id),
             onBudgetUpdate = { key, scope, amount, period, version ->
                 update = listOf(key, scope, amount, period, version.toString())
             }, onBudgetReset = { resets++ })
@@ -128,7 +287,10 @@ class FinanceScreensTest {
             familyVersions = mapOf("еда" to 7L, "транспорт" to 2L),
             familyTotalVersion = 11L,
         )
-        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budgets),
+        val owner = tenant("owner")
+        show(FinanceUiState(authenticated = true, tenants = listOf(owner), budgets = budgets,
+            familyBudgetFoodStatus = budgets.rolling7FoodStatus, familyBudgetFoodMonth = budgets.month,
+            familyBudgetFoodTenantId = owner.id),
             onBudgetUpdate = { key, scope, amount, period, version ->
                 updates += listOf(key, scope, amount, period, version.toString())
             })
@@ -153,7 +315,8 @@ class FinanceScreensTest {
             .performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Family limit: 20,000.00 RUB", substring = true)
             .performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Family 7-day food limit: 1,000.00 RUB")
+        compose.onNodeWithText("Food over 7 days (2026-09-25–2026-10-01): spent 350.25 RUB / " +
+            "1,000.00 RUB · remaining 649.75 RUB · Within limit · Insufficient history")
             .performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("RU").performClick()
 
@@ -1221,6 +1384,7 @@ class FinanceScreensTest {
 
     private fun show(state: FinanceUiState,
                      onReportLoad: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
+                     onFamilyBudgetFoodStatusLoad: (String) -> Unit = {},
                      onCreateTenant: (String, String, String?) -> Unit = { _, _, _ -> },
                      onBudgetUpdate: (String, String, String, String, Long) -> Unit = { _, _, _, _, _ -> },
                      onBudgetReset: () -> Unit = {},
@@ -1276,6 +1440,7 @@ class FinanceScreensTest {
                 onBudgetProposal = onBudgetProposal, onBudgetApply = onBudgetApply,
                 onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> }, onDebtForecast = {},
                 onReportLoad = onReportLoad,
+                onFamilyBudgetFoodStatusLoad = onFamilyBudgetFoodStatusLoad,
                 onRepeatTransaction = { transaction -> onTransactionMutation(); onRepeatTransaction(transaction) },
                 onVoidTransaction = { transaction -> onTransactionMutation(); onVoidTransaction(transaction) },
                 onTransactionFilter = onTransactionFilter, onTransactionLoadMore = onTransactionLoadMore,

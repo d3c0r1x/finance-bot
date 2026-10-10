@@ -37,3 +37,28 @@ internal fun formatSemanticStatus(kind: String, code: String, language: String):
     }
     return labels[code] ?: if (russian) "Неизвестный статус" else "Unknown status"
 }
+
+internal fun formatRollingFoodStatus(status: RollingFoodStatus, language: String, currency: String = "RUB"): String {
+    val russian = language == "ru"
+    val label = if (russian) "Еда за 7 дней" else "Food over 7 days"
+    val window = "${status.fromDate}–${status.toDate}"
+    val spent = formatMoney(status.spent, language, currency)
+    val limit = if (status.limitStatus == "disabled") null else formatMoney(status.limit, language, currency)
+    val remaining = status.remaining?.let { formatMoney(it, language, currency) }
+    val limitStatus = if (status.limitStatus == "disabled") {
+        if (russian) "Лимит отключён" else "Limit disabled"
+    } else formatSemanticStatus("limitStatus", status.limitStatus, language)
+    val paceStatus = formatSemanticStatus("paceStatus", status.paceStatus, language)
+    val values = if (russian) buildList {
+        add("потрачено $spent${limit?.let { " / $it" } ?: ""}")
+        if (remaining != null) add("остаток $remaining")
+        add(limitStatus)
+        add(paceStatus)
+    } else buildList {
+        add("spent $spent${limit?.let { " / $it" } ?: ""}")
+        if (remaining != null) add("remaining $remaining")
+        add(limitStatus)
+        add(paceStatus)
+    }
+    return "$label ($window): ${values.joinToString(" · ")}"
+}
