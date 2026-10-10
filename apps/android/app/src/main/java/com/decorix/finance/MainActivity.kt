@@ -5443,6 +5443,10 @@ private fun DebtScreen(state: FinanceUiState, language: String,
                         Text(debt.name, style = MaterialTheme.typography.titleMedium)
                         Text(if (russian) "Остаток ${debt.currentBalance} ₽ · ${if (debt.status == "open") "открыт" else "закрыт"} · версия ${debt.version}"
                         else "Balance ${debt.currentBalance} RUB · ${debt.status} · version ${debt.version}")
+                        val rate = debt.interestRate ?: "0.0000"
+                        val localizedRate = if (russian) rate.replace('.', ',') else rate
+                        Text(if (russian) "Ставка: $localizedRate% · Минимальный платёж: ${formatMoney(debt.minimumPayment, language)}"
+                        else "Interest rate: $localizedRate% · Minimum payment: ${formatMoney(debt.minimumPayment, language)}")
                         if (canManage && debt.status == "open") {
                             OutlinedTextField(paymentAmount, { paymentAmount = it }, label = { Text(if (russian) "Платёж, ₽" else "Payment, RUB") })
                             Button(onClick = { onPay(debt.id, paymentAmount, debt.version) }, enabled = !state.busy && paymentAmount.isNotBlank()) {

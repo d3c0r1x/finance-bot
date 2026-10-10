@@ -19,6 +19,7 @@ import org.junit.Test
 import org.junit.rules.ExternalResource
 import org.junit.runner.RunWith
 import java.util.Collections
+import java.time.Instant
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -31,6 +32,68 @@ class FinanceReceiptApiTest {
     @get:Rule val serverRule = object : ExternalResource() {
         override fun before() = server.start()
         override fun after() = server.shutdown()
+    }
+
+    @Test fun debtLifecycleUsesTenantScopedVersionedIdempotentRequestsAndParsesForecast() {
+        server.enqueue(MockResponse().setBody(debtJson(currentBalance = "9000.00", version = 7)))
+        server.enqueue(MockResponse().setBody("""{"debt":${debtJson(currentBalance = "8279.50", version = 8)}}"""))
+        server.enqueue(MockResponse().setBody(debtJson(currentBalance = "8000.00", version = 9)))
+        server.enqueue(MockResponse().setBody("""{"monthsToPayoff":18,"estimateBasis":"minimum_payment"}"""))
+        server.enqueue(MockResponse().setBody("""{"monthsToPayoff":null,"estimateBasis":"payment_required"}"""))
+
+        val api = api().also {
+            it.saveTokens("access-token", "refresh-token", System.currentTimeMillis() + 60_000)
+        }
+        val created = api.createDebt("tenant-17", "  Credit card  ", "10000,00", "18,50", "450,00")
+        val paid = api.payDebt("tenant-17", created.id, "720,50", created.version)
+        val adjusted = api.adjustDebtBalance("tenant-17", paid.id, "8000,00", paid.version)
+        val forecast = api.debtForecast("tenant-17", adjusted.id)
+        val unavailableForecast = api.debtForecast("tenant-17", adjusted.id)
+
+        assertEquals("debt-22", created.id)
+        assertEquals("9000.00", created.currentBalance)
+        assertEquals(7L, created.version)
+        assertEquals("8279.50", paid.currentBalance)
+        assertEquals(8L, paid.version)
+        assertEquals("8000.00", adjusted.currentBalance)
+        assertEquals(9L, adjusted.version)
+        assertEquals(18, forecast.monthsToPayoff)
+        assertEquals("minimum_payment", forecast.estimateBasis)
+        assertEquals(null, unavailableForecast.monthsToPayoff)
+        assertEquals("payment_required", unavailableForecast.estimateBasis)
+
+        val createRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", createRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/debts", createRequest.path)
+        val createBody = org.json.JSONObject(createRequest.body.readUtf8())
+        assertEquals("Credit card", createBody.getString("name"))
+        assertEquals("10000.00", createBody.getString("openingBalance"))
+        assertEquals("18.50", createBody.getString("interestRate"))
+        assertEquals("450.00", createBody.getString("minimumPayment"))
+        val createKey = assertUuidIdempotencyKey(createRequest)
+
+        val paymentRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", paymentRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/debts/debt-22/payments", paymentRequest.path)
+        assertEquals("\"7\"", paymentRequest.getHeader("If-Match"))
+        val paymentKey = assertUuidIdempotencyKey(paymentRequest)
+        val paymentBody = org.json.JSONObject(paymentRequest.body.readUtf8())
+        assertEquals("720.50", paymentBody.getString("amount"))
+        assertNotNull(Instant.parse(paymentBody.getString("occurredAt")))
+
+        val adjustmentRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PUT", adjustmentRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/debts/debt-22/balance", adjustmentRequest.path)
+        assertEquals("\"8\"", adjustmentRequest.getHeader("If-Match"))
+        val adjustmentKey = assertUuidIdempotencyKey(adjustmentRequest)
+        assertEquals(3, setOf(createKey, paymentKey, adjustmentKey).size)
+        assertEquals("8000.00", org.json.JSONObject(adjustmentRequest.body.readUtf8()).getString("currentBalance"))
+
+        repeat(2) {
+            val forecastRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("GET", forecastRequest.method)
+            assertEquals("/api/v1/tenants/tenant-17/debts/debt-22/forecast", forecastRequest.path)
+        }
     }
 
     @Test fun photoUploadRefreshesAfter401AndReplaysSameMultipartFileAndKey() {
@@ -1291,6 +1354,20 @@ class FinanceReceiptApiTest {
         return FinanceApi(ApplicationProvider.getApplicationContext<Context>(),
             FinanceApiEndpoints(base, base), OkHttpClient())
     }
+
+    private fun assertUuidIdempotencyKey(request: RecordedRequest): String {
+        val key = requireNotNull(request.getHeader("Idempotency-Key"))
+        assertTrue("Idempotency-Key must be a UUID", key.matches(
+            Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"),
+        ))
+        return key
+    }
+
+    private fun debtJson(currentBalance: String, version: Long) = """
+        {"id":"debt-22","tenantId":"tenant-17","name":"Credit card","openingBalance":"10000.00",
+         "currentBalance":"$currentBalance","interestRate":"18.50","minimumPayment":"450.00",
+         "status":"open","version":$version}
+    """.trimIndent()
 
     private fun jobJson(state: String, stage: String, progress: Int) = """
         {"id":"job-29","tenantId":"tenant-17","documentId":"document-9","state":"$state",

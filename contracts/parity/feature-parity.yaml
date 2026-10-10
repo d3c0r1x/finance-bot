@@ -570,7 +570,9 @@ features:
       scenario: "Android counterpart for F27: Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F27 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+      evidence: "Android renders Core rate/minimum in RU/EN with the Web null-rate fallback; tests cover exact payment, adjustment and forecast callback IDs/versions, viewer and closed-debt write gating. MockWebServer verifies tenant-scoped create/pay/adjust/forecast requests, exact normalized values, If-Match, distinct UUID idempotency keys, and forecast states. Full API 27 instrumentation 220/220 plus focused F27/API checks 8/8; Android unit/build gates pass."
+      gap: "Live authenticated Android-to-Core OIDC and tenant-isolation E2E remain unverified; API tests use synthetic MockWebServer responses."
     intentional_differences: []
   - id: F28
     feature: "Правка остатка долга через панель, возврат при отмене платежа"

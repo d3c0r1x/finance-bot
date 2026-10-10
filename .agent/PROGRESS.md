@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-10, Europe/Moscow.
+Updated: 2026-10-11, Europe/Moscow.
 
 ## Global plan
 
@@ -1840,3 +1840,12 @@ Updated: 2026-10-10, Europe/Moscow.
 - Tests first: expanded Android model coverage to assert all ten DTO fields exactly. Added synthetic RU/EN Compose coverage for actual and planned income, exact income/expense/reserve/promised/safe values, horizon date and duration, plus absent guidance. Initial RED: actual and planned panels each failed on the missing income-basis text. A follow-up run exposed another real gap: the dashboard had no scroll semantics, clipping the reserve/charges on short screens. Added vertical scrolling to the dashboard; all card values can now be reached.
 - GREEN: targeted API 27 instrumentation 4/4; full isolated API 27 instrumentation 215/215 on `emulator-5554`; Android JVM tests 35/35; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` pass; contract suite 78 passed, 2 skipped; `git diff --check` clean. Independent UI review found no blocker. Debug APK installed and `MainActivity` launched on isolated Android 8.1/API 27 (PID 15734). APK SHA-256 `6FE1C8B85008FE0597AA7B2F7E3B0CA685D107CF5D80195B6F551EFDB8B91627`.
 - Commit: `69e8ba841bfdadf92f77fbf8b254e2865a447bf0` (`feat(F26): add Android safe-to-spend parity`). Android F26 stays PARTIAL only for live authenticated Core/OIDC and tenant-isolation E2E. No backend policy changed. Next: push commit, then select next approved V1 goal.
+
+## F59.3 F27 Android debt display and lifecycle — GREEN; COMMIT_PENDING — 2026-10-11 02:44 MSK
+
+- Scope: close the Android F27 presentation and action-evidence gaps. Core remains the only debt ledger and calculation owner; Android displays Core rate/minimum and forwards exact IDs, entered values and versions.
+- Tests first: the initial API-27 Compose run was RED for missing interest-rate/minimum-payment content. Test harness issues (off-screen horizontal tab, form scrolling, and missing synthetic auth token) were corrected without production edits. Added UI checks for RU/EN, null-rate Web parity, payment/adjust/forecast callbacks and viewer/closed-debt gating; MockWebServer checks create/pay/adjust/forecast paths, normalized payloads, quoted If-Match versions, unique UUID idempotency keys and forecast responses.
+- Implementation: debt cards now display Core interest rate and minimum payment, preserve rate precision while localizing its decimal separator, format minimum payment through the shared RU/EN money formatter, and match Web's `0.0000` null-rate fallback. No debt math or mutation policy moved to Android.
+- GREEN: full direct instrumentation on isolated Android 8.1/API 27 `emulator-5554` 220/220; focused final F27/API instrumentation 8/8; Android `:app:testDebugUnitTest`, `:app:assembleDebug` and `:app:assembleDebugAndroidTest` pass; parity contracts 78 passed/2 skipped; `git diff --check` clean. APK SHA-256 `3D2F13953AA037EBB869DE680BC0283465309A0DEEEE3E7760BCF389CA0116B5`.
+- Independent review found no production blocker. Android F27 remains PARTIAL because live authenticated Android-to-Core OIDC and tenant-isolation E2E are not tested; Core atomicity and duplicate-payment behavior remain covered by the existing PostgreSQL acceptance suite. Full F59 parity remains open.
+- Next: commit only the F27 UI/API tests, debt display and this progress/contract update; leave pre-existing user-owned untracked files untouched.

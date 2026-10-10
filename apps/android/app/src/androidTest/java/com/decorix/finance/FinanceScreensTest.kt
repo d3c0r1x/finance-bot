@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -65,9 +66,88 @@ class FinanceScreensTest {
             "1 000,00 ₽ · остаток 649,75 ₽ · В норме · Недостаточно истории").assertIsDisplayed()
 
         compose.onNodeWithText("Долги").performScrollTo().performClick()
-        compose.onNodeWithText("Кредитная карта").performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("Долги").assertCountEquals(2)
+        compose.onNodeWithText("Кредитная карта").assertIsDisplayed()
         compose.onNodeWithText("Записать платёж").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Прогноз выплаты").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun debtCardDisplaysCoreInterestRateAndMinimumPayment() {
+        val coreDebt = debt().copy(interestRate = "18.50", minimumPayment = "450.00")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(coreDebt)))
+
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onNodeWithText("Кредитная карта").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Ставка: 18,50% · Минимальный платёж: 450,00 ₽").assertIsDisplayed()
+    }
+
+    @Test fun debtCardLocalizesRateAndMinimumPaymentInRussianAndEnglish() {
+        val coreDebt = debt().copy(interestRate = "18.50", minimumPayment = "450.00")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(coreDebt)))
+
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onNodeWithText("Ставка: 18,50% · Минимальный платёж: 450,00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Interest rate: 18.50% · Minimum payment: 450.00 RUB").assertIsDisplayed()
+    }
+
+    @Test fun debtCardMatchesWebFallbackWhenCoreRateIsNull() {
+        val coreDebt = debt().copy(interestRate = null, minimumPayment = "450.00")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(coreDebt)))
+
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onNodeWithText("Ставка: 0,0000% · Минимальный платёж: 450,00 ₽").assertIsDisplayed()
+    }
+
+    @Test fun debtWriterSubmitsExactCoreIdAmountAndVersionForPayment() {
+        var paid: List<Any>? = null
+        show(
+            FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(debt())),
+            onDebtPay = { id, amount, version -> paid = listOf(id, amount, version) },
+        )
+
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onAllNodesWithText("Долги").assertCountEquals(2)
+        compose.onNodeWithText("Платёж, ₽").performTextInput("125,50")
+        compose.onNodeWithText("Записать платёж").performClick()
+
+        assertEquals(listOf("debt-1", "125,50", 3L), paid)
+    }
+
+    @Test fun debtMutationsAreHiddenForViewer() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")), debts = listOf(debt())))
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onAllNodesWithText("Долги").assertCountEquals(2)
+        compose.onNodeWithText("Просмотр только для чтения").assertIsDisplayed()
+        compose.onNodeWithText("Записать платёж").assertDoesNotExist()
+        compose.onNodeWithText("Создать долг").assertDoesNotExist()
+    }
+
+    @Test fun debtMutationsAreHiddenForClosedDebt() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(debt().copy(status = "closed"))))
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onAllNodesWithText("Долги").assertCountEquals(2)
+        compose.onNodeWithText("закрыт", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Записать платёж").assertDoesNotExist()
+        compose.onNodeWithText("Сохранить остаток").assertDoesNotExist()
+    }
+
+    @Test fun debtAdjustmentAndForecastActionsPreserveCoreDebtIdAndVersion() {
+        var adjustment: List<Any>? = null
+        var forecastDebtId: String? = null
+        show(
+            FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(debt())),
+            onDebtAdjust = { id, amount, version -> adjustment = listOf(id, amount, version) },
+            onDebtForecast = { forecastDebtId = it },
+        )
+
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onNodeWithText("Исправить остаток, ₽").performTextInput("8150,25")
+        compose.onNodeWithText("Сохранить остаток").assertIsEnabled().performScrollTo().performClick()
+        compose.onNodeWithText("Прогноз выплаты").performScrollTo().performClick()
+
+        assertEquals(listOf("debt-1", "8150,25", 3L), adjustment)
+        assertEquals("debt-1", forecastDebtId)
     }
 
     @Test fun rollingFoodStatusUsesSameCoreWindowAmountsAndStatusesAcrossScreensInRussianAndEnglish() {
@@ -1495,9 +1575,13 @@ class FinanceScreensTest {
                       onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> },
                      onRepeatTransaction: (FinanceTransaction) -> Unit = {},
                       onVoidTransaction: (FinanceTransaction) -> Unit = {},
-                      onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
-                      onTransactionLoadMore: () -> Unit = {},
-                      onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {}) {
+                     onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
+                     onTransactionLoadMore: () -> Unit = {},
+                     onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {},
+                     onDebtCreate: (String, String, String?, String) -> Unit = { _, _, _, _ -> },
+                     onDebtPay: (String, String, Long) -> Unit = { _, _, _ -> },
+                     onDebtAdjust: (String, String, Long) -> Unit = { _, _, _ -> },
+                     onDebtForecast: (String) -> Unit = {}) {
         val language = mutableStateOf("ru")
         val contentKey = Any()
         compose.setContent {
@@ -1523,7 +1607,7 @@ class FinanceScreensTest {
                 onLogout = {},
                 onBudgetUpdate = onBudgetUpdate, onBudgetReset = onBudgetReset,
                 onBudgetProposal = onBudgetProposal, onBudgetApply = onBudgetApply,
-                onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> }, onDebtForecast = {},
+                onDebtCreate = onDebtCreate, onDebtPay = onDebtPay, onDebtAdjust = onDebtAdjust, onDebtForecast = onDebtForecast,
                 onReportLoad = onReportLoad,
                 onFamilyBudgetFoodStatusLoad = onFamilyBudgetFoodStatusLoad,
                 onRepeatTransaction = { transaction -> onTransactionMutation(); onRepeatTransaction(transaction) },
