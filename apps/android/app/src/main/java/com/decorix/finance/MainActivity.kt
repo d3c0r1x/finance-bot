@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
     private val receiptConfirmGeneration = AtomicLong(0L)
     private val receiptCategoryGeneration = AtomicLong(0L)
     private val receiptBasketReviewGeneration = AtomicLong(0L)
+    private val receiptDisputedItemsGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -157,7 +158,9 @@ class MainActivity : ComponentActivity() {
                         onReceiptDuplicateDecision = ::decideReceiptDuplicate,
                         onReceiptConfirm = ::confirmReceipt,
                         onReceiptCategorySelect = ::selectReceiptCategory,
-                        onReceiptBasketReview = ::reviewReceiptBasket)
+                        onReceiptBasketReview = ::reviewReceiptBasket,
+                        onReceiptDisputedItemsPage = ::loadReceiptDisputedItems,
+                        onReceiptDisputedProductDecision = ::decideReceiptDisputedProduct)
                 }
             }
         }
@@ -659,6 +662,120 @@ class MainActivity : ComponentActivity() {
                         ui = ui.copy(receiptItemsLoading = false, receiptItemsError = "unavailable")
                     }
                 }
+        }
+    }
+
+    private fun loadReceiptDisputedItems(receiptId: String, page: Int) {
+        if (page < 1) return
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated || ui.receiptDraft?.id != receiptId) return
+        val generation = receiptDisputedItemsGeneration.incrementAndGet()
+        ui = ui.copy(receiptDisputedItemsReceiptId = receiptId,
+            receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = true,
+            receiptDisputedItemsError = null)
+        executor.execute {
+            if (receiptDisputedItemsGeneration.get() != generation) return@execute
+            runCatching {
+                api.disputedReceiptItems(tenantId, receiptId, page) to api.productDecisions(tenantId)
+            }.onSuccess { (items, decisions) ->
+                if (receiptDisputedItemsGeneration.get() == generation && ui.authenticated &&
+                    ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId &&
+                    ui.receiptDisputedItemsRequestedPage == page) {
+                    ui = ui.copy(receiptDisputedItemsPage = items, receiptDisputedItemsReceiptId = receiptId,
+                        receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = false,
+                        receiptDisputedItemsError = null, productDecisions = decisions)
+                }
+            }.onFailure {
+                if (receiptDisputedItemsGeneration.get() == generation && ui.authenticated &&
+                    ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId &&
+                    ui.receiptDisputedItemsRequestedPage == page) {
+                    // Keep the last Core page visible; retry can recover without losing the user's place.
+                    ui = ui.copy(receiptDisputedItemsLoading = false, receiptDisputedItemsError = "unavailable")
+                }
+            }
+        }
+    }
+
+    private fun decideReceiptDisputedProduct(productKey: String, action: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val receiptId = ui.receiptDraft?.id ?: return
+        if (!ui.authenticated || !canReviewReceiptBasket(ui.tenants.firstOrNull()?.role) ||
+            ui.receiptDisputedItemsLoading || action !in setOf("allow", "revoke") || productKey.isBlank()) return
+        val page = ui.receiptDisputedItemsPage?.page?.takeIf {
+            ui.receiptDisputedItemsReceiptId == receiptId
+        } ?: 1
+        val refreshDoNotBuy = ui.doNotBuy != null
+        val refreshShopping = ui.shoppingList != null
+        val generation = receiptDisputedItemsGeneration.incrementAndGet()
+        ui = ui.copy(receiptDisputedItemsReceiptId = receiptId,
+            receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = true,
+            receiptDisputedItemsError = null)
+        executor.execute {
+            if (receiptDisputedItemsGeneration.get() != generation) return@execute
+            val result = runCatching {
+                applyReceiptDisputedDecisionAndRefresh(
+                    applyDecision = { api.decideDoNotBuy(tenantId, productKey, action) },
+                    loadPage = { api.disputedReceiptItems(tenantId, receiptId, page) },
+                    loadDecisions = { api.productDecisions(tenantId) },
+                )
+            }
+            val mutationError = result.exceptionOrNull() as? ReceiptDisputedDecisionMutationFailure
+            val mutationMayHaveApplied = result.isSuccess ||
+                result.exceptionOrNull() is ReceiptDisputedDecisionRefreshFailure ||
+                mutationError?.mayHaveApplied == true
+            val refreshedDoNotBuy = if (mutationMayHaveApplied && refreshDoNotBuy) {
+                runCatching { api.doNotBuy(tenantId) }
+            } else null
+            val refreshedShopping = if (mutationMayHaveApplied && refreshShopping) {
+                runCatching { api.shoppingCandidates(tenantId) }
+            } else null
+            result.onSuccess { snapshot ->
+                if (receiptDisputedItemsGeneration.get() == generation && ui.authenticated &&
+                    ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
+                    ui = ui.copy(receiptDisputedItemsPage = snapshot.page, receiptDisputedItemsReceiptId = receiptId,
+                        receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = false,
+                        receiptDisputedItemsError = null, productDecisions = snapshot.decisions,
+                        doNotBuy = refreshedDoNotBuy?.getOrNull() ?: ui.doNotBuy,
+                        doNotBuyError = when {
+                            refreshedDoNotBuy?.isFailure == true -> "unavailable"
+                            refreshedDoNotBuy?.isSuccess == true -> null
+                            else -> ui.doNotBuyError
+                        },
+                        shoppingList = refreshedShopping?.getOrNull() ?: ui.shoppingList,
+                        shoppingError = when {
+                            refreshedShopping?.isFailure == true -> "unavailable"
+                            refreshedShopping?.isSuccess == true -> null
+                            else -> ui.shoppingError
+                        })
+                }
+            }.onFailure { error ->
+                if (receiptDisputedItemsGeneration.get() == generation && ui.authenticated &&
+                    ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
+                    // Preserve prior Core data; a later refresh error never implies the mutation was rolled back.
+                    val errorCode = when (error) {
+                        is ReceiptDisputedDecisionRefreshFailure -> "decision_refresh"
+                        else -> "decision_failed"
+                    }
+                    val reconciled = (error as? ReceiptDisputedDecisionMutationFailure)?.snapshot
+                    ui = ui.copy(receiptDisputedItemsPage = reconciled?.page ?: ui.receiptDisputedItemsPage,
+                        receiptDisputedItemsReceiptId = if (reconciled != null) receiptId else ui.receiptDisputedItemsReceiptId,
+                        receiptDisputedItemsRequestedPage = if (reconciled != null) page else ui.receiptDisputedItemsRequestedPage,
+                        productDecisions = reconciled?.decisions ?: ui.productDecisions,
+                        receiptDisputedItemsLoading = false, receiptDisputedItemsError = errorCode,
+                        doNotBuy = refreshedDoNotBuy?.getOrNull() ?: ui.doNotBuy,
+                        doNotBuyError = when {
+                            refreshedDoNotBuy?.isFailure == true -> "unavailable"
+                            refreshedDoNotBuy?.isSuccess == true -> null
+                            else -> ui.doNotBuyError
+                        },
+                        shoppingList = refreshedShopping?.getOrNull() ?: ui.shoppingList,
+                        shoppingError = when {
+                            refreshedShopping?.isFailure == true -> "unavailable"
+                            refreshedShopping?.isSuccess == true -> null
+                            else -> ui.shoppingError
+                        })
+                }
+            }
         }
     }
 
@@ -1399,7 +1516,12 @@ class MainActivity : ComponentActivity() {
                         doNotBuy = ui.doNotBuy.takeIf { sameTenant },
                         productDecisions = ui.productDecisions.takeIf { sameTenant },
                         doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
-                        doNotBuyLoading = ui.doNotBuyLoading && sameTenant)
+                        doNotBuyLoading = ui.doNotBuyLoading && sameTenant,
+                        receiptDisputedItemsPage = ui.receiptDisputedItemsPage.takeIf { sameTenant },
+                        receiptDisputedItemsReceiptId = ui.receiptDisputedItemsReceiptId.takeIf { sameTenant },
+                        receiptDisputedItemsRequestedPage = ui.receiptDisputedItemsRequestedPage.takeIf { sameTenant },
+                        receiptDisputedItemsLoading = ui.receiptDisputedItemsLoading && sameTenant,
+                        receiptDisputedItemsError = ui.receiptDisputedItemsError.takeIf { sameTenant })
                     if (restoreReceiptCheckpoint) {
                         restoreReceiptCheckpointForTenant(snapshot.tenants.firstOrNull()?.id, receiptOperationToken!!)
                     }
@@ -1683,6 +1805,7 @@ class MainActivity : ComponentActivity() {
 
     private fun logout() {
         ReceiptOperationGeneration.invalidate()
+        receiptDisputedItemsGeneration.incrementAndGet()
         receiptReadingGeneration.incrementAndGet()
         receiptItemsGeneration.incrementAndGet()
         receiptItemAddGeneration.incrementAndGet()
@@ -1790,11 +1913,52 @@ data class FinanceUiState(
     val receiptBasketReviewingReceiptId: String? = null,
     val receiptBasketReviewingTenantId: String? = null,
     val receiptBasketReviewError: String? = null,
+    val receiptDisputedItemsPage: FinanceReceiptItemPage? = null,
+    val receiptDisputedItemsReceiptId: String? = null,
+    val receiptDisputedItemsRequestedPage: Int? = null,
+    val receiptDisputedItemsLoading: Boolean = false,
+    val receiptDisputedItemsError: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
     val receiptCheckpointUnresolved: Boolean = false,
 )
+
+internal data class ReceiptDisputedDecisionSnapshot(
+    val page: FinanceReceiptItemPage,
+    val decisions: FinanceProductDecisions,
+)
+
+internal class ReceiptDisputedDecisionMutationFailure(
+    cause: Throwable,
+    val snapshot: ReceiptDisputedDecisionSnapshot?,
+) : RuntimeException("Could not apply the disputed-product decision", cause) {
+    val mayHaveApplied: Boolean = when (cause) {
+        is ApiFailure -> cause.status !in 400..499 || cause.status in setOf(408, 425, 429)
+        else -> true
+    }
+}
+
+internal class ReceiptDisputedDecisionRefreshFailure(cause: Throwable) :
+    RuntimeException("Could not refresh disputed products after the decision", cause)
+
+internal fun applyReceiptDisputedDecisionAndRefresh(
+    applyDecision: () -> Unit,
+    loadPage: () -> FinanceReceiptItemPage,
+    loadDecisions: () -> FinanceProductDecisions,
+): ReceiptDisputedDecisionSnapshot {
+    try {
+        applyDecision()
+    } catch (error: Exception) {
+        val reconciled = runCatching { ReceiptDisputedDecisionSnapshot(loadPage(), loadDecisions()) }.getOrNull()
+        throw ReceiptDisputedDecisionMutationFailure(error, reconciled)
+    }
+    try {
+        return ReceiptDisputedDecisionSnapshot(loadPage(), loadDecisions())
+    } catch (error: Exception) {
+        throw ReceiptDisputedDecisionRefreshFailure(error)
+    }
+}
 
 internal fun canWriteReceiptCategory(role: String?): Boolean = role != null && role != "viewer"
 
@@ -1968,7 +2132,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptDuplicateDecision: (String, Long, String, String?) -> Unit = { _, _, _, _ -> },
                           onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
                           onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> },
-                          onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> }) {
+                          onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> },
+                          onReceiptDisputedItemsPage: (String, Int) -> Unit = { _, _ -> },
+                          onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> }) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -2270,12 +2436,16 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             state.receiptBasketReviewingReceiptId == state.receiptDraft?.id &&
                             state.receiptBasketReviewingTenantId == state.tenants.firstOrNull()?.id,
                         state.receiptBasketReviewError,
+                        state.receiptDisputedItemsPage, state.receiptDisputedItemsReceiptId,
+                        state.receiptDisputedItemsRequestedPage, state.receiptDisputedItemsLoading,
+                        state.receiptDisputedItemsError, state.productDecisions,
                         canReviewReceiptBasket(state.tenants.firstOrNull()?.role),
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
                         onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
                         onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh,
                         onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm,
-                        onReceiptCategorySelect, onReceiptBasketReview)
+                        onReceiptCategorySelect, onReceiptBasketReview,
+                        onReceiptDisputedItemsPage, onReceiptDisputedProductDecision)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -2503,6 +2673,9 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 receiptConfirmError: String?,
                                 categorySaving: Boolean, categoryError: String?,
                                 basketReviewing: Boolean, basketReviewError: String?,
+                                disputedItemsPage: FinanceReceiptItemPage?, disputedItemsReceiptId: String?,
+                                disputedItemsRequestedPage: Int?, disputedItemsLoading: Boolean,
+                                disputedItemsError: String?, productDecisions: FinanceProductDecisions?,
                                 canReviewBasket: Boolean,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
@@ -2518,12 +2691,19 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onDuplicateDecision: (String, Long, String, String?) -> Unit,
                                 onConfirmReceipt: (String, Long, String) -> Unit,
                                 onSelectCategory: (String, Long, String) -> Unit,
-                                onReviewBasket: (String, Long) -> Unit) {
+                                onReviewBasket: (String, Long) -> Unit,
+                                onDisputedItemsPage: (String, Int) -> Unit,
+                                onDisputedProductDecision: (String, String) -> Unit) {
     val confirmationIdempotencyKey = androidx.compose.runtime.remember(receipt?.tenantId, receipt?.id) {
         receipt?.let { receiptConfirmationIdempotencyKey(it.tenantId, it.id) }.orEmpty()
     }
     var pageNumber by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableIntStateOf(1)
+    }
+    var disputedPageNumber by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableIntStateOf(disputedItemsPage?.page?.takeIf {
+            disputedItemsReceiptId == receipt?.id
+        } ?: 1)
     }
     var editingItemId by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableStateOf<String?>(null)
@@ -2574,6 +2754,9 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
     var lastRequestedPage by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableStateOf<Int?>(null)
     }
+    var lastRequestedDisputedPage by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf<Int?>(null)
+    }
     androidx.compose.runtime.LaunchedEffect(receipt?.id, receipt?.itemCount, pageNumber,
         receiptItemsPage?.page, receiptItemsReceiptId, receiptItemsRequestedPage, receiptItemsLoading) {
         val currentReceipt = receipt ?: return@LaunchedEffect
@@ -2584,6 +2767,20 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
         if (!pageLoaded && !embeddedFirstPageAvailable && !requestInProgress && lastRequestedPage != pageNumber) {
             lastRequestedPage = pageNumber
             onLoadItemsPage(currentReceipt.id, pageNumber)
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(receipt?.id, receipt?.state, receipt?.itemCount,
+        disputedPageNumber, disputedItemsPage?.page, disputedItemsReceiptId,
+        disputedItemsRequestedPage, disputedItemsLoading) {
+        val currentReceipt = receipt ?: return@LaunchedEffect
+        if (currentReceipt.state != "review_required" || currentReceipt.itemCount <= 0) return@LaunchedEffect
+        val pageLoaded = disputedItemsReceiptId == currentReceipt.id &&
+            disputedItemsPage?.page == disputedPageNumber
+        val requestInProgress = disputedItemsLoading && disputedItemsReceiptId == currentReceipt.id &&
+            disputedItemsRequestedPage == disputedPageNumber
+        if (!pageLoaded && !requestInProgress && lastRequestedDisputedPage != disputedPageNumber) {
+            lastRequestedDisputedPage = disputedPageNumber
+            onDisputedItemsPage(currentReceipt.id, disputedPageNumber)
         }
     }
     val russian = language == "ru"
@@ -3137,6 +3334,30 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                         }
                     }
                 }
+                if (draft.state == "review_required" && draft.itemCount > 0) {
+                    ReceiptDisputedItemsSection(
+                        receiptId = draft.id,
+                        language = language,
+                        currency = draft.currency,
+                        canManage = canReviewBasket,
+                        pageNumber = disputedPageNumber,
+                        page = disputedItemsPage,
+                        pageReceiptId = disputedItemsReceiptId,
+                        requestedPage = disputedItemsRequestedPage,
+                        loading = disputedItemsLoading,
+                        error = disputedItemsError,
+                        decisions = productDecisions,
+                        productNames = (draft.items + receiptItemsPage
+                            ?.takeIf { receiptItemsReceiptId == draft.id }?.items.orEmpty())
+                            .filter { it.productKey != null }.associate { it.productKey!! to it.name },
+                        onPageChange = { page ->
+                            disputedPageNumber = page
+                            lastRequestedDisputedPage = page
+                            onDisputedItemsPage(draft.id, page)
+                        },
+                        onDecision = onDisputedProductDecision,
+                    )
+                }
                 val currentReading = reading.takeIf { readingReceiptId == null || readingReceiptId == draft.id }
                 val sourceLabel = when (draft.categorySource) {
                     "human" -> if (russian) "вручную" else "manual"
@@ -3284,6 +3505,160 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
     }
 }
 
+@androidx.compose.runtime.Composable
+private fun ReceiptDisputedItemsSection(
+    receiptId: String,
+    language: String,
+    currency: String,
+    canManage: Boolean,
+    pageNumber: Int,
+    page: FinanceReceiptItemPage?,
+    pageReceiptId: String?,
+    requestedPage: Int?,
+    loading: Boolean,
+    error: String?,
+    decisions: FinanceProductDecisions?,
+    productNames: Map<String, String>,
+    onPageChange: (Int) -> Unit,
+    onDecision: (String, String) -> Unit,
+) {
+    val russian = language == "ru"
+    val currentPage = page?.takeIf { pageReceiptId == receiptId }
+    val visiblePage = currentPage?.page ?: pageNumber
+    val (sortedAllowedKeys, allowedKeys) = androidx.compose.runtime.remember(decisions) {
+        val sorted = decisions?.productKeys.orEmpty().sorted()
+        sorted to sorted.toHashSet()
+    }
+    val allowedPageSize = 20
+    var allowedPageNumber by androidx.compose.runtime.remember(receiptId, decisions) {
+        androidx.compose.runtime.mutableIntStateOf(1)
+    }
+    val allowedPageCount = ((sortedAllowedKeys.size + allowedPageSize - 1) / allowedPageSize).coerceAtLeast(1)
+    val boundedAllowedPage = allowedPageNumber.coerceIn(1, allowedPageCount)
+    val allowedPageStart = (boundedAllowedPage - 1) * allowedPageSize
+    val visibleAllowedKeys = sortedAllowedKeys.subList(
+        allowedPageStart, minOf(allowedPageStart + allowedPageSize, sortedAllowedKeys.size))
+    val errorForReceipt = error != null && (pageReceiptId == null || pageReceiptId == receiptId)
+    Card(Modifier.fillMaxWidth().testTag("receipt-disputed-items")) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (russian) "Спорные товары" else "Disputed items",
+                style = MaterialTheme.typography.titleSmall)
+            if (loading && (pageReceiptId == null || pageReceiptId == receiptId) &&
+                (requestedPage == null || requestedPage == pageNumber)) {
+                Text(if (russian) "Загружаем спорные товары…" else "Loading disputed items…",
+                    modifier = Modifier.testTag("receipt-disputed-items-loading"))
+            }
+            if (errorForReceipt) {
+                Text(receiptDisputedItemsErrorMessage(error, language),
+                    modifier = Modifier.testTag("receipt-disputed-items-error"),
+                    color = MaterialTheme.colorScheme.error)
+                TextButton(modifier = Modifier.testTag("receipt-disputed-items-retry"),
+                    enabled = !loading, onClick = { onPageChange(requestedPage ?: visiblePage) }) {
+                    Text(if (russian) "Повторить" else "Retry")
+                }
+            }
+            if (!loading && !errorForReceipt && currentPage != null && currentPage.items.isEmpty()) {
+                Text(if (russian) "Нет спорных товаров" else "No disputed items",
+                    modifier = Modifier.testTag("receipt-disputed-items-empty"))
+            }
+            currentPage?.items?.forEach { item ->
+                Column(Modifier.fillMaxWidth().testTag("receipt-disputed-item-${item.id}"),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(item.name, style = MaterialTheme.typography.bodyMedium)
+                    item.lineSum?.let { amount ->
+                        Text(formatMoney(amount, language, currency),
+                            modifier = Modifier.testTag("receipt-disputed-item-amount-${item.id}"))
+                    }
+                    Text("${if (russian) "Оценка" else "Verdict"}: " +
+                        disputedVerdictLabel(item.verdict, language),
+                        modifier = Modifier.testTag("receipt-disputed-item-verdict-${item.id}"))
+                    Text("${if (russian) "Причина" else "Reason"}: " +
+                        safeReceiptReviewText(item.reviewReason, language, "reason"),
+                        modifier = Modifier.testTag("receipt-disputed-item-reason-${item.id}"))
+                    Text("${if (russian) "Действие" else "Action"}: " +
+                        disputedActionLabel(item.reviewAction, language),
+                        modifier = Modifier.testTag("receipt-disputed-item-action-${item.id}"))
+                    Text("${if (russian) "Совет" else "Advice"}: " +
+                        safeReceiptReviewText(item.advice, language, "advice"),
+                        modifier = Modifier.testTag("receipt-disputed-item-advice-${item.id}"))
+                    val sourceLabel = disputedSourceLabel(item.verdictSource, language)
+                    val provider = safeReceiptProvenance(item.reviewProvider, language)
+                    val model = safeReceiptProvenance(item.reviewModelVersion, language)
+                    val prompt = safeReceiptProvenance(item.reviewPromptVersion, language)
+                    val algorithm = safeReceiptProvenance(item.reviewAlgorithmVersion, language)
+                    Text("${if (russian) "Источник" else "Source"}: $sourceLabel · " +
+                        "${if (russian) "провайдер" else "provider"} $provider · " +
+                        "${if (russian) "модель" else "model"} $model · " +
+                        "${if (russian) "промпт" else "prompt"} $prompt · " +
+                        "${if (russian) "алгоритм" else "algorithm"} $algorithm",
+                        modifier = Modifier.testTag("receipt-disputed-item-source-${item.id}"))
+                    Text("${if (russian) "Происхождение позиции" else "Item provenance"}: " +
+                        disputedItemProvenanceLabel(item.provenance, language),
+                        modifier = Modifier.testTag("receipt-disputed-item-provenance-${item.id}"))
+                    val productKey = item.productKey?.takeIf(String::isNotBlank)
+                    if (canManage && productKey != null && productKey !in allowedKeys) {
+                        TextButton(
+                            modifier = Modifier.testTag("receipt-disputed-item-allow-$productKey"),
+                            enabled = !loading,
+                            onClick = { onDecision(productKey, "allow") },
+                        ) {
+                            Text(if (russian) "Разрешить товар" else "Allow product")
+                        }
+                    }
+                }
+            }
+            if (sortedAllowedKeys.isNotEmpty()) {
+                Text(if (russian) "Разрешённые товары" else "Allowed products",
+                    style = MaterialTheme.typography.labelLarge)
+                visibleAllowedKeys.forEach { productKey ->
+                    Row(Modifier.fillMaxWidth().testTag("receipt-disputed-allowed-item-$productKey"),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text(productNames[productKey] ?: if (russian) "Товар" else "Product",
+                            modifier = Modifier.weight(1f))
+                        if (canManage) TextButton(
+                            modifier = Modifier.testTag("receipt-disputed-item-revoke-$productKey"),
+                            enabled = !loading,
+                            onClick = { onDecision(productKey, "revoke") },
+                        ) {
+                            Text(if (russian) "Вернуть в спорные" else "Revoke allow")
+                        }
+                    }
+                }
+                Text(if (russian) "Страница $boundedAllowedPage из $allowedPageCount"
+                    else "Page $boundedAllowedPage of $allowedPageCount",
+                    modifier = Modifier.testTag("receipt-disputed-allowed-page"))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(modifier = Modifier.testTag("receipt-disputed-allowed-previous"),
+                        enabled = boundedAllowedPage > 1 && !loading,
+                        onClick = { allowedPageNumber = (boundedAllowedPage - 1).coerceAtLeast(1) }) {
+                        Text(if (russian) "Назад" else "Previous")
+                    }
+                    TextButton(modifier = Modifier.testTag("receipt-disputed-allowed-next"),
+                        enabled = boundedAllowedPage < allowedPageCount && !loading,
+                        onClick = { allowedPageNumber = (boundedAllowedPage + 1).coerceAtMost(allowedPageCount) }) {
+                        Text(if (russian) "Далее" else "Next")
+                    }
+                }
+            }
+            Text(if (russian) "Страница $visiblePage" else "Page $visiblePage",
+                modifier = Modifier.testTag("receipt-disputed-items-page"))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(modifier = Modifier.testTag("receipt-disputed-items-previous"),
+                    enabled = visiblePage > 1 && !loading,
+                    onClick = { onPageChange((visiblePage - 1).coerceAtLeast(1)) }) {
+                    Text(if (russian) "Назад" else "Previous")
+                }
+                TextButton(modifier = Modifier.testTag("receipt-disputed-items-next"),
+                    enabled = currentPage?.hasMore == true && !loading,
+                    onClick = { onPageChange(visiblePage + 1) }) {
+                    Text(if (russian) "Далее" else "Next")
+                }
+            }
+        }
+    }
+}
+
 internal fun receiptPollDelayMillis(state: String, attempt: Int): Long? {
     if (attempt >= 60) return null
     return when (state) {
@@ -3298,6 +3673,98 @@ private fun receiptConfirmationIdempotencyKey(tenantId: String, receiptId: Strin
         .digest("$tenantId:$receiptId".toByteArray(Charsets.UTF_8))
     return "receipt-confirm-${digest.joinToString("") { "%02x".format(it) }}"
 }
+
+private fun receiptDisputedItemsErrorMessage(error: String?, language: String): String =
+    if (language == "ru") when (error) {
+        "decision_failed" -> "Не удалось проверить изменение решения. Обновите список и проверьте результат."
+        "decision_refresh" -> "Решение могло сохраниться, но список не обновился. Повторите обновление."
+        else -> "Не удалось загрузить спорные товары."
+    } else when (error) {
+        "decision_failed" -> "Could not verify the decision change. Refresh the list to check its result."
+        "decision_refresh" -> "The decision may have been saved, but the list did not refresh. Retry refresh."
+        else -> "Could not load disputed items."
+    }
+
+private fun disputedVerdictLabel(verdict: String?, language: String): String =
+    if (language == "ru") when (verdict) {
+        "harmful" -> "неблагоприятная"
+        "unnecessary" -> "необязательная"
+        "useful" -> "полезная"
+        "neutral" -> "нейтральная"
+        null, "" -> "не указана"
+        else -> "неизвестная"
+    } else when (verdict) {
+        "harmful" -> "harmful"
+        "unnecessary" -> "unnecessary"
+        "useful" -> "useful"
+        "neutral" -> "neutral"
+        null, "" -> "not provided"
+        else -> "unknown"
+    }
+
+private fun disputedActionLabel(action: String?, language: String): String {
+    val russian = language == "ru"
+    val value = action?.trim()?.takeIf(String::isNotEmpty) ?: return if (russian) "не указано" else "not provided"
+    return when (value.lowercase()) {
+        "avoid" -> if (russian) "не брать" else "avoid"
+        "unknown", "null", "not_provided" -> if (russian) "не указано" else "not provided"
+        else -> if (RECEIPT_MACHINE_REVIEW_VALUE.matches(value)) {
+            if (russian) "не указано" else "not provided"
+        } else value
+    }
+}
+
+private fun disputedSourceLabel(source: String?, language: String): String =
+    if (language == "ru") when (source) {
+        "rule" -> "правило"
+        "model" -> "модель"
+        "default" -> "по умолчанию"
+        "human" -> "человек"
+        "unknown", null, "" -> "неизвестен"
+        else -> "неизвестен"
+    } else when (source) {
+        "rule" -> "rule"
+        "model" -> "model"
+        "default" -> "default"
+        "human" -> "human"
+        "unknown", null, "" -> "unknown"
+        else -> "unknown"
+    }
+
+private fun disputedItemProvenanceLabel(provenance: String?, language: String): String =
+    if (language == "ru") when (provenance) {
+        "ocr" -> "распознавание чека"
+        "receipt_review" -> "проверка чека"
+        "manual" -> "вручную"
+        "unknown", null, "" -> "неизвестно"
+        else -> "неизвестно"
+    } else when (provenance) {
+        "ocr" -> "receipt recognition"
+        "receipt_review" -> "receipt review"
+        "manual" -> "manual"
+        "unknown", null, "" -> "unknown"
+        else -> "unknown"
+    }
+
+private fun safeReceiptReviewText(value: String?, language: String, kind: String): String {
+    val russian = language == "ru"
+    val fallback = when (kind) {
+        "reason" -> if (russian) "не указана" else "not provided"
+        else -> if (russian) "не указан" else "not provided"
+    }
+    val text = value?.trim()?.takeIf(String::isNotEmpty) ?: return fallback
+    return if (text.lowercase() in setOf("unknown", "null", "not_provided", "not-provided") ||
+        RECEIPT_MACHINE_REVIEW_VALUE.matches(text)) fallback else text
+}
+
+private fun safeReceiptProvenance(value: String?, language: String): String {
+    val text = value?.trim()?.takeIf(String::isNotEmpty)
+    return if (text == null || text.lowercase() in setOf("unknown", "null", "not_provided")) {
+        if (language == "ru") "не указано" else "not provided"
+    } else text
+}
+
+private val RECEIPT_MACHINE_REVIEW_VALUE = Regex("^[A-Za-z][A-Za-z0-9]*(?:[._][A-Za-z0-9]+)+$")
 
 private fun receiptStageLabel(stage: String, language: String): String = if (language == "ru") when (stage) {
     "queued" -> "В очереди"

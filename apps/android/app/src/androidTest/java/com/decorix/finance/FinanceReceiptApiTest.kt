@@ -170,6 +170,111 @@ class FinanceReceiptApiTest {
         assertEquals(null, reading.reconciliation.visionItemsTotal)
     }
 
+    @Test fun disputedReceiptItemsRequestsAuthenticatedPagesAndParsesReviewEvidence() {
+        val firstPageItems = (1..8).map { index -> disputedReceiptItemJson(index, "rule") }
+        val lastPageItem = disputedReceiptItemJson(9, "model")
+        server.enqueue(MockResponse().setBody(receiptItemPageJson(firstPageItems, 1, 9, true)))
+        server.enqueue(MockResponse().setBody(receiptItemPageJson(listOf(lastPageItem), 2, 9, false)))
+        val api = api()
+        api.saveTokens("receipt-member-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val first = api.disputedReceiptItems("tenant-17", "receipt-42", page = 1)
+        val second = api.disputedReceiptItems("tenant-17", "receipt-42", page = 2)
+
+        val firstRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        val secondRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", firstRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/disputed-items?page=1", firstRequest.path)
+        assertEquals("Bearer receipt-member-token", firstRequest.getHeader("Authorization"))
+        assertEquals("GET", secondRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/disputed-items?page=2", secondRequest.path)
+        assertEquals("Bearer receipt-member-token", secondRequest.getHeader("Authorization"))
+
+        assertEquals(1, first.page)
+        assertEquals(9, first.totalItems)
+        assertEquals(8, first.items.size)
+        assertTrue(first.hasMore)
+        assertEquals("harmful", first.items.first().verdict)
+        assertEquals("milk930ml", first.items.first().productKey)
+        assertEquals("rule", first.items.first().verdictSource)
+        assertEquals("receipt-rule.v1", first.items.first().reviewAlgorithmVersion)
+        assertEquals(2L, first.items.first().version)
+        assertEquals(2, second.page)
+        assertEquals(9, second.totalItems)
+        assertEquals(1, second.items.size)
+        assertFalse(second.hasMore)
+        assertEquals("model", second.items.single().verdictSource)
+        assertEquals("synthetic-model", second.items.single().reviewProvider)
+        assertEquals("synthetic-review-v1", second.items.single().reviewModelVersion)
+        assertEquals("Check the product before a repeat purchase.", second.items.single().advice)
+    }
+
+    @Test fun productAllowAndRevokeUseAuthenticatedCoreRoutesWithoutReceiptConcurrencyHeaders() {
+        server.enqueue(MockResponse().setBody(
+            """{"productKey":"milk930ml","decision":"allowed","version":1,"updatedAt":"2026-10-10T09:00:00Z"}""",
+        ))
+        server.enqueue(MockResponse().setBody("""{"productKeys":["milk930ml"],"confirmedProductKeys":[]}"""))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setBody("""{"productKeys":[],"confirmedProductKeys":[]}"""))
+        val api = api()
+        api.saveTokens("receipt-member-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        api.decideDoNotBuy("tenant-17", "milk930ml", "allow")
+        val allowed = api.productDecisions("tenant-17")
+        api.decideDoNotBuy("tenant-17", "milk930ml", "revoke")
+        val revoked = api.productDecisions("tenant-17")
+        assertEquals(listOf("milk930ml"), allowed.productKeys)
+        assertTrue(allowed.confirmedProductKeys.isEmpty())
+        assertTrue(revoked.productKeys.isEmpty())
+        assertTrue(revoked.confirmedProductKeys.isEmpty())
+
+        val allow = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PUT", allow.method)
+        assertEquals("/api/v1/tenants/tenant-17/products/milk930ml/decision", allow.path)
+        assertEquals("Bearer receipt-member-token", allow.getHeader("Authorization"))
+        assertEquals("application/json", allow.getHeader("Content-Type")?.substringBefore(';'))
+        val allowBody = org.json.JSONObject(allow.body.readUtf8())
+        assertEquals(setOf("decision"), allowBody.keys().asSequence().toSet())
+        assertEquals("allowed", allowBody.getString("decision"))
+        assertNull(allow.getHeader("If-Match"))
+        assertNull(allow.getHeader("Idempotency-Key"))
+
+        val allowedStateRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", allowedStateRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/products/decisions", allowedStateRequest.path)
+        assertEquals("Bearer receipt-member-token", allowedStateRequest.getHeader("Authorization"))
+
+        val revoke = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("DELETE", revoke.method)
+        assertEquals("/api/v1/tenants/tenant-17/products/milk930ml/decision", revoke.path)
+        assertEquals("Bearer receipt-member-token", revoke.getHeader("Authorization"))
+        assertEquals("{}", revoke.body.readUtf8())
+        assertNull(revoke.getHeader("If-Match"))
+        assertNull(revoke.getHeader("Idempotency-Key"))
+
+        val revokedStateRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", revokedStateRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/products/decisions", revokedStateRequest.path)
+        assertEquals("Bearer receipt-member-token", revokedStateRequest.getHeader("Authorization"))
+    }
+
+    @Test fun productDecisionWritePreservesCoreForbiddenResponse() {
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"detail":"forbidden"}"""))
+        val api = api()
+        api.saveTokens("viewer-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val failure = runCatching {
+            api.decideDoNotBuy("tenant-17", "milk930ml", "allow")
+        }.exceptionOrNull()
+
+        assertTrue("Core must reject a viewer's product decision", failure is ApiFailure)
+        assertEquals(403, (failure as ApiFailure).status)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PUT", request.method)
+        assertEquals("Bearer viewer-token", request.getHeader("Authorization"))
+        assertEquals("/api/v1/tenants/tenant-17/products/milk930ml/decision", request.path)
+    }
+
     @Test fun missingOwnerScopedReceiptReadingReturnsNotFoundWithoutInventingEvidence() {
         server.enqueue(MockResponse().setResponseCode(404).setBody("""{"detail":"not found"}"""))
         val api = api()
@@ -1052,6 +1157,20 @@ class FinanceReceiptApiTest {
         .put("reviewPromptVersion", org.json.JSONObject.NULL)
         .put("reviewAlgorithmVersion", org.json.JSONObject.NULL)
         .put("version", index)
+        .toString()
+
+    private fun disputedReceiptItemJson(index: Int, source: String) = org.json.JSONObject(receiptItemJson(index))
+        .put("productKey", "milk930ml")
+        .put("verdict", "harmful")
+        .put("advice", "Check the product before a repeat purchase.")
+        .put("reviewReason", "Synthetic reason")
+        .put("reviewAction", "Review the choice")
+        .put("verdictSource", source)
+        .put("reviewProvider", if (source == "model") "synthetic-model" else org.json.JSONObject.NULL)
+        .put("reviewModelVersion", if (source == "model") "synthetic-review-v1" else org.json.JSONObject.NULL)
+        .put("reviewPromptVersion", if (source == "model") "synthetic-prompt-v1" else org.json.JSONObject.NULL)
+        .put("reviewAlgorithmVersion", if (source == "rule") "receipt-rule.v1" else "receipt-model.v1")
+        .put("version", 2)
         .toString()
 
     private fun receiptItemPageJson(items: List<String>, page: Int, totalItems: Int, hasMore: Boolean): String {

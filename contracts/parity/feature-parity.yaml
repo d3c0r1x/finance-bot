@@ -406,9 +406,14 @@ features:
     evidence:
       - "V17 stores tenant/user-scoped product decisions and append-only events. PostgreSQL proves duplicate names share a normalized key, disputed rows page in groups of eight, an allowed key hides matching rows, and revoke restores them. The same decision table suppresses repeat-waste warnings. RU/EN Web allows and revokes products. Focused PostgreSQL/unit tests, 44 Python migration/contracts tests (2 skipped), 7 Web receipt tests, and the full Core check pass."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F20: «Не согласен» с вердиктом, пагинация спорных строк"
-      gap: "No Android user screen or equivalent flow is verified for F20 yet."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/ReceiptDisputedDecisionRefreshTest.kt
+      gap: "Locally verified Android flow; live authenticated Android-to-Core OIDC E2E remains unverified."
+      evidence: "Android reads Core-owned disputed-item pages, shows verdict evidence, and uses reversible allow/revoke decisions without changing receipt totals. API-27 instrumentation passed 35 API + 64 screen tests; Android JVM 26/26; parity contracts 60/60. Tests cover page metadata/navigation, writer/viewer roles, RU/EN, errors/retry, USD formatting, 20-key allowed-decision paging, unchanged totals, and ambiguous-write reconciliation. Debug APK installed/launched on isolated Android 8.1/API 27 emulator; SHA-256 A6B77AC6220FCE26248909877021A9C18611200349D117C1C0DEE286BEE1595B. Synthetic response fixtures only; live authenticated Android-to-Core OIDC E2E remains unverified."
     intentional_differences: []
   - id: F21
     feature: "Повторные предупреждения о необязательном товаре; `services/advice.py`"

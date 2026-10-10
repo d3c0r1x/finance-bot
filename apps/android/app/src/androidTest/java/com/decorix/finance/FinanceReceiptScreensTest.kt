@@ -922,7 +922,7 @@ class FinanceReceiptScreensTest {
     private fun assertReceiptItemPage(page: FinanceReceiptItemPage): List<String> {
         val missingValues = mutableListOf<String>()
         compose.onNodeWithTag("receipt-items-page").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Страница ${page.page}").performScrollTo().assertIsDisplayed()
+            .assertTextContains("Страница ${page.page}")
         page.items.forEach { item ->
             val row = compose.onNodeWithTag("receipt-item-${item.id}").performScrollTo().assertIsDisplayed()
             listOf(item.name, requireNotNull(item.quantity), requireNotNull(item.unitPrice),
@@ -1555,6 +1555,313 @@ class FinanceReceiptScreensTest {
         assertEquals(1, chooseNewPhotoCalls)
     }
 
+    @Test fun disputedReceiptItemsPageForwardAndBackUseServerPagesInRussianAndEnglish() {
+        val firstItem = disputedItem("disputed-1", "Сладкая газировка", "sugary-drink")
+        val secondItem = disputedItem("disputed-2", "Чипсы", "chips")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                listOf(firstItem), page = 1, totalItems = 2, hasMore = true),
+            receiptDisputedItemsReceiptId = "receipt-42"))
+        val requestedPages = mutableListOf<Pair<String, Int>>()
+        show(state.value, onReceiptDisputedItemsPage = { receiptId, page ->
+            requestedPages += receiptId to page
+            state.value = state.value.copy(receiptDisputedItemsPage = FinanceReceiptItemPage(
+                if (page == 1) listOf(firstItem) else listOf(secondItem), page, 2, page == 1),
+                receiptDisputedItemsReceiptId = receiptId,
+                receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = false)
+        }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-disputed-item-${firstItem.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-items-previous").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithTag("receipt-disputed-items-next").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("receipt-42" to 2), requestedPages)
+        compose.onNodeWithTag("receipt-disputed-items-page").performScrollTo().assertTextEquals("Страница 2")
+        compose.onNodeWithTag("receipt-disputed-item-${secondItem.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-items-next").performScrollTo().assertIsNotEnabled()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-disputed-items-previous").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("receipt-42" to 2, "receipt-42" to 1), requestedPages)
+        compose.onNodeWithTag("receipt-disputed-items-page").performScrollTo().assertTextEquals("Page 1")
+        compose.onNodeWithTag("receipt-disputed-item-${firstItem.id}").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun disputedReceiptPaginationRendersEightRowsThenTheExactRemainingTwo() {
+        val firstPage = (1..8).map { disputedItem("disputed-$it", "Спорный товар $it", "product-$it") }
+        val lastPage = (9..10).map { disputedItem("disputed-$it", "Спорный товар $it", "product-$it") }
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                firstPage, page = 1, totalItems = 10, hasMore = true),
+            receiptDisputedItemsReceiptId = "receipt-42"))
+        val requestedPages = mutableListOf<Int>()
+        show(state.value, onReceiptDisputedItemsPage = { receiptId, page ->
+            assertEquals("receipt-42", receiptId)
+            requestedPages += page
+            state.value = state.value.copy(receiptDisputedItemsPage = FinanceReceiptItemPage(
+                lastPage, page = 2, totalItems = 10, hasMore = false),
+                receiptDisputedItemsReceiptId = receiptId,
+                receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = false)
+        }, stateHolder = state)
+
+        firstPage.forEach { item ->
+            compose.onNodeWithTag("receipt-disputed-item-${item.id}").performScrollTo().assertIsDisplayed()
+        }
+        assertEquals(10, state.value.receiptDisputedItemsPage?.totalItems)
+        assertEquals(true, state.value.receiptDisputedItemsPage?.hasMore)
+        compose.onNodeWithTag("receipt-disputed-items-next").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(2), requestedPages)
+        assertEquals(10, state.value.receiptDisputedItemsPage?.totalItems)
+        assertEquals(false, state.value.receiptDisputedItemsPage?.hasMore)
+        firstPage.forEach { item -> compose.onNodeWithTag("receipt-disputed-item-${item.id}").assertDoesNotExist() }
+        lastPage.forEach { item ->
+            compose.onNodeWithTag("receipt-disputed-item-${item.id}").performScrollTo().assertIsDisplayed()
+        }
+    }
+
+    @Test fun disputedAllowedProductKeysShowBoundedPagesAcrossFortyOneKeys() {
+        val keys = (1..41).map { "allowed%02d".format(it) }
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(),
+            productDecisions = FinanceProductDecisions(keys, emptyList())))
+
+        compose.onNodeWithTag("receipt-disputed-allowed-page").performScrollTo()
+            .assertTextEquals("Страница 1 из 3")
+        compose.onNodeWithTag("receipt-disputed-allowed-item-${keys.first()}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-allowed-item-${keys[19]}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-allowed-item-${keys[20]}").assertDoesNotExist()
+
+        compose.onNodeWithTag("receipt-disputed-allowed-next").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("receipt-disputed-allowed-page").performScrollTo()
+            .assertTextEquals("Страница 2 из 3")
+        compose.onNodeWithTag("receipt-disputed-allowed-item-${keys[20]}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-allowed-item-${keys[39]}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-allowed-item-${keys[40]}").assertDoesNotExist()
+
+        compose.onNodeWithTag("receipt-disputed-allowed-next").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithTag("receipt-disputed-allowed-page").performScrollTo()
+            .assertTextEquals("Страница 3 из 3")
+        compose.onNodeWithTag("receipt-disputed-allowed-item-${keys[40]}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-allowed-next").assertIsNotEnabled()
+    }
+
+    @Test fun disputedItemAmountUsesReceiptCurrencyAndVerdictUsesCoreItemLocalization() {
+        val item = disputedItem("disputed-usd", "Coffee", "coffee").copy(lineSum = "10.00")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft().copy(currency = "USD"),
+            receiptDisputedItemsPage = FinanceReceiptItemPage(listOf(item), 1, 1, false),
+            receiptDisputedItemsReceiptId = "receipt-42"))
+
+        compose.onNodeWithTag("receipt-disputed-item-verdict-${item.id}").performScrollTo()
+            .assertTextEquals("Оценка: необязательная")
+        compose.onNodeWithTag("receipt-disputed-item-amount-${item.id}").performScrollTo()
+            .assertTextEquals("10,00 USD")
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-disputed-item-verdict-${item.id}").performScrollTo()
+            .assertTextEquals("Verdict: unnecessary")
+        compose.onNodeWithTag("receipt-disputed-item-amount-${item.id}").performScrollTo()
+            .assertTextEquals("10.00 USD")
+    }
+
+    @Test fun disputedItemAmountUsesReceiptCurrency() {
+        val item = disputedItem("disputed-usd-amount", "Coffee", "coffee").copy(lineSum = "10.00")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft().copy(currency = "USD"),
+            receiptDisputedItemsPage = FinanceReceiptItemPage(listOf(item), 1, 1, false),
+            receiptDisputedItemsReceiptId = "receipt-42"))
+
+        compose.onNodeWithText("10,00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("10.00 ₽").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-disputed-item-amount-${item.id}").performScrollTo()
+            .assertTextEquals("10,00 USD")
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("10.00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("10.00 ₽").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-disputed-item-amount-${item.id}").performScrollTo()
+            .assertTextEquals("10.00 USD")
+    }
+
+    @Test fun allowingAndRevokingDisputedProductWaitsForCorePageAndRestoresRows() {
+        val allowed = disputedItem("disputed-1", "Сладкая газировка", "sugary-drink")
+        val remaining = disputedItem("disputed-2", "Чипсы", "chips")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("member")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                listOf(allowed, remaining), page = 1, totalItems = 2, hasMore = false),
+            receiptDisputedItemsReceiptId = "receipt-42",
+            productDecisions = FinanceProductDecisions(emptyList(), emptyList())))
+        val decisions = mutableListOf<Pair<String, String>>()
+        show(state.value, onReceiptDisputedProductDecision = { productKey, action ->
+            decisions += productKey to action
+            // The UI must wait for the authoritative page returned by Core.
+        }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-disputed-item-allow-sugary-drink").performScrollTo()
+            .assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("sugary-drink" to "allow"), decisions)
+        compose.onNodeWithTag("receipt-disputed-item-${allowed.id}").performScrollTo().assertIsDisplayed()
+        assertEquals(emptyList<String>(), state.value.productDecisions?.productKeys)
+        assertEquals("245.70", state.value.receiptDraft?.cashTotal)
+        assertEquals("245.70", state.value.receiptDraft?.itemsTotal)
+
+        state.value = state.value.copy(receiptDisputedItemsPage = FinanceReceiptItemPage(
+            listOf(remaining), page = 1, totalItems = 1, hasMore = false),
+            productDecisions = FinanceProductDecisions(listOf("sugary-drink"), emptyList()))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-disputed-item-${allowed.id}").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-disputed-item-${remaining.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-item-revoke-sugary-drink").performScrollTo()
+            .assertIsDisplayed().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("sugary-drink" to "allow", "sugary-drink" to "revoke"), decisions)
+        compose.onNodeWithTag("receipt-disputed-item-${allowed.id}").assertDoesNotExist()
+        assertEquals(listOf("sugary-drink"), state.value.productDecisions?.productKeys)
+        assertEquals("245.70", state.value.receiptDraft?.cashTotal)
+        assertEquals("245.70", state.value.receiptDraft?.itemsTotal)
+
+        state.value = state.value.copy(receiptDisputedItemsPage = FinanceReceiptItemPage(
+            listOf(allowed, remaining), page = 1, totalItems = 2, hasMore = false),
+            productDecisions = FinanceProductDecisions(emptyList(), emptyList()))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-disputed-item-${allowed.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-item-revoke-sugary-drink").assertDoesNotExist()
+        assertEquals("245.70", state.value.receiptDraft?.cashTotal)
+        assertEquals("245.70", state.value.receiptDraft?.itemsTotal)
+        assertEquals("unnecessary", state.value.receiptDisputedItemsPage?.items?.first()?.verdict)
+        compose.onNodeWithTag("receipt-disputed-item-verdict-${allowed.id}").performScrollTo()
+            .assertTextEquals("Оценка: необязательная")
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-disputed-item-verdict-${allowed.id}").performScrollTo()
+            .assertTextEquals("Verdict: unnecessary")
+    }
+
+    @Test fun disputedProductDecisionsAreReadOnlyForViewer() {
+        val item = disputedItem("disputed-1", "Сладкая газировка", "sugary-drink")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                listOf(item), page = 1, totalItems = 1, hasMore = false),
+            receiptDisputedItemsReceiptId = "receipt-42"))
+
+        compose.onNodeWithTag("receipt-disputed-item-${item.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-item-allow-sugary-drink").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-disputed-item-revoke-sugary-drink").assertDoesNotExist()
+    }
+
+    @Test fun disputedItemsErrorIsLocalizedAndRetryRequestsTheSameCorePage() {
+        val item = disputedItem("disputed-1", "Сладкая газировка", "sugary-drink")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                listOf(item), page = 2, totalItems = 10, hasMore = true),
+            receiptDisputedItemsReceiptId = "receipt-42", receiptDisputedItemsRequestedPage = 2,
+            receiptDisputedItemsError = "unavailable"))
+        val requestedPages = mutableListOf<Pair<String, Int>>()
+        show(state.value, onReceiptDisputedItemsPage = { receiptId, page ->
+            requestedPages += receiptId to page
+        }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-disputed-items-error").performScrollTo().assertIsDisplayed()
+            .assertTextEquals("Не удалось загрузить спорные товары.")
+        compose.onNodeWithTag("receipt-disputed-item-${item.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-items-retry").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(listOf("receipt-42" to 2), requestedPages)
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-disputed-items-error").performScrollTo().assertIsDisplayed()
+            .assertTextEquals("Could not load disputed items.")
+        compose.onNodeWithTag("receipt-disputed-items-retry").assertIsDisplayed()
+    }
+
+    @Test fun failedAllowKeepsLastCorePageAndDecisionKeysUntilRetrySucceeds() {
+        val item = disputedItem("disputed-1", "Сладкая газировка", "sugary-drink")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("member")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                listOf(item), page = 1, totalItems = 1, hasMore = false),
+            receiptDisputedItemsReceiptId = "receipt-42",
+            productDecisions = FinanceProductDecisions(emptyList(), emptyList())))
+        val requests = mutableListOf<String>()
+        show(state.value,
+            onReceiptDisputedProductDecision = { key, action -> requests += "$action:$key" },
+            onReceiptDisputedItemsPage = { receiptId, page -> requests += "page:$receiptId:$page" },
+            stateHolder = state)
+
+        compose.onNodeWithTag("receipt-disputed-item-allow-sugary-drink").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf("allow:sugary-drink"), requests)
+        assertEquals(listOf(item), state.value.receiptDisputedItemsPage?.items)
+        assertEquals(emptyList<String>(), state.value.productDecisions?.productKeys)
+
+        // Simulate the controller reporting a failed Core mutation: keep Core data, show retryable status.
+        state.value = state.value.copy(receiptDisputedItemsLoading = false,
+            receiptDisputedItemsError = "unavailable")
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-disputed-item-${item.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-disputed-items-error").performScrollTo().assertTextEquals(
+            "Не удалось загрузить спорные товары.")
+        assertEquals(listOf(item), state.value.receiptDisputedItemsPage?.items)
+        assertEquals(emptyList<String>(), state.value.productDecisions?.productKeys)
+
+        compose.onNodeWithTag("receipt-disputed-items-retry").performScrollTo().performClick()
+        assertEquals(listOf("allow:sugary-drink", "page:receipt-42:1"), requests)
+    }
+
+    @Test fun emptyDisputedItemsStateIsLocalizedWithoutInventingRows() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                emptyList(), page = 1, totalItems = 0, hasMore = false),
+            receiptDisputedItemsReceiptId = "receipt-42"))
+
+        compose.onNodeWithTag("receipt-disputed-items-empty").performScrollTo().assertIsDisplayed()
+            .assertTextContains("Нет спорных товаров")
+        compose.onNodeWithTag("receipt-disputed-item-disputed-1").assertDoesNotExist()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-disputed-items-empty").performScrollTo().assertIsDisplayed()
+            .assertTextContains("No disputed items")
+    }
+
+    @Test fun administratorCanAllowDisputedProduct() {
+        val item = disputedItem("disputed-1", "Сладкая газировка", "sugary-drink")
+        val decisions = mutableListOf<Pair<String, String>>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("admin")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                listOf(item), page = 1, totalItems = 1, hasMore = false),
+            receiptDisputedItemsReceiptId = "receipt-42"),
+            onReceiptDisputedProductDecision = { key, action -> decisions += key to action })
+
+        compose.onNodeWithTag("receipt-disputed-item-allow-sugary-drink").performScrollTo()
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        assertEquals(listOf("sugary-drink" to "allow"), decisions)
+        compose.onNodeWithTag("receipt-disputed-item-allow-sugary-drink").assertTextEquals("Разрешить товар")
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-disputed-item-allow-sugary-drink").assertTextEquals("Allow product")
+    }
+
+    @Test fun ownerCanRevokePreviouslyAllowedProduct() {
+        val item = disputedItem("disputed-1", "Сладкая газировка", "sugary-drink")
+        val decisions = mutableListOf<Pair<String, String>>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptDisputedItemsPage = FinanceReceiptItemPage(
+                listOf(item), page = 1, totalItems = 1, hasMore = false),
+            receiptDisputedItemsReceiptId = "receipt-42",
+            productDecisions = FinanceProductDecisions(listOf("sugary-drink"), emptyList())),
+            onReceiptDisputedProductDecision = { key, action -> decisions += key to action })
+
+        compose.onNodeWithTag("receipt-disputed-item-revoke-sugary-drink").performScrollTo()
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        assertEquals(listOf("sugary-drink" to "revoke"), decisions)
+        compose.onNodeWithTag("receipt-disputed-item-revoke-sugary-drink").assertTextEquals("Вернуть в спорные")
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-disputed-item-revoke-sugary-drink").assertTextEquals("Revoke allow")
+    }
+
+    private fun disputedItem(id: String, name: String, productKey: String) = FinanceReceiptItem(
+        id, name, "1", "10.00", "10.00", productKey, "receipt_review", 1.0,
+        null, "unnecessary", "Optional item", "Marked unnecessary", "avoid",
+        "rule", null, null, null, "basket-rules.v1", 1,
+    )
+
     private fun tenant(role: String) = FinanceTenant("tenant-17", "Семья", role, "Europe/Moscow")
 
     private fun receiptDraft() = FinanceReceipt(
@@ -1605,6 +1912,8 @@ class FinanceReceiptScreensTest {
                      onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
                      onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> },
                      onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> },
+                     onReceiptDisputedItemsPage: (String, Int) -> Unit = { _, _ -> },
+                     onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> },
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
         val language = mutableStateOf("ru")
         compose.setContent {
@@ -1626,7 +1935,9 @@ class FinanceReceiptScreensTest {
                     onReceiptDuplicateDecision = onReceiptDuplicateDecision,
                     onReceiptConfirm = onReceiptConfirm,
                     onReceiptCategorySelect = onReceiptCategorySelect,
-                    onReceiptBasketReview = onReceiptBasketReview)
+                    onReceiptBasketReview = onReceiptBasketReview,
+                    onReceiptDisputedItemsPage = onReceiptDisputedItemsPage,
+                    onReceiptDisputedProductDecision = onReceiptDisputedProductDecision)
             }
         }
         compose.waitForIdle()

@@ -152,6 +152,13 @@ class FinanceApi internal constructor(
             "/api/v1/tenants/$tenantId/receipts/$receiptId/items?page=$page", "GET",
         )))
 
+    fun disputedReceiptItems(tenantId: String, receiptId: String, page: Int = 1): FinanceReceiptItemPage {
+        require(page in 1..1_000_000) { "Invalid disputed receipt item page" }
+        return FinanceModels.receiptItemPage(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/disputed-items?page=$page", "GET",
+        )))
+    }
+
     fun updateReceiptItem(tenantId: String, receiptId: String, itemId: String, version: Long,
                           name: String, quantity: String?, unitPrice: String?, lineSum: String?): FinanceReceipt {
         require(version > 0) { "Invalid receipt version" }
