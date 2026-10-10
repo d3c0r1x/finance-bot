@@ -160,9 +160,17 @@ class FinanceModelsTest {
                "historyWeeks":0,"paceStatus":"insufficient_history","paceShare":null}}
         """.trimIndent()))
 
-        assertEquals("22000.00", summary.safeToSpend?.safeTotal)
-        assertEquals("733.33", summary.safeToSpend?.safePerDay)
-        assertEquals("actual_income", summary.safeToSpend?.incomeBasis)
+        val safe = requireNotNull(summary.safeToSpend)
+        assertEquals("actual_income", safe.incomeBasis)
+        assertEquals("50000.00", safe.incomeBase)
+        assertEquals("2026-10", safe.month)
+        assertEquals("2026-10-31", safe.horizonDate)
+        assertEquals(30, safe.daysRemaining)
+        assertEquals("20000.00", safe.monthlyExpenses)
+        assertEquals("5000.00", safe.reserve)
+        assertEquals("3000.00", safe.promisedPayments)
+        assertEquals("22000.00", safe.safeTotal)
+        assertEquals("733.33", safe.safePerDay)
     }
 
     @Test fun parsesPersonalAndFamilyReportFieldsWithoutCalculatingTotals() {

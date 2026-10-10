@@ -908,6 +908,91 @@ class FinanceScreensTest {
         compose.onNodeWithText("Платежи по долгам: 3 000,00 ₽").assertIsDisplayed()
     }
 
+    @Test fun safeToSpendDisclosesActualIncomeBasisAndCoreAmountsInRussianAndEnglish() {
+        val safe = SafeToSpend(
+            incomeBasis = "actual_income", incomeBase = "120000.00", month = "2026-10",
+            horizonDate = "2026-10-20", daysRemaining = 10, monthlyExpenses = "42000.35",
+            reserve = "12000.00", promisedPayments = "5000.25", safeTotal = "60999.40",
+            safePerDay = "6099.94",
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            dashboardSummary = DashboardSummary(
+                month = "2026-10", incomeTotal = "120000.00", expenseTotal = "42000.35",
+                transactionCount = 4, asOfDate = "2026-10-10", daysElapsed = 10, daysInMonth = 31,
+                daysRemaining = 21, dailyExpensePace = null, projectedExpenseTotal = null,
+                rolling7FoodStatus = budget().rolling7FoodStatus, safeToSpend = safe,
+            )))
+
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText("Расчёт по фактическому доходу: 120 000,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Расходы в расчёте: 42 000,35 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Горизонт расчёта: 2026-10-20 · 10 дн.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Свободно до 2026-10-20: 60 999,40 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Безопасно тратить в день: 6 099,94 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Резерв 10%: 12 000,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Обязательные списания: 5 000,25 ₽").performScrollTo().assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Calculated from actual income: 120,000.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Expenses used: 42,000.35 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Calculation horizon: 2026-10-20 · 10 days").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Available through 2026-10-20: 60,999.40 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Safe to spend per day: 6,099.94 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("10% reserve: 12,000.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Committed payments: 5,000.25 RUB").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun safeToSpendDisclosesPlannedIncomeBasisAndCoreAmountsInRussianAndEnglish() {
+        val safe = SafeToSpend(
+            incomeBasis = "planned_income", incomeBase = "80000.00", month = "2026-10",
+            horizonDate = "2026-11-05", daysRemaining = 26, monthlyExpenses = "18000.00",
+            reserve = "8000.00", promisedPayments = "3500.00", safeTotal = "50500.00",
+            safePerDay = "1942.31",
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            dashboardSummary = DashboardSummary(
+                month = "2026-10", incomeTotal = "0.00", expenseTotal = "18000.00",
+                transactionCount = 2, asOfDate = "2026-10-10", daysElapsed = 10, daysInMonth = 31,
+                daysRemaining = 21, dailyExpensePace = null, projectedExpenseTotal = null,
+                rolling7FoodStatus = budget().rolling7FoodStatus, safeToSpend = safe,
+            )))
+
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText("Расчёт по плановому доходу: 80 000,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Расходы в расчёте: 18 000,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Горизонт расчёта: 2026-11-05 · 26 дн.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Свободно до 2026-11-05: 50 500,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Безопасно тратить в день: 1 942,31 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Резерв 10%: 8 000,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Обязательные списания: 3 500,00 ₽").performScrollTo().assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Calculated from planned income: 80,000.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Expenses used: 18,000.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Calculation horizon: 2026-11-05 · 26 days").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Available through 2026-11-05: 50,500.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Safe to spend per day: 1,942.31 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("10% reserve: 8,000.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Committed payments: 3,500.00 RUB").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun dashboardDoesNotInventSafeToSpendWhenCoreOmitsThePlan() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            dashboardSummary = DashboardSummary(
+                month = "2026-10", incomeTotal = "0.00", expenseTotal = "0.00", transactionCount = 0,
+                asOfDate = "2026-10-01", daysElapsed = 1, daysInMonth = 31, daysRemaining = 30,
+                dailyExpensePace = null, projectedExpenseTotal = null,
+                rolling7FoodStatus = budget().rolling7FoodStatus, safeToSpend = null,
+            )))
+
+        compose.onNodeWithText("Обзор").performClick()
+        compose.onNodeWithText("Безопасно тратить в день:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Свободно до", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Safe to spend per day:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Available through", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("null").assertDoesNotExist()
+    }
+
     @Test fun dashboardShowsCoreBudgetRemainderPaceAndForecastExactlyInRussianAndEnglish() {
         val summary = DashboardSummary(
             month = "2026-10", incomeTotal = "95000.00", expenseTotal = "42000.35", transactionCount = 8,

@@ -4998,7 +4998,8 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
     val russian = language == "ru"
     val summary = state.dashboardSummary
     val budget = state.budgets
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(if (russian) "Сводка" else "Summary", style = MaterialTheme.typography.titleLarge)
         if (summary == null) {
             Text(if (russian) "Сводка пока не загружена" else "Summary is not loaded")
@@ -5036,6 +5037,17 @@ private fun DashboardScreen(state: FinanceUiState, language: String) {
         summary.safeToSpend?.let { cash ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    val incomeBasis = when (cash.incomeBasis) {
+                        "actual_income" -> if (russian) "фактическому доходу" else "actual income"
+                        "planned_income" -> if (russian) "плановому доходу" else "planned income"
+                        else -> if (russian) "доходу" else "income"
+                    }
+                    Text(if (russian) "Расчёт по $incomeBasis: ${formatMoney(cash.incomeBase, language)}"
+                        else "Calculated from $incomeBasis: ${formatMoney(cash.incomeBase, language)}")
+                    Text(if (russian) "Расходы в расчёте: ${formatMoney(cash.monthlyExpenses, language)}"
+                        else "Expenses used: ${formatMoney(cash.monthlyExpenses, language)}")
+                    Text(if (russian) "Горизонт расчёта: ${cash.horizonDate} · ${cash.daysRemaining} дн."
+                        else "Calculation horizon: ${cash.horizonDate} · ${cash.daysRemaining} days")
                     Text(if (russian) "Безопасно тратить в день: ${formatMoney(cash.safePerDay, language)}"
                         else "Safe to spend per day: ${formatMoney(cash.safePerDay, language)}")
                     Text(if (russian) "Свободно до ${cash.horizonDate}: ${formatMoney(cash.safeTotal, language)}"

@@ -548,7 +548,9 @@ features:
       scenario: "Android counterpart for F26: «Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F26 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+      evidence: "Android displays exact Core income basis and amount, monthly expenses, horizon/date span, reserve, promised payments, safe total and per-day value in RU/EN. Null guidance is hidden; dashboard scrolls. Targeted instrumentation 4/4; full API 27 suite 215/215; JVM 35/35; debug/test APK builds pass; installed/launched on isolated Android 8.1/API 27. APK SHA-256 6FE1C8B85008FE0597AA7B2F7E3B0CA685D107CF5D80195B6F551EFDB8B91627."
+      gap: "Live authenticated Android-to-Core OIDC E2E and tenant-isolation verification remain outstanding."
     intentional_differences: []
   - id: F27
     feature: "Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
