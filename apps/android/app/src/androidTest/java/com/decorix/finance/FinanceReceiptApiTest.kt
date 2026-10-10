@@ -209,6 +209,50 @@ class FinanceReceiptApiTest {
         assertEquals("Check the product before a repeat purchase.", second.items.single().advice)
     }
 
+    @Test fun receiptRepeatWarningsRequestsAuthenticatedCoreRouteAndPreservesExactAmounts() {
+        val receiptId = "00000000-0000-4000-8000-000000000042"
+        server.enqueue(MockResponse().setBody("""
+            {"warnings":[{"itemId":"00000000-0000-4000-8000-000000000091",
+             "name":"Synthetic oat drink","productKey":"oatdrink1l","verdict":"unnecessary",
+             "title":"Повторная необязательная покупка","count":3,"lastSum":"1234567890123456.78",
+             "advice":"Проверьте, действительно ли этот товар нужен."}]}
+        """.trimIndent()))
+        val api = api()
+        api.saveTokens("receipt-member-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val result = api.receiptRepeatWarnings("tenant-17", receiptId)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/$receiptId/repeat-warnings", request.path)
+        assertEquals("Bearer receipt-member-token", request.getHeader("Authorization"))
+        assertEquals(1, result.warnings.size)
+        val warning = result.warnings.single()
+        assertEquals("00000000-0000-4000-8000-000000000091", warning.itemId)
+        assertEquals("Synthetic oat drink", warning.name)
+        assertEquals("oatdrink1l", warning.productKey)
+        assertEquals("unnecessary", warning.verdict)
+        assertEquals("Повторная необязательная покупка", warning.title)
+        assertEquals(3, warning.count)
+        assertEquals("1234567890123456.78", warning.lastSum)
+        assertEquals("Проверьте, действительно ли этот товар нужен.", warning.advice)
+    }
+
+    @Test fun receiptRepeatWarningsParsesAnEmptyWarningsList() {
+        val receiptId = "00000000-0000-4000-8000-000000000042"
+        server.enqueue(MockResponse().setBody("""{"warnings":[]}"""))
+        val api = api()
+        api.saveTokens("receipt-member-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val result = api.receiptRepeatWarnings("tenant-17", receiptId)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/$receiptId/repeat-warnings", request.path)
+        assertEquals("Bearer receipt-member-token", request.getHeader("Authorization"))
+        assertTrue(result.warnings.isEmpty())
+    }
+
     @Test fun productAllowAndRevokeUseAuthenticatedCoreRoutesWithoutReceiptConcurrencyHeaders() {
         server.enqueue(MockResponse().setBody(
             """{"productKey":"milk930ml","decision":"allowed","version":1,"updatedAt":"2026-10-10T09:00:00Z"}""",

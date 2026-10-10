@@ -1344,6 +1344,146 @@ class FinanceReceiptScreensTest {
         assertEquals("Confirmed receipt must not start a review", 0, reviewCalls)
     }
 
+    @Test fun repeatWarningsShowCoreEvidenceAndExactLastSumInReceiptCurrency() {
+        val receipt = receiptDraft().copy(currency = "USD")
+        val warning = repeatWarning().copy(title = "Core repeat title", name = "Synthetic cereal",
+            verdict = "unnecessary", count = 3, lastSum = "12.34", advice = "Core advice from history")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt,
+            receiptRepeatWarnings = FinanceReceiptRepeatWarnings(listOf(warning)),
+            receiptRepeatWarningsReceiptId = receipt.id))
+
+        compose.onNodeWithTag("receipt-repeat-warning-${warning.itemId}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-repeat-warning-title-${warning.itemId}").assertTextEquals("Core repeat title")
+        compose.onNodeWithText("Товар: Synthetic cereal").assertIsDisplayed()
+        compose.onNodeWithText("Совпадений ранее: 3").assertIsDisplayed()
+        compose.onNodeWithText("Последняя сумма: 12,34 USD").assertIsDisplayed()
+        compose.onNodeWithText("Совет: Core advice from history").assertIsDisplayed()
+        compose.onNodeWithText("Необязательный товар").assertDoesNotExist()
+        assertEquals("245.70", receipt.cashTotal)
+        assertEquals("245.70", receipt.itemsTotal)
+    }
+
+    @Test fun repeatWarningsHaveLocalizedPresentationAndEmptyState() {
+        val warning = repeatWarning().copy(title = "Необязательный товар", verdict = "harmful",
+            advice = "Consider reducing this")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptRepeatWarnings = FinanceReceiptRepeatWarnings(listOf(warning)),
+            receiptRepeatWarningsReceiptId = "receipt-42"))
+        show(state.value, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-repeat-warnings-title").performScrollTo()
+            .assertTextEquals("Повторные покупки")
+        compose.onNodeWithTag("receipt-repeat-warning-${warning.itemId}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Оценка: Вредно").assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-repeat-warnings-title").performScrollTo()
+            .assertTextEquals("Repeat purchases")
+        compose.onNodeWithText("Verdict: Harmful").assertIsDisplayed()
+        compose.onNodeWithText("Advice: Consider reducing this").assertIsDisplayed()
+
+        state.value = state.value.copy(receiptRepeatWarnings = FinanceReceiptRepeatWarnings(emptyList()))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-repeat-warnings-empty").performScrollTo().assertIsDisplayed()
+            .assertTextEquals("No repeat warnings")
+        compose.onNodeWithTag("receipt-repeat-warning-${warning.itemId}").assertDoesNotExist()
+        compose.onNodeWithText("RU").performClick()
+        compose.onNodeWithTag("receipt-repeat-warnings-empty").performScrollTo().assertIsDisplayed()
+            .assertTextEquals("Повторных предупреждений нет")
+    }
+
+    @Test fun repeatWarningsAreReadOnlyForViewerAndNeverChangeReceiptTotals() {
+        val receipt = receiptDraft()
+        val warning = repeatWarning()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
+            receiptDraft = receipt, receiptRepeatWarnings = FinanceReceiptRepeatWarnings(listOf(warning)),
+            receiptRepeatWarningsReceiptId = receipt.id))
+        show(state.value, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-repeat-warning-${warning.itemId}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-repeat-warning-action-${warning.itemId}").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-repeat-warning-allow-${warning.productKey}").assertDoesNotExist()
+        assertEquals("245.70", state.value.receiptDraft?.cashTotal)
+        assertEquals("245.70", state.value.receiptDraft?.itemsTotal)
+        assertEquals(listOf(warning), state.value.receiptRepeatWarnings?.warnings)
+    }
+
+    @Test fun repeatWarningBlockIsHiddenUntilReviewAndAfterConfirmation() {
+        val warning = repeatWarning()
+        val unreviewed = receiptDraft().copy(state = "draft", items = listOf(receiptItem(3).copy(verdict = null,
+            reviewReason = null, reviewAction = null, advice = null)), itemCount = 1)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = unreviewed, receiptRepeatWarnings = FinanceReceiptRepeatWarnings(listOf(warning)),
+            receiptRepeatWarningsReceiptId = unreviewed.id))
+        show(state.value, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-repeat-warnings-title").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-repeat-warning-${warning.itemId}").assertDoesNotExist()
+
+        state.value = state.value.copy(receiptDraft = receiptDraft().copy(state = "confirmed",
+            transactionId = "posted-expense-3"))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-repeat-warnings-title").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-repeat-warning-${warning.itemId}").assertDoesNotExist()
+    }
+
+    @Test fun repeatWarningLoadErrorCanRetryWithoutChangingReceipt() {
+        val receipt = receiptDraft()
+        val warning = repeatWarning()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, receiptRepeatWarningsError = "unavailable",
+            receiptRepeatWarningsReceiptId = receipt.id))
+        val requestedReceiptIds = mutableListOf<String>()
+        show(state.value, stateHolder = state,
+            onReceiptRepeatWarningsRefresh = { receiptId -> requestedReceiptIds += receiptId })
+
+        compose.onNodeWithTag("receipt-repeat-warnings-error").performScrollTo().assertIsDisplayed()
+            .assertTextContains("Повторные предупреждения временно недоступны", substring = true)
+        compose.onNodeWithTag("receipt-repeat-warnings-retry").performScrollTo()
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        assertEquals(listOf(receipt.id), requestedReceiptIds)
+        assertEquals(receipt, state.value.receiptDraft)
+        assertEquals("245.70", state.value.receiptDraft?.cashTotal)
+        assertEquals("245.70", state.value.receiptDraft?.itemsTotal)
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-repeat-warnings-error").performScrollTo()
+            .assertTextContains("Repeat warnings are temporarily unavailable", substring = true)
+    }
+
+    @Test fun sameCountReceiptItemRevisionRefreshesRepeatWarnings() {
+        val receipt = receiptDraft()
+        val warning = repeatWarning()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, receiptRepeatWarnings = FinanceReceiptRepeatWarnings(listOf(warning)),
+            receiptRepeatWarningsReceiptId = receipt.id,
+            receiptRepeatWarningsRevision = receiptRepeatWarningsRevision(receipt)))
+        val requestedReceiptIds = mutableListOf<String>()
+        show(state.value, stateHolder = state,
+            onReceiptRepeatWarningsRefresh = { requestedReceiptIds += it })
+        assertEquals(emptyList<String>(), requestedReceiptIds)
+
+        val originalItem = receipt.items.single()
+        state.value = state.value.copy(receiptDraft = receipt.copy(items = listOf(originalItem.copy(
+            name = "Переименованный товар", version = originalItem.version + 1))))
+        compose.waitForIdle()
+
+        assertEquals("Same-count name/version changes must refresh Core warnings",
+            listOf(receipt.id), requestedReceiptIds)
+        compose.onNodeWithText(warning.title).assertDoesNotExist()
+    }
+
+    private fun repeatWarning() = FinanceReceiptRepeatWarning(
+        itemId = "00000000-0000-4000-8000-000000000021",
+        name = "Synthetic repeat item",
+        productKey = "synthetic-repeat-item",
+        verdict = "unnecessary",
+        title = "Необязательный товар",
+        count = 2,
+        lastSum = "10.00",
+        advice = "Synthetic previous advice",
+    )
+
     @Test fun missingReceiptReadingShowsUnavailableStateWithoutFillingVerifiedFields() {
         val draft = receiptDraft().copy(merchant = null, receiptDate = null, cashTotal = null,
             categoryCode = null, categorySource = "unknown")
@@ -1914,6 +2054,7 @@ class FinanceReceiptScreensTest {
                      onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> },
                      onReceiptDisputedItemsPage: (String, Int) -> Unit = { _, _ -> },
                      onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> },
+                     onReceiptRepeatWarningsRefresh: (String) -> Unit = {},
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
         val language = mutableStateOf("ru")
         compose.setContent {
@@ -1937,7 +2078,8 @@ class FinanceReceiptScreensTest {
                     onReceiptCategorySelect = onReceiptCategorySelect,
                     onReceiptBasketReview = onReceiptBasketReview,
                     onReceiptDisputedItemsPage = onReceiptDisputedItemsPage,
-                    onReceiptDisputedProductDecision = onReceiptDisputedProductDecision)
+                    onReceiptDisputedProductDecision = onReceiptDisputedProductDecision,
+                    onReceiptRepeatWarningsRefresh = onReceiptRepeatWarningsRefresh)
             }
         }
         compose.waitForIdle()

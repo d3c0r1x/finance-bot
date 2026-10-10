@@ -129,15 +129,88 @@ class ReceiptDisputedDecisionRefreshTest {
     }
 
     @Test fun definitePermissionRejectionDoesNotMarkMutationAsPossiblyApplied() {
+        var warningRefreshes = 0
         val failure = runCatching {
             applyReceiptDisputedDecisionAndRefresh(
                 applyDecision = { throw ApiFailure(403, "forbidden") },
                 loadPage = { FinanceReceiptItemPage(emptyList(), 1, 0, false) },
                 loadDecisions = { FinanceProductDecisions(emptyList(), emptyList()) },
+                loadWarnings = { warningRefreshes++; FinanceReceiptRepeatWarnings(emptyList()) },
             )
         }.exceptionOrNull() as ReceiptDisputedDecisionMutationFailure
 
         assertEquals(false, failure.mayHaveApplied)
         assertTrue(failure.snapshot != null)
+        assertEquals(0, warningRefreshes)
+        assertEquals(null, receiptRepeatWarningErrorAfterDecision(
+            previousError = null, refreshRequested = true, mutationMayHaveApplied = failure.mayHaveApplied,
+            refreshedWarnings = failure.snapshot?.warnings))
     }
+
+    @Test fun anInFlightWarningRequestIsInvalidatedAndRefreshedAfterSuccessfulDecision() {
+        assertTrue(shouldRefreshReceiptRepeatWarnings("receipt-42", "receipt-42", null, loading = true))
+        assertEquals(false, receiptRepeatWarningsResponseMatches(
+            requestedGeneration = 4, currentGeneration = 5,
+            requestedRevision = "item-v1", currentRevision = "item-v2"))
+
+        val events = mutableListOf<String>()
+        val refreshed = FinanceReceiptRepeatWarnings(listOf(repeatWarning(count = 4)))
+        val result = applyReceiptDisputedDecisionAndRefresh(
+            applyDecision = { events += "allow" },
+            loadPage = { events += "page"; FinanceReceiptItemPage(emptyList(), 1, 0, false) },
+            loadDecisions = { events += "decisions"; FinanceProductDecisions(emptyList(), emptyList()) },
+            loadWarnings = { events += "fresh-warning-request"; refreshed },
+        )
+        assertEquals(listOf("allow", "page", "decisions", "fresh-warning-request"), events)
+        assertSame(refreshed, result.warnings)
+    }
+
+    @Test fun changedReceiptRevisionInvalidatesRepeatWarningResponse() {
+        assertEquals(false, receiptRepeatWarningsResponseMatches(
+            requestedGeneration = 8, currentGeneration = 8,
+            requestedRevision = "receipt-v1|item-name=Old", currentRevision = "receipt-v2|item-name=New"))
+        assertEquals(true, receiptRepeatWarningsResponseMatches(
+            requestedGeneration = 8, currentGeneration = 8,
+            requestedRevision = "receipt-v1|item-name=Old", currentRevision = "receipt-v1|item-name=Old"))
+    }
+
+    @Test fun successfulAllowAndAmbiguousRevokeRefreshAlreadyLoadedRepeatWarningsLast() {
+        val previouslyLoaded = FinanceReceiptRepeatWarnings(listOf(repeatWarning(count = 2)))
+        val refreshed = FinanceReceiptRepeatWarnings(listOf(repeatWarning(count = 3)))
+        val page = FinanceReceiptItemPage(emptyList(), 1, 0, false)
+        val decisions = FinanceProductDecisions(listOf("sugarydrink"), emptyList())
+
+        val allowEvents = mutableListOf<String>()
+        val allowed = applyReceiptDisputedDecisionAndRefresh(
+            applyDecision = { allowEvents += "allow" },
+            loadPage = { allowEvents += "page"; page },
+            loadDecisions = { allowEvents += "decisions"; decisions },
+            invalidateWarnings = { allowEvents += "invalidate-warnings" },
+            loadWarnings = { allowEvents += "warnings"; refreshed },
+        )
+        assertEquals(listOf("allow", "invalidate-warnings", "page", "decisions", "warnings"), allowEvents)
+        assertSame(refreshed, allowed.warnings)
+        assertTrue(allowed.warnings !== previouslyLoaded)
+
+        val revokeEvents = mutableListOf<String>()
+        val lostResponse = SocketTimeoutException("revoke may have committed before its response was lost")
+        val revokeFailure = runCatching {
+            applyReceiptDisputedDecisionAndRefresh(
+                applyDecision = { revokeEvents += "revoke"; throw lostResponse },
+                loadPage = { revokeEvents += "page"; page },
+                loadDecisions = { revokeEvents += "decisions"; decisions },
+                invalidateWarnings = { revokeEvents += "invalidate-warnings" },
+                loadWarnings = { revokeEvents += "warnings"; refreshed },
+            )
+        }.exceptionOrNull() as ReceiptDisputedDecisionMutationFailure
+        assertEquals(listOf("revoke", "invalidate-warnings", "page", "decisions", "warnings"), revokeEvents)
+        assertSame(lostResponse, revokeFailure.cause)
+        assertSame(refreshed, revokeFailure.snapshot?.warnings)
+        assertTrue(revokeFailure.snapshot?.warnings !== previouslyLoaded)
+    }
+
+    private fun repeatWarning(count: Int) = FinanceReceiptRepeatWarning(
+        itemId = "item-cola", name = "Cola", productKey = "sugarydrink", verdict = "harmful",
+        title = "Repeated purchase", count = count, lastSum = "2.50", advice = null,
+    )
 }

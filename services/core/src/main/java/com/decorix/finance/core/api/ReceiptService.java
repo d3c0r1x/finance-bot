@@ -198,32 +198,45 @@ public class ReceiptService {
     public RepeatWarnings repeatWarnings(UUID tenantId, String subject, UUID receiptId) {
         return transaction.execute(status -> {
             UUID userId = requireMember(tenantId, subject);
-            getHeader(tenantId, userId, receiptId, false);
+            ReceiptHeader currentReceipt = getHeader(tenantId, userId, receiptId, false);
+            Instant currentEffectiveAt = currentReceipt.receiptDate() == null
+                    ? currentReceipt.createdAt()
+                    : currentReceipt.receiptDate().atStartOfDay(ZoneId.of("UTC")).toInstant();
             List<ReceiptRepeatWarningPolicy.CurrentItem> current = loadReceiptLines(tenantId, receiptId).stream()
                     .map(item -> new ReceiptRepeatWarningPolicy.CurrentItem(item.id(), item.name())).toList();
             List<String> allowedKeys = jdbc.query("SELECT product_key FROM user_product_decisions "
                             + "WHERE tenant_id = ? AND user_id = ? AND decision = 'allowed'",
                     (rs, row) -> rs.getString("product_key"), tenantId, userId);
             ReceiptRepeatWarningPolicy.Accumulator warnings = new ReceiptRepeatWarningPolicy.Accumulator(
-                    receiptId, current, java.util.Set.copyOf(allowedKeys));
+                    receiptId, currentEffectiveAt, currentReceipt.createdAt(), current, java.util.Set.copyOf(allowedKeys));
             org.springframework.jdbc.core.PreparedStatementCreator historyQuery = connection -> {
                 var statement = connection.prepareStatement("""
                         SELECT r.id AS receipt_id, ri.name, ri.verdict, ri.line_sum,
-                               ri.advice, coalesce(r.receipt_date::timestamp AT TIME ZONE 'UTC', r.created_at) AS occurred_at
+                               ri.advice, coalesce(r.receipt_date::timestamp AT TIME ZONE 'UTC', r.created_at) AS occurred_at,
+                               r.created_at
                         FROM receipts r JOIN receipt_items ri ON ri.tenant_id = r.tenant_id AND ri.receipt_id = r.id
                         WHERE r.tenant_id = ? AND r.owner_user_id = ? AND r.state = 'confirmed'
                           AND r.id <> ? AND ri.verdict IN ('harmful', 'unnecessary')
-                        ORDER BY occurred_at DESC, r.created_at DESC, ri.ordinal ASC
+                          AND (
+                            coalesce(r.receipt_date::timestamp AT TIME ZONE 'UTC', r.created_at) < ?
+                            OR (coalesce(r.receipt_date::timestamp AT TIME ZONE 'UTC', r.created_at) = ?
+                                AND r.created_at < ?)
+                          )
+                        ORDER BY occurred_at DESC, r.created_at DESC, r.id DESC, ri.ordinal ASC
                         """);
                 statement.setFetchSize(500);
                 statement.setObject(1, tenantId);
                 statement.setObject(2, userId);
                 statement.setObject(3, receiptId);
+                statement.setTimestamp(4, java.sql.Timestamp.from(currentEffectiveAt));
+                statement.setTimestamp(5, java.sql.Timestamp.from(currentEffectiveAt));
+                statement.setTimestamp(6, java.sql.Timestamp.from(currentReceipt.createdAt()));
                 return statement;
             };
             org.springframework.jdbc.core.RowCallbackHandler historyRows = rs -> warnings.add(new ReceiptRepeatWarningPolicy.HistoryItem(
                     rs.getObject("receipt_id", UUID.class), rs.getString("name"), rs.getString("verdict"),
-                    rs.getBigDecimal("line_sum"), rs.getString("advice"), rs.getTimestamp("occurred_at").toInstant()));
+                    rs.getBigDecimal("line_sum"), rs.getString("advice"), rs.getTimestamp("occurred_at").toInstant(),
+                    rs.getTimestamp("created_at").toInstant()));
             jdbc.query(historyQuery, historyRows);
             List<RepeatWarning> result = warnings.finish().stream().map(warning -> new RepeatWarning(
                     warning.itemId(), warning.name(), ProductIdentityPolicy.productKey(warning.name()),

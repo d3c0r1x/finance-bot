@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
     private val receiptCategoryGeneration = AtomicLong(0L)
     private val receiptBasketReviewGeneration = AtomicLong(0L)
     private val receiptDisputedItemsGeneration = AtomicLong(0L)
+    private val receiptRepeatWarningsGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -160,6 +161,7 @@ class MainActivity : ComponentActivity() {
                         onReceiptCategorySelect = ::selectReceiptCategory,
                         onReceiptBasketReview = ::reviewReceiptBasket,
                         onReceiptDisputedItemsPage = ::loadReceiptDisputedItems,
+                        onReceiptRepeatWarningsRefresh = ::loadReceiptRepeatWarnings,
                         onReceiptDisputedProductDecision = ::decideReceiptDisputedProduct)
                 }
             }
@@ -696,6 +698,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadReceiptRepeatWarnings(receiptId: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        if (!ui.authenticated || receipt.state != "review_required" || receipt.itemCount <= 0) return
+        val revision = receiptRepeatWarningsRevision(receipt)
+        if (ui.receiptRepeatWarningsLoading && ui.receiptRepeatWarningsReceiptId == receiptId &&
+            ui.receiptRepeatWarningsRevision == revision) return
+        val generation = receiptRepeatWarningsGeneration.incrementAndGet()
+        ui = ui.copy(receiptRepeatWarningsReceiptId = receiptId,
+            receiptRepeatWarnings = ui.receiptRepeatWarnings.takeIf {
+                ui.receiptRepeatWarningsRevision == revision
+            },
+            receiptRepeatWarningsRevision = revision,
+            receiptRepeatWarningsLoading = true, receiptRepeatWarningsError = null)
+        executor.execute {
+            if (receiptRepeatWarningsGeneration.get() != generation) return@execute
+            runCatching { api.receiptRepeatWarnings(tenantId, receiptId) }
+                .onSuccess { warnings ->
+                    if (ui.authenticated && ui.tenants.firstOrNull()?.id == tenantId &&
+                        receiptRepeatWarningsResponseMatches(generation, receiptRepeatWarningsGeneration.get(),
+                            revision, ui.receiptDraft?.takeIf { it.id == receiptId }
+                                ?.let(::receiptRepeatWarningsRevision)) &&
+                        ui.receiptDraft?.state == "review_required") {
+                        ui = ui.copy(receiptRepeatWarnings = warnings,
+                            receiptRepeatWarningsReceiptId = receiptId,
+                            receiptRepeatWarningsRevision = revision,
+                            receiptRepeatWarningsLoading = false, receiptRepeatWarningsError = null)
+                    }
+                }
+                .onFailure {
+                    if (ui.authenticated && ui.tenants.firstOrNull()?.id == tenantId &&
+                        receiptRepeatWarningsResponseMatches(generation, receiptRepeatWarningsGeneration.get(),
+                            revision, ui.receiptDraft?.takeIf { it.id == receiptId }
+                                ?.let(::receiptRepeatWarningsRevision)) &&
+                        ui.receiptDraft?.state == "review_required") {
+                        ui = ui.copy(receiptRepeatWarningsLoading = false,
+                            receiptRepeatWarningsError = "unavailable")
+                    }
+                }
+        }
+    }
+
     private fun decideReceiptDisputedProduct(productKey: String, action: String) {
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
         val receiptId = ui.receiptDraft?.id ?: return
@@ -706,17 +750,48 @@ class MainActivity : ComponentActivity() {
         } ?: 1
         val refreshDoNotBuy = ui.doNotBuy != null
         val refreshShopping = ui.shoppingList != null
+        val refreshRepeatWarnings = shouldRefreshReceiptRepeatWarnings(receiptId,
+            ui.receiptRepeatWarningsReceiptId, ui.receiptRepeatWarnings,
+            loading = ui.receiptRepeatWarningsLoading)
         val generation = receiptDisputedItemsGeneration.incrementAndGet()
         ui = ui.copy(receiptDisputedItemsReceiptId = receiptId,
             receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = true,
             receiptDisputedItemsError = null)
         executor.execute {
             if (receiptDisputedItemsGeneration.get() != generation) return@execute
+            var warningRefreshGeneration: Long? = null
             val result = runCatching {
                 applyReceiptDisputedDecisionAndRefresh(
                     applyDecision = { api.decideDoNotBuy(tenantId, productKey, action) },
                     loadPage = { api.disputedReceiptItems(tenantId, receiptId, page) },
                     loadDecisions = { api.productDecisions(tenantId) },
+                    invalidateWarnings = if (refreshRepeatWarnings) {
+                        { warningRefreshGeneration = receiptRepeatWarningsGeneration.incrementAndGet() }
+                    } else null,
+                    loadWarnings = if (refreshRepeatWarnings) {
+                        {
+                            val currentReceipt = ui.receiptDraft?.takeIf { it.id == receiptId }
+                                ?: error("Receipt changed before repeat warnings refresh")
+                            val revision = receiptRepeatWarningsRevision(currentReceipt)
+                            val warningGeneration = receiptRepeatWarningsGeneration.incrementAndGet()
+                            warningRefreshGeneration = warningGeneration
+                            ui = ui.copy(receiptRepeatWarningsReceiptId = receiptId,
+                                receiptRepeatWarningsRevision = revision,
+                                receiptRepeatWarningsLoading = true, receiptRepeatWarningsError = null)
+                            val warnings = api.receiptRepeatWarnings(tenantId, receiptId)
+                            if (!receiptRepeatWarningsResponseMatches(warningGeneration,
+                                    receiptRepeatWarningsGeneration.get(), revision,
+                                    ui.receiptDraft?.takeIf { it.id == receiptId }
+                                        ?.let(::receiptRepeatWarningsRevision))) {
+                                error("Receipt revision changed while refreshing repeat warnings")
+                            }
+                            ui = ui.copy(receiptRepeatWarnings = warnings,
+                                receiptRepeatWarningsReceiptId = receiptId,
+                                receiptRepeatWarningsRevision = revision,
+                                receiptRepeatWarningsLoading = false, receiptRepeatWarningsError = null)
+                            warnings
+                        }
+                    } else null,
                 )
             }
             val mutationError = result.exceptionOrNull() as? ReceiptDisputedDecisionMutationFailure
@@ -735,6 +810,16 @@ class MainActivity : ComponentActivity() {
                     ui = ui.copy(receiptDisputedItemsPage = snapshot.page, receiptDisputedItemsReceiptId = receiptId,
                         receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = false,
                         receiptDisputedItemsError = null, productDecisions = snapshot.decisions,
+                        receiptRepeatWarnings = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get())
+                            snapshot.warnings ?: ui.receiptRepeatWarnings else ui.receiptRepeatWarnings,
+                        receiptRepeatWarningsReceiptId = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get() &&
+                            snapshot.warnings != null) receiptId else ui.receiptRepeatWarningsReceiptId,
+                        receiptRepeatWarningsLoading = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get())
+                            false else ui.receiptRepeatWarningsLoading,
+                        receiptRepeatWarningsError = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get())
+                            receiptRepeatWarningErrorAfterDecision(ui.receiptRepeatWarningsError,
+                                refreshRepeatWarnings, mutationMayHaveApplied, snapshot.warnings)
+                            else ui.receiptRepeatWarningsError,
                         doNotBuy = refreshedDoNotBuy?.getOrNull() ?: ui.doNotBuy,
                         doNotBuyError = when {
                             refreshedDoNotBuy?.isFailure == true -> "unavailable"
@@ -761,6 +846,16 @@ class MainActivity : ComponentActivity() {
                         receiptDisputedItemsReceiptId = if (reconciled != null) receiptId else ui.receiptDisputedItemsReceiptId,
                         receiptDisputedItemsRequestedPage = if (reconciled != null) page else ui.receiptDisputedItemsRequestedPage,
                         productDecisions = reconciled?.decisions ?: ui.productDecisions,
+                        receiptRepeatWarnings = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get())
+                            reconciled?.warnings ?: ui.receiptRepeatWarnings else ui.receiptRepeatWarnings,
+                        receiptRepeatWarningsReceiptId = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get() &&
+                            reconciled?.warnings != null) receiptId else ui.receiptRepeatWarningsReceiptId,
+                        receiptRepeatWarningsLoading = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get() &&
+                            refreshRepeatWarnings && mutationMayHaveApplied) false else ui.receiptRepeatWarningsLoading,
+                        receiptRepeatWarningsError = if (warningRefreshGeneration == receiptRepeatWarningsGeneration.get())
+                            receiptRepeatWarningErrorAfterDecision(ui.receiptRepeatWarningsError,
+                                refreshRepeatWarnings, mutationMayHaveApplied, reconciled?.warnings)
+                            else ui.receiptRepeatWarningsError,
                         receiptDisputedItemsLoading = false, receiptDisputedItemsError = errorCode,
                         doNotBuy = refreshedDoNotBuy?.getOrNull() ?: ui.doNotBuy,
                         doNotBuyError = when {
@@ -1918,6 +2013,11 @@ data class FinanceUiState(
     val receiptDisputedItemsRequestedPage: Int? = null,
     val receiptDisputedItemsLoading: Boolean = false,
     val receiptDisputedItemsError: String? = null,
+    val receiptRepeatWarnings: FinanceReceiptRepeatWarnings? = null,
+    val receiptRepeatWarningsReceiptId: String? = null,
+    val receiptRepeatWarningsRevision: String? = null,
+    val receiptRepeatWarningsLoading: Boolean = false,
+    val receiptRepeatWarningsError: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
@@ -1927,6 +2027,7 @@ data class FinanceUiState(
 internal data class ReceiptDisputedDecisionSnapshot(
     val page: FinanceReceiptItemPage,
     val decisions: FinanceProductDecisions,
+    val warnings: FinanceReceiptRepeatWarnings? = null,
 )
 
 internal class ReceiptDisputedDecisionMutationFailure(
@@ -1942,19 +2043,76 @@ internal class ReceiptDisputedDecisionMutationFailure(
 internal class ReceiptDisputedDecisionRefreshFailure(cause: Throwable) :
     RuntimeException("Could not refresh disputed products after the decision", cause)
 
+internal fun shouldRefreshReceiptRepeatWarnings(
+    receiptId: String,
+    warningsReceiptId: String?,
+    warnings: FinanceReceiptRepeatWarnings?,
+    loading: Boolean,
+): Boolean = warningsReceiptId == receiptId && (warnings != null || loading)
+
+internal fun receiptRepeatWarningErrorAfterDecision(
+    previousError: String?,
+    refreshRequested: Boolean,
+    mutationMayHaveApplied: Boolean,
+    refreshedWarnings: FinanceReceiptRepeatWarnings?,
+): String? = when {
+    refreshedWarnings != null -> null
+    refreshRequested && mutationMayHaveApplied -> "unavailable"
+    else -> previousError
+}
+
+internal fun receiptRepeatWarningsRevision(receipt: FinanceReceipt): String = buildString {
+    val values = buildList {
+        add(receipt.version.toString())
+        add(receipt.state)
+        add(receipt.itemCount.toString())
+        receipt.items.forEach { item ->
+            add(item.id)
+            add(item.version.toString())
+            add(item.name)
+            add(item.productKey.orEmpty())
+            add(item.verdict.orEmpty())
+            add(item.advice.orEmpty())
+        }
+    }
+    values.forEach { value -> append(value.length).append(':').append(value) }
+}
+
+internal fun receiptRepeatWarningsResponseMatches(
+    requestedGeneration: Long,
+    currentGeneration: Long,
+    requestedRevision: String,
+    currentRevision: String?,
+): Boolean = requestedGeneration == currentGeneration && requestedRevision == currentRevision
+
 internal fun applyReceiptDisputedDecisionAndRefresh(
     applyDecision: () -> Unit,
     loadPage: () -> FinanceReceiptItemPage,
     loadDecisions: () -> FinanceProductDecisions,
+    invalidateWarnings: (() -> Unit)? = null,
+    loadWarnings: (() -> FinanceReceiptRepeatWarnings)? = null,
 ): ReceiptDisputedDecisionSnapshot {
+    fun loadSnapshot(includeWarnings: Boolean = true): ReceiptDisputedDecisionSnapshot {
+        val page = loadPage()
+        val decisions = loadDecisions()
+        val warnings = if (includeWarnings) loadWarnings?.let { runCatching(it).getOrNull() } else null
+        return ReceiptDisputedDecisionSnapshot(page, decisions, warnings)
+    }
+
     try {
         applyDecision()
     } catch (error: Exception) {
-        val reconciled = runCatching { ReceiptDisputedDecisionSnapshot(loadPage(), loadDecisions()) }.getOrNull()
+        val mayHaveApplied = when (error) {
+            is ApiFailure -> error.status !in 400..499 || error.status in setOf(408, 425, 429)
+            else -> true
+        }
+        if (mayHaveApplied) runCatching { invalidateWarnings?.invoke() }
+        val reconciled = runCatching { loadSnapshot(includeWarnings = mayHaveApplied) }.getOrNull()
         throw ReceiptDisputedDecisionMutationFailure(error, reconciled)
     }
     try {
-        return ReceiptDisputedDecisionSnapshot(loadPage(), loadDecisions())
+        invalidateWarnings?.invoke()
+        return loadSnapshot()
     } catch (error: Exception) {
         throw ReceiptDisputedDecisionRefreshFailure(error)
     }
@@ -2134,6 +2292,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> },
                           onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> },
                           onReceiptDisputedItemsPage: (String, Int) -> Unit = { _, _ -> },
+                          onReceiptRepeatWarningsRefresh: (String) -> Unit = {},
                           onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> }) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -2439,13 +2598,16 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptDisputedItemsPage, state.receiptDisputedItemsReceiptId,
                         state.receiptDisputedItemsRequestedPage, state.receiptDisputedItemsLoading,
                         state.receiptDisputedItemsError, state.productDecisions,
+                        state.receiptRepeatWarnings, state.receiptRepeatWarningsReceiptId,
+                        state.receiptRepeatWarningsRevision, state.receiptRepeatWarningsLoading,
+                        state.receiptRepeatWarningsError,
                         canReviewReceiptBasket(state.tenants.firstOrNull()?.role),
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
                         onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
                         onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh,
                         onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm,
                         onReceiptCategorySelect, onReceiptBasketReview,
-                        onReceiptDisputedItemsPage, onReceiptDisputedProductDecision)
+                        onReceiptDisputedItemsPage, onReceiptRepeatWarningsRefresh, onReceiptDisputedProductDecision)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -2676,6 +2838,9 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 disputedItemsPage: FinanceReceiptItemPage?, disputedItemsReceiptId: String?,
                                 disputedItemsRequestedPage: Int?, disputedItemsLoading: Boolean,
                                 disputedItemsError: String?, productDecisions: FinanceProductDecisions?,
+                                repeatWarnings: FinanceReceiptRepeatWarnings?, repeatWarningsReceiptId: String?,
+                                repeatWarningsRevision: String?,
+                                repeatWarningsLoading: Boolean, repeatWarningsError: String?,
                                 canReviewBasket: Boolean,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
@@ -2693,6 +2858,7 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onSelectCategory: (String, Long, String) -> Unit,
                                 onReviewBasket: (String, Long) -> Unit,
                                 onDisputedItemsPage: (String, Int) -> Unit,
+                                onRepeatWarningsRefresh: (String) -> Unit,
                                 onDisputedProductDecision: (String, String) -> Unit) {
     val confirmationIdempotencyKey = androidx.compose.runtime.remember(receipt?.tenantId, receipt?.id) {
         receipt?.let { receiptConfirmationIdempotencyKey(it.tenantId, it.id) }.orEmpty()
@@ -2781,6 +2947,29 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
         if (!pageLoaded && !requestInProgress && lastRequestedDisputedPage != disputedPageNumber) {
             lastRequestedDisputedPage = disputedPageNumber
             onDisputedItemsPage(currentReceipt.id, disputedPageNumber)
+        }
+    }
+    val currentRepeatWarningsRevision = receipt?.let(::receiptRepeatWarningsRevision)
+    var observedRepeatWarningsRevision by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf(currentRepeatWarningsRevision)
+    }
+    androidx.compose.runtime.LaunchedEffect(receipt?.id, receipt?.state, receipt?.itemCount,
+        currentRepeatWarningsRevision, repeatWarnings, repeatWarningsReceiptId,
+        repeatWarningsRevision, repeatWarningsLoading, repeatWarningsError) {
+        val currentReceipt = receipt ?: return@LaunchedEffect
+        if (currentReceipt.state != "review_required" || currentReceipt.itemCount <= 0) return@LaunchedEffect
+        if (observedRepeatWarningsRevision != currentRepeatWarningsRevision) {
+            observedRepeatWarningsRevision = currentRepeatWarningsRevision
+            onRepeatWarningsRefresh(currentReceipt.id)
+            return@LaunchedEffect
+        }
+        val loadedOrFailed = repeatWarningsReceiptId == currentReceipt.id &&
+            (repeatWarnings != null || repeatWarningsError != null) &&
+            (repeatWarningsRevision == null || repeatWarningsRevision == currentRepeatWarningsRevision)
+        val requestInProgress = repeatWarningsLoading && repeatWarningsReceiptId == currentReceipt.id &&
+            repeatWarningsRevision == currentRepeatWarningsRevision
+        if (!loadedOrFailed && !requestInProgress) {
+            onRepeatWarningsRefresh(currentReceipt.id)
         }
     }
     val russian = language == "ru"
@@ -3357,6 +3546,17 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                         },
                         onDecision = onDisputedProductDecision,
                     )
+                    ReceiptRepeatWarningsSection(
+                        receipt = draft,
+                        language = language,
+                        warnings = repeatWarnings?.takeIf { repeatWarningsReceiptId == draft.id &&
+                            (repeatWarningsRevision == null || repeatWarningsRevision == currentRepeatWarningsRevision) },
+                        loading = repeatWarningsLoading && repeatWarningsReceiptId == draft.id &&
+                            repeatWarningsRevision == currentRepeatWarningsRevision,
+                        error = repeatWarningsError.takeIf { repeatWarningsReceiptId == draft.id &&
+                            (repeatWarningsRevision == null || repeatWarningsRevision == currentRepeatWarningsRevision) },
+                        onRetry = { onRepeatWarningsRefresh(draft.id) },
+                    )
                 }
                 val currentReading = reading.takeIf { readingReceiptId == null || readingReceiptId == draft.id }
                 val sourceLabel = when (draft.categorySource) {
@@ -3658,6 +3858,77 @@ private fun ReceiptDisputedItemsSection(
         }
     }
 }
+
+@androidx.compose.runtime.Composable
+private fun ReceiptRepeatWarningsSection(
+    receipt: FinanceReceipt,
+    language: String,
+    warnings: FinanceReceiptRepeatWarnings?,
+    loading: Boolean,
+    error: String?,
+    onRetry: () -> Unit,
+) {
+    val russian = language == "ru"
+    Card(Modifier.fillMaxWidth().testTag("receipt-repeat-warnings")) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (russian) "Повторные покупки" else "Repeat purchases",
+                modifier = Modifier.testTag("receipt-repeat-warnings-title"),
+                style = MaterialTheme.typography.titleSmall)
+            if (loading) {
+                Text(if (russian) "Загружаем предупреждения…" else "Loading repeat warnings…",
+                    modifier = Modifier.testTag("receipt-repeat-warnings-loading"))
+            } else if (error != null) {
+                Text(if (russian) "Повторные предупреждения временно недоступны"
+                    else "Repeat warnings are temporarily unavailable",
+                    modifier = Modifier.testTag("receipt-repeat-warnings-error"),
+                    color = MaterialTheme.colorScheme.error)
+                TextButton(modifier = Modifier.testTag("receipt-repeat-warnings-retry"),
+                    onClick = onRetry) {
+                    Text(if (russian) "Повторить" else "Retry")
+                }
+            } else if (warnings != null && warnings.warnings.isEmpty()) {
+                Text(if (russian) "Повторных предупреждений нет" else "No repeat warnings",
+                    modifier = Modifier.testTag("receipt-repeat-warnings-empty"))
+            } else if (warnings == null) {
+                Text(if (russian) "Загружаем предупреждения…" else "Loading repeat warnings…",
+                    modifier = Modifier.testTag("receipt-repeat-warnings-loading"))
+            } else {
+                warnings.warnings.forEach { warning ->
+                    Column(Modifier.fillMaxWidth().testTag("receipt-repeat-warning-${warning.itemId}"),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        val title = if (russian) warning.title else when (warning.verdict) {
+                            "harmful" -> "Consider reducing"
+                            "unnecessary" -> "Could skip this purchase"
+                            else -> "Repeat warning"
+                        }
+                        Text(title, modifier = Modifier.testTag("receipt-repeat-warning-title-${warning.itemId}"),
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text("${if (russian) "Товар" else "Product"}: ${warning.name}")
+                        Text("${if (russian) "Оценка" else "Verdict"}: " +
+                            repeatWarningVerdictLabel(warning.verdict, language))
+                        Text("${if (russian) "Совпадений ранее" else "Prior purchases"}: ${warning.count}")
+                        Text("${if (russian) "Последняя сумма" else "Last amount"}: " +
+                            formatMoney(warning.lastSum, language, receipt.currency))
+                        warning.advice?.takeIf(String::isNotBlank)?.let { advice ->
+                            Text("${if (russian) "Совет" else "Advice"}: $advice")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun repeatWarningVerdictLabel(verdict: String, language: String): String =
+    if (language == "ru") when (verdict) {
+        "harmful" -> "Вредно"
+        "unnecessary" -> "Необязательно"
+        else -> "Неизвестно"
+    } else when (verdict) {
+        "harmful" -> "Harmful"
+        "unnecessary" -> "Optional"
+        else -> "Unknown"
+    }
 
 internal fun receiptPollDelayMillis(state: String, attempt: Int): Long? {
     if (attempt >= 60) return null

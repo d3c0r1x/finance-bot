@@ -419,19 +419,23 @@ features:
     feature: "Повторные предупреждения о необязательном товаре; `services/advice.py`"
     target: "G history features; J policy/presentation DTO"
     acceptance: "Новый чек не находит сам себя в прошлой истории; разрешённый товар не предупреждается"
-    status: complete
+    status: in_progress
     tests:
       - services/core/src/test/java/com/decorix/finance/core/domain/ProductIdentityPolicyTest.java
       - services/core/src/test/java/com/decorix/finance/core/domain/ReceiptRepeatWarningPolicyTest.java
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - tools/contracts/test_contracts.py
       - apps/web/src/ReceiptsPanel.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+      - apps/android/app/src/test/java/com/decorix/finance/ReceiptDisputedDecisionRefreshTest.kt
     evidence:
-      - "Java ports legacy token-overlap and SequenceMatcher-style signature similarity. Owner/BFF repeat-warning API scans only prior confirmed receipts, excludes current receipt, filters allowed keys, and streams history with a bounded JDBC fetch size. PostgreSQL proves prior-only results and zero warnings after the matching product is allowed. RU Web shows warning count, last amount and advice. Unit, PostgreSQL, migration/contract and Web tests pass."
+      - "Core excludes the current receipt, allowed product keys, and history after the current receipt's effective date/creation order. Equal timestamps use a stable UUID tie-break. The repeat-warning policy tests pass. The full Core suite passes 292 tests, 0 failures/errors, and reports 138 skips; the PostgreSQL temporal regression test was not run because FINANCE_TEST_DATABASE_URL is unset and PostgreSQL is unavailable. RU Web shows warning count, last amount and advice; ReceiptsPanel tests pass 9/9. Android reads Core warnings, localizes RU/EN presentation, preserves exact receipt totals, and refreshes after successful or ambiguous F20 decisions. Full API-27 instrumentation passes 196 tests; JVM tests pass 29/29. The debug APK is installed and launched on Android 8.1/API 27. Authenticated Android-to-Core OIDC E2E remains unverified."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F21: Повторные предупреждения о необязательном товаре; `services/advice.py`"
-      gap: "No Android user screen or equivalent flow is verified for F21 yet."
+      gap: "Live authenticated Android-to-Core OIDC E2E remains unverified."
+      evidence: "RU/EN repeat-warning screen uses the authenticated Core endpoint, shows Core evidence and exact last amount in receipt currency, and hides outside draft review. API-27 instrumentation 196/196 and JVM 29/29 pass; debug APK installed/launched on isolated Android 8.1/API 27 emulator."
     intentional_differences: []
   - id: F22
     feature: "Семейные и личные месячные лимиты, общий лимит, reset"

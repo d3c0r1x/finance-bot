@@ -326,6 +326,19 @@ data class FinanceReceiptItemPage(
     val hasMore: Boolean,
 )
 
+data class FinanceReceiptRepeatWarning(
+    val itemId: String,
+    val name: String,
+    val productKey: String,
+    val verdict: String,
+    val title: String,
+    val count: Int,
+    val lastSum: String,
+    val advice: String?,
+)
+
+data class FinanceReceiptRepeatWarnings(val warnings: List<FinanceReceiptRepeatWarning>)
+
 data class FinanceReceiptDuplicateCandidate(
     val id: String,
     val cashTotal: String,
@@ -545,6 +558,31 @@ internal object FinanceModels {
             totalItems = json.getInt("totalItems"),
             hasMore = json.getBoolean("hasMore"),
         )
+    }
+
+    fun receiptRepeatWarnings(json: JSONObject): FinanceReceiptRepeatWarnings {
+        val rows = json.getJSONArray("warnings")
+        require(rows.length() <= 200) { "Invalid receipt repeat warning count" }
+        val amount = Regex("^(?:0|[1-9][0-9]{0,17})\\.[0-9]{2}$")
+        val warnings = (0 until rows.length()).map { index ->
+            val row = rows.getJSONObject(index)
+            val itemId = row.getString("itemId")
+            val name = row.getString("name")
+            val productKey = row.getString("productKey")
+            val verdict = row.getString("verdict")
+            val title = row.getString("title")
+            val count = row.getInt("count")
+            val lastSum = row.getString("lastSum")
+            val advice = nullableString(row, "advice")
+            require(runCatching { java.util.UUID.fromString(itemId).toString().equals(itemId, ignoreCase = true) }.getOrDefault(false) &&
+                name.isNotBlank() && name.length <= 200 && productKey.isNotBlank() && productKey.length <= 256 &&
+                verdict in setOf("harmful", "unnecessary") && title.isNotBlank() && title.length <= 80 &&
+                count >= 1 && amount.matches(lastSum) && (advice == null || advice.length <= 500)) {
+                "Invalid receipt repeat warning"
+            }
+            FinanceReceiptRepeatWarning(itemId, name, productKey, verdict, title, count, lastSum, advice)
+        }
+        return FinanceReceiptRepeatWarnings(warnings)
     }
 
     fun receiptDuplicateCandidates(json: JSONObject): FinanceReceiptDuplicateCandidates {

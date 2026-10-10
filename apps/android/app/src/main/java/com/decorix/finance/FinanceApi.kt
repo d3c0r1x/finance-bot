@@ -159,6 +159,11 @@ class FinanceApi internal constructor(
         )))
     }
 
+    fun receiptRepeatWarnings(tenantId: String, receiptId: String): FinanceReceiptRepeatWarnings =
+        FinanceModels.receiptRepeatWarnings(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/repeat-warnings", "GET",
+        )))
+
     fun updateReceiptItem(tenantId: String, receiptId: String, itemId: String, version: Long,
                           name: String, quantity: String?, unitPrice: String?, lineSum: String?): FinanceReceipt {
         require(version > 0) { "Invalid receipt version" }

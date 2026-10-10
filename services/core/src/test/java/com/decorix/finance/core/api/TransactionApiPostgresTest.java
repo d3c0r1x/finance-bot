@@ -6115,15 +6115,24 @@ class TransactionApiPostgresTest {
                                 + "\"categoryCode\":\"food\",\"description\":\"Current receipt\","
                                 + "\"occurredAt\":\"2026-10-02T10:00:00Z\"}"))
                 .andExpect(status().isCreated()).andReturn();
+        var futureTransaction = mvc.perform(post("/api/v1/tenants/" + tenantId + "/transactions").with(auth)
+                        .header("Idempotency-Key", "repeat-warning-tx-future-001")
+                        .contentType("application/json")
+                        .content("{\"type\":\"expense\",\"amount\":\"99.99\",\"currency\":\"RUB\","
+                                + "\"categoryCode\":\"food\",\"description\":\"Future receipt\","
+                                + "\"occurredAt\":\"2026-10-03T10:00:00Z\"}"))
+                .andExpect(status().isCreated()).andReturn();
         UUID previousTransactionId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
                 previousTransaction.getResponse().getContentAsString(), "$.id"));
         UUID currentTransactionId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
                 currentTransaction.getResponse().getContentAsString(), "$.id"));
+        UUID futureTransactionId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
+                futureTransaction.getResponse().getContentAsString(), "$.id"));
 
         var previous = mvc.perform(post("/api/v1/tenants/" + tenantId + "/receipts").with(auth)
                         .header("Idempotency-Key", "repeat-warning-receipt-prev-001")
                         .contentType("application/json").content("""
-                                {"cashTotal":"12.50","merchant":"Market","receiptDate":"2026-10-01","items":[
+                                {"cashTotal":"12.50","merchant":"Market","receiptDate":"2026-10-02","items":[
                                   {"name":"Йогурт Активиа","quantity":"1","unitPrice":"12.50","lineSum":"12.50"}]}
                                 """))
                 .andExpect(status().isCreated()).andReturn();
@@ -6134,22 +6143,42 @@ class TransactionApiPostgresTest {
                                   {"name":"Йогурт Активиа 150г","quantity":"1","unitPrice":"15.00","lineSum":"15.00"}]}
                                 """))
                 .andExpect(status().isCreated()).andReturn();
+        var future = mvc.perform(post("/api/v1/tenants/" + tenantId + "/receipts").with(auth)
+                        .header("Idempotency-Key", "repeat-warning-receipt-future-001")
+                        .contentType("application/json").content("""
+                                {"cashTotal":"99.99","merchant":"Market","receiptDate":"2026-10-03","items":[
+                                  {"name":"Йогурт Активиа 150г","quantity":"1","unitPrice":"99.99","lineSum":"99.99"}]}
+                                """))
+                .andExpect(status().isCreated()).andReturn();
         UUID previousReceiptId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
                 previous.getResponse().getContentAsString(), "$.id"));
         UUID currentReceiptId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
                 current.getResponse().getContentAsString(), "$.id"));
+        UUID futureReceiptId = UUID.fromString(com.jayway.jsonpath.JsonPath.read(
+                future.getResponse().getContentAsString(), "$.id"));
         String productKey = com.jayway.jsonpath.JsonPath.read(current.getResponse().getContentAsString(), "$.items[0].productKey");
 
         transactions.executeWithoutResult(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
             jdbc.update("UPDATE receipt_items SET verdict = 'harmful', advice = 'buy less', verdict_source = 'model' "
-                    + "WHERE tenant_id = ? AND receipt_id IN (?, ?)", tenantId, previousReceiptId, currentReceiptId);
+                    + "WHERE tenant_id = ? AND receipt_id IN (?, ?, ?)",
+                    tenantId, previousReceiptId, currentReceiptId, futureReceiptId);
             jdbc.update("UPDATE receipts SET state = 'confirmed', transaction_id = ?, confirm_idempotency_key = ?, "
                             + "confirmed_at = now(), version = version + 1 WHERE tenant_id = ? AND id = ?",
                     previousTransactionId, "repeat-confirm-previous-0001", tenantId, previousReceiptId);
             jdbc.update("UPDATE receipts SET state = 'confirmed', transaction_id = ?, confirm_idempotency_key = ?, "
                             + "confirmed_at = now(), version = version + 1 WHERE tenant_id = ? AND id = ?",
                     currentTransactionId, "repeat-confirm-current-0001", tenantId, currentReceiptId);
+            jdbc.update("UPDATE receipts SET state = 'confirmed', transaction_id = ?, confirm_idempotency_key = ?, "
+                            + "confirmed_at = now(), version = version + 1 WHERE tenant_id = ? AND id = ?",
+                    futureTransactionId, "repeat-confirm-future-0001", tenantId, futureReceiptId);
+            jdbc.update("UPDATE receipts SET created_at = CASE id "
+                            + "WHEN ? THEN '2026-10-02T11:00:00Z'::timestamptz "
+                            + "WHEN ? THEN '2026-10-02T12:00:00Z'::timestamptz "
+                            + "WHEN ? THEN '2026-10-03T11:00:00Z'::timestamptz END "
+                            + "WHERE tenant_id = ? AND id IN (?, ?, ?)",
+                    previousReceiptId, currentReceiptId, futureReceiptId, tenantId,
+                    previousReceiptId, currentReceiptId, futureReceiptId);
         });
 
         String warningPath = "/api/v1/tenants/" + tenantId + "/receipts/" + currentReceiptId + "/repeat-warnings";
