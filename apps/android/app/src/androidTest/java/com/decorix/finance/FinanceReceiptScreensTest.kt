@@ -1149,6 +1149,163 @@ class FinanceReceiptScreensTest {
         assertEquals(14L, state.value.receiptDraft?.version)
     }
 
+    @Test fun basketReviewRendersLocalizedCoreProvenanceAndUnknownWithoutInventingAmounts() {
+        val reviewed = receiptDraft().copy(cashTotal = null, itemsTotal = null,
+            items = listOf(
+                receiptItem(1).copy(name = "Synthetic rule item", quantity = null, unitPrice = null,
+                    lineSum = null, verdict = "harmful", reviewReason = "synthetic reason",
+                    reviewAction = "synthetic action", advice = "synthetic advice", verdictSource = "rule",
+                    reviewProvider = null, reviewAlgorithmVersion = "receipt-basket.v1"),
+                receiptItem(2).copy(name = "Synthetic model item", quantity = null, unitPrice = null,
+                    lineSum = null, verdict = "useful", reviewReason = "model reason", reviewAction = "model action",
+                    verdictSource = "model", reviewProvider = "synthetic-model",
+                    reviewModelVersion = "synthetic-model-v1", reviewPromptVersion = "receipt-basket.v1",
+                    reviewAlgorithmVersion = "receipt-basket.v1"),
+                receiptItem(3).copy(name = "Synthetic default item", quantity = null, unitPrice = null,
+                    lineSum = null, verdict = "neutral", verdictSource = "default",
+                    reviewAlgorithmVersion = "receipt-basket.v1"),
+                receiptItem(4).copy(name = "Synthetic legacy item", quantity = null, unitPrice = null,
+                    lineSum = null, verdict = "neutral", verdictSource = "unknown",
+                    reviewProvider = "unknown", reviewAlgorithmVersion = "unknown"),
+            ), itemCount = 4)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = reviewed))
+        show(state.value, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-item-review-verdict-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Оценка", substring = true)
+            .assertTextContains("неблагоприятная", substring = true)
+        compose.onNodeWithText("harmful", substring = true).assertDoesNotExist()
+        compose.onNodeWithTag("receipt-item-review-reason-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Причина", substring = true)
+            .assertTextContains("synthetic reason", substring = true)
+        compose.onNodeWithTag("receipt-item-review-action-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Действие", substring = true)
+            .assertTextContains("synthetic action", substring = true)
+        compose.onNodeWithTag("receipt-item-review-advice-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Совет", substring = true)
+            .assertTextContains("synthetic advice", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("правило", substring = true)
+            .assertTextContains("receipt-basket.v1", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[1].id}").performScrollTo()
+            .assertTextContains("модель", substring = true)
+            .assertTextContains("synthetic-model", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[2].id}").performScrollTo()
+            .assertTextContains("по умолчанию", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[3].id}").performScrollTo()
+            .assertTextContains("неизвест", substring = true)
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("receipt-item-review-verdict-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Verdict", substring = true)
+            .assertTextContains("harmful", substring = true)
+        compose.onNodeWithTag("receipt-item-review-reason-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Reason", substring = true)
+        compose.onNodeWithTag("receipt-item-review-action-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Action", substring = true)
+        compose.onNodeWithTag("receipt-item-review-advice-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("Advice", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[0].id}").performScrollTo()
+            .assertTextContains("rule", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[1].id}").performScrollTo()
+            .assertTextContains("model", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[2].id}").performScrollTo()
+            .assertTextContains("default", substring = true)
+        compose.onNodeWithTag("receipt-item-review-source-${reviewed.items[3].id}").performScrollTo()
+            .assertTextContains("unknown", substring = true)
+        compose.onNodeWithText("0.00").assertDoesNotExist()
+        compose.onNodeWithText("0 ₽").assertDoesNotExist()
+        assertNull(state.value.receiptDraft?.cashTotal)
+        assertNull(state.value.receiptDraft?.itemsTotal)
+    }
+
+    @Test fun memberBasketReviewRequiresExplicitTapAndShowsReturnedCoreDtoWithoutChangingTotals() {
+        val receipt = receiptDraft().copy(version = 7, cashTotal = "245.70", itemsTotal = "245.70",
+            items = listOf(receiptItem(7).copy(name = "Synthetic review target", verdict = null,
+                reviewReason = null, reviewAction = null, advice = null, verdictSource = "unknown",
+                reviewAlgorithmVersion = "unknown")), itemCount = 1)
+        val reviewedItem = receipt.items.single().copy(verdict = "harmful", reviewReason = "Core reason",
+            reviewAction = "Core action", advice = "Core advice", verdictSource = "rule",
+            reviewProvider = null, reviewAlgorithmVersion = "receipt-basket.v1")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("member")),
+            receiptDraft = receipt))
+        val reviewCalls = mutableListOf<Pair<String, Long>>()
+        show(state.value, stateHolder = state, onReceiptBasketReview = { receiptId, version ->
+            reviewCalls += receiptId to version
+            state.value = state.value.copy(receiptDraft = receipt.copy(version = version + 1,
+                items = listOf(reviewedItem)))
+        })
+
+        compose.onNodeWithTag("receipt-item-review-verdict-${receipt.items.single().id}").assertDoesNotExist()
+        assertEquals(emptyList<Pair<String, Long>>(), reviewCalls)
+        compose.onNodeWithTag("receipt-basket-review").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(receipt.id to 7L), reviewCalls)
+        assertEquals("245.70", state.value.receiptDraft?.cashTotal)
+        assertEquals("245.70", state.value.receiptDraft?.itemsTotal)
+        assertEquals("Core reason", state.value.receiptDraft?.items?.single()?.reviewReason)
+        assertEquals("Core action", state.value.receiptDraft?.items?.single()?.reviewAction)
+        assertEquals("Core advice", state.value.receiptDraft?.items?.single()?.advice)
+        compose.onNodeWithTag("receipt-item-review-verdict-${reviewedItem.id}").performScrollTo()
+            .assertTextContains("неблагоприятная", substring = true)
+        compose.onNodeWithText("harmful", substring = true).assertDoesNotExist()
+        compose.onNodeWithTag("receipt-item-review-source-${reviewedItem.id}").performScrollTo()
+            .assertTextContains("правило", substring = true)
+    }
+
+    @Test fun ownerAndMemberCanReviewBasketButViewerCannot() {
+        val receipt = receiptDraft()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt))
+        var calls = 0
+        show(state.value, stateHolder = state, onReceiptBasketReview = { _, _ -> calls++ })
+
+        compose.onNodeWithTag("receipt-basket-review").performScrollTo().assertIsEnabled()
+        state.value = state.value.copy(tenants = listOf(tenant("member")))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-basket-review").performScrollTo().assertIsEnabled()
+        state.value = state.value.copy(tenants = listOf(tenant("viewer")))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-basket-review").assertDoesNotExist()
+        assertEquals(0, calls)
+    }
+
+    @Test fun basketReviewPendingStateIsScopedToReceiptBeingReviewed() {
+        val reviewing = receiptDraft().copy(id = "receipt-being-reviewed")
+        val another = receiptDraft().copy(id = "different-receipt")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("member")),
+            receiptDraft = reviewing, receiptBasketReviewing = true,
+            receiptBasketReviewingTenantId = tenant("member").id,
+            receiptBasketReviewingReceiptId = reviewing.id))
+        var calls = 0
+        show(state.value, stateHolder = state, onReceiptBasketReview = { _, _ -> calls++ })
+
+        compose.onNodeWithTag("receipt-basket-review").performScrollTo().assertIsNotEnabled()
+        state.value = state.value.copy(receiptDraft = another)
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-basket-review").performScrollTo().assertIsEnabled()
+        assertEquals(0, calls)
+    }
+
+    @Test fun basketReviewIsUnavailableForEmptyOrConfirmedReceipt() {
+        val receipt = receiptDraft().copy(items = emptyList(), itemCount = 0)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt))
+        var reviewCalls = 0
+        show(state.value, stateHolder = state, onReceiptBasketReview = { _, _ -> reviewCalls++ })
+
+        compose.onNodeWithTag("receipt-basket-review").assertDoesNotExist()
+        assertEquals("Empty basket must not start a review", 0, reviewCalls)
+
+        state.value = state.value.copy(receiptDraft = receipt.copy(state = "confirmed",
+            transactionId = "posted-expense-7", itemCount = 1, items = listOf(receiptItem(7))))
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-basket-review").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-confirmed").performScrollTo().assertIsDisplayed()
+        assertEquals("Confirmed receipt must not start a review", 0, reviewCalls)
+    }
+
     @Test fun missingReceiptReadingShowsUnavailableStateWithoutFillingVerifiedFields() {
         val draft = receiptDraft().copy(merchant = null, receiptDate = null, cashTotal = null,
             categoryCode = null, categorySource = "unknown")
@@ -1409,6 +1566,7 @@ class FinanceReceiptScreensTest {
                          { _, _, _, _ -> },
                      onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
                      onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> },
+                     onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> },
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
         val language = mutableStateOf("ru")
         compose.setContent {
@@ -1429,7 +1587,8 @@ class FinanceReceiptScreensTest {
                     onReceiptItemAddRefresh = onReceiptItemAddRefresh,
                     onReceiptDuplicateDecision = onReceiptDuplicateDecision,
                     onReceiptConfirm = onReceiptConfirm,
-                    onReceiptCategorySelect = onReceiptCategorySelect)
+                    onReceiptCategorySelect = onReceiptCategorySelect,
+                    onReceiptBasketReview = onReceiptBasketReview)
             }
         }
         compose.waitForIdle()

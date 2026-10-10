@@ -362,9 +362,13 @@ features:
     evidence:
       - "Python accepts bounded ordinal/name-only context and strict amount-free model output. Java applies deterministic safety rules, removes repeated advice only across different products, defaults missing/invalid model opinions safely, and preserves rule/model/default sources by item ID. PostgreSQL acceptance proves the AI request contains no total or line sums, rule precedence wins over the model, totals do not change, and advice is audited/versioned. RU/EN Web, Python, Java, contract and PostgreSQL tests pass."
     android:
-      status: missing
-      scenario: "Android counterpart for F18: Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"
-      gap: "No Android user screen or equivalent flow is verified for F18 yet."
+      status: partial
+      scenario: "Android writer explicitly requests Core basket review for an editable non-empty receipt, then displays returned verdict, reason, action, advice, and rule/model/default/unknown provenance in RU/EN without changing money values. Viewer, empty, and confirmed receipt are blocked; 409/412 refreshes current receipt."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+      gap: "Live authenticated Android-to-Core OIDC E2E remains unverified; Activity network stale-refresh path is code-reviewed and simulated only at the screen seam."
+      evidence: "API 31/31 and screen 51/51 Android API-27 instrumentation tests pass. Core remains source of truth; Android sends quoted If-Match and no request body, renders returned DTO, and never calculates basket advice or monetary totals."
     intentional_differences: []
   - id: F19
     feature: "Сохранение verdict/advice/verdict_source по позициям"

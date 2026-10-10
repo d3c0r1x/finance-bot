@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
     private val receiptDuplicateGeneration = AtomicLong(0L)
     private val receiptConfirmGeneration = AtomicLong(0L)
     private val receiptCategoryGeneration = AtomicLong(0L)
+    private val receiptBasketReviewGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -155,7 +156,8 @@ class MainActivity : ComponentActivity() {
                         onReceiptDuplicateCandidates = ::loadReceiptDuplicateCandidates,
                         onReceiptDuplicateDecision = ::decideReceiptDuplicate,
                         onReceiptConfirm = ::confirmReceipt,
-                        onReceiptCategorySelect = ::selectReceiptCategory)
+                        onReceiptCategorySelect = ::selectReceiptCategory,
+                        onReceiptBasketReview = ::reviewReceiptBasket)
                 }
             }
         }
@@ -545,6 +547,61 @@ class MainActivity : ComponentActivity() {
                             }
                     } else {
                         ui = ui.copy(receiptCategorySaving = false, receiptCategoryError = "unavailable")
+                    }
+                }
+        }
+    }
+
+    private fun reviewReceiptBasket(receiptId: String, version: Long) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        if (!ui.authenticated || !canReviewReceiptBasket(tenant.role) || ui.busy ||
+            (ui.receiptBasketReviewing && ui.receiptBasketReviewingReceiptId == receiptId &&
+                ui.receiptBasketReviewingTenantId == tenant.id) || receipt.transactionId != null || receipt.itemCount <= 0 ||
+            receipt.state !in setOf("draft", "review_required") || receipt.version != version) return
+        val generation = receiptBasketReviewGeneration.incrementAndGet()
+        ui = ui.copy(receiptBasketReviewing = true, receiptBasketReviewingReceiptId = receiptId,
+            receiptBasketReviewingTenantId = tenant.id, receiptBasketReviewError = null)
+        executor.execute {
+            runCatching { api.reviewReceiptBasket(tenant.id, receiptId, version) }
+                .onSuccess { reviewed ->
+                    if (receiptBasketReviewGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptDraft = reviewed, receiptItemsPage = null,
+                            receiptItemsReceiptId = null, receiptItemsRequestedPage = null,
+                            receiptItemsError = null, receiptBasketReviewError = null)
+                    }
+                }
+                .onFailure { failure ->
+                    if (receiptBasketReviewGeneration.get() != generation || !ui.authenticated ||
+                        ui.tenants.firstOrNull()?.id != tenant.id || ui.receiptDraft?.id != receiptId) return@onFailure
+                    val status = (failure as? ApiFailure)?.status
+                    if (status == 409 || status == 412) {
+                        runCatching { api.receipt(tenant.id, receiptId) }
+                            .onSuccess { latest ->
+                                if (receiptBasketReviewGeneration.get() == generation && ui.authenticated &&
+                                    ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                                    ui = ui.copy(receiptDraft = latest, receiptItemsPage = null,
+                                        receiptItemsReceiptId = null, receiptItemsRequestedPage = null,
+                                        receiptBasketReviewError = if (status == 412) "stale_version" else "conflict")
+                                }
+                            }
+                            .onFailure {
+                                if (receiptBasketReviewGeneration.get() == generation && ui.authenticated &&
+                                    ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                                    ui = ui.copy(receiptBasketReviewError = "refresh_unavailable")
+                                }
+                            }
+                    } else {
+                        ui = ui.copy(receiptBasketReviewError = "unavailable")
+                    }
+                }
+                .also {
+                    if (receiptBasketReviewGeneration.get() == generation &&
+                        ui.receiptBasketReviewingReceiptId == receiptId &&
+                        ui.receiptBasketReviewingTenantId == tenant.id) {
+                        ui = ui.copy(receiptBasketReviewing = false, receiptBasketReviewingReceiptId = null,
+                            receiptBasketReviewingTenantId = null)
                     }
                 }
         }
@@ -1729,6 +1786,10 @@ data class FinanceUiState(
     val receiptConfirmError: String? = null,
     val receiptCategorySaving: Boolean = false,
     val receiptCategoryError: String? = null,
+    val receiptBasketReviewing: Boolean = false,
+    val receiptBasketReviewingReceiptId: String? = null,
+    val receiptBasketReviewingTenantId: String? = null,
+    val receiptBasketReviewError: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
@@ -1736,6 +1797,8 @@ data class FinanceUiState(
 )
 
 internal fun canWriteReceiptCategory(role: String?): Boolean = role != null && role != "viewer"
+
+internal fun canReviewReceiptBasket(role: String?): Boolean = role in setOf("owner", "admin", "member")
 
 private val RECEIPT_CATEGORY_CODES = listOf(
     "еда", "транспорт", "жилье", "досуг", "одежда", "здоровье", "работа", "техника", "долги", "прочее",
@@ -1904,7 +1967,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptDuplicateCandidates: (String) -> Unit = {},
                           onReceiptDuplicateDecision: (String, Long, String, String?) -> Unit = { _, _, _, _ -> },
                           onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
-                          onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> }) {
+                          onReceiptCategorySelect: (String, Long, String) -> Unit = { _, _, _ -> },
+                          onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> }) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -2202,11 +2266,16 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptDuplicateCandidatesError, state.receiptDuplicateDecisionInProgress,
                         state.receiptDuplicateDecisionError, state.receiptConfirming, state.receiptConfirmError,
                         state.receiptCategorySaving, state.receiptCategoryError,
+                        state.receiptBasketReviewing &&
+                            state.receiptBasketReviewingReceiptId == state.receiptDraft?.id &&
+                            state.receiptBasketReviewingTenantId == state.tenants.firstOrNull()?.id,
+                        state.receiptBasketReviewError,
+                        canReviewReceiptBasket(state.tenants.firstOrNull()?.role),
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
                         onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
                         onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh,
                         onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm,
-                        onReceiptCategorySelect)
+                        onReceiptCategorySelect, onReceiptBasketReview)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -2433,6 +2502,8 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 duplicateDecisionError: String?, receiptConfirming: Boolean,
                                 receiptConfirmError: String?,
                                 categorySaving: Boolean, categoryError: String?,
+                                basketReviewing: Boolean, basketReviewError: String?,
+                                canReviewBasket: Boolean,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
                                 onLoadReading: (String) -> Unit,
@@ -2446,7 +2517,8 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onLoadDuplicateCandidates: (String) -> Unit,
                                 onDuplicateDecision: (String, Long, String, String?) -> Unit,
                                 onConfirmReceipt: (String, Long, String) -> Unit,
-                                onSelectCategory: (String, Long, String) -> Unit) {
+                                onSelectCategory: (String, Long, String) -> Unit,
+                                onReviewBasket: (String, Long) -> Unit) {
     val confirmationIdempotencyKey = androidx.compose.runtime.remember(receipt?.tenantId, receipt?.id) {
         receipt?.let { receiptConfirmationIdempotencyKey(it.tenantId, it.id) }.orEmpty()
     }
@@ -2752,6 +2824,32 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                     }
                 }
 
+                if (canReviewBasket && draft.transactionId == null &&
+                    draft.state in setOf("draft", "review_required") && draft.itemCount > 0) {
+                    basketReviewError?.let { code ->
+                        val message = when (code) {
+                            "stale_version" -> if (russian) "Чек обновлён. Проверьте позиции перед повторной проверкой корзины."
+                                else "Receipt refreshed. Review its items before checking the basket again."
+                            "conflict" -> if (russian) "Состояние чека изменилось. Проверьте его перед повтором."
+                                else "Receipt state changed. Review it before retrying."
+                            "refresh_unavailable" -> if (russian) "Не удалось обновить чек после изменения. Повторите позже."
+                                else "Could not refresh the changed receipt. Please retry later."
+                            else -> if (russian) "Не удалось проверить корзину. Повторите попытку."
+                                else "Could not review the basket. Please retry."
+                        }
+                        Text(message, modifier = Modifier.testTag("receipt-basket-review-error"),
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                    Button(modifier = Modifier.fillMaxWidth().testTag("receipt-basket-review"),
+                        enabled = !busy && !basketReviewing && !receiptConfirming && !duplicateDecisionInProgress &&
+                            !categorySaving && !receiptTotalSyncInProgress,
+                        onClick = { onReviewBasket(draft.id, draft.version) }) {
+                        Text(if (basketReviewing) {
+                            if (russian) "Проверяем корзину…" else "Reviewing basket…"
+                        } else if (russian) "Проверить корзину" else "Review basket")
+                    }
+                }
+
                 if (canWrite && draft.state == "confirmed") {
                     Text(if (russian) "Расход подтверждён" else "Expense confirmed",
                         modifier = Modifier.fillMaxWidth().testTag("receipt-confirmed"))
@@ -2892,6 +2990,54 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                             editLineSum = item.lineSum.orEmpty()
                                         }) {
                                         Text(if (russian) "Изменить" else "Edit")
+                                    }
+                                }
+                                val hasReview = item.verdict != null || item.reviewReason != null ||
+                                    item.reviewAction != null || item.advice != null ||
+                                    item.verdictSource in setOf("rule", "model", "default")
+                                if (hasReview) {
+                                    val verdictLabel = when (item.verdict) {
+                                        "harmful" -> if (russian) "неблагоприятная" else "harmful"
+                                        "unnecessary" -> if (russian) "необязательная" else "unnecessary"
+                                        "useful" -> if (russian) "полезная" else "useful"
+                                        "neutral" -> if (russian) "нейтральная" else "neutral"
+                                        null -> if (russian) "не указана" else "not provided"
+                                        else -> if (russian) "неизвестная" else "unknown"
+                                    }
+                                    val sourceLabel = when (item.verdictSource) {
+                                        "rule" -> if (russian) "правило" else "rule"
+                                        "model" -> if (russian) "модель" else "model"
+                                        "default" -> if (russian) "по умолчанию" else "default"
+                                        "unknown" -> if (russian) "неизвестен" else "unknown"
+                                        "human" -> if (russian) "человек" else "human"
+                                        null -> if (russian) "не указан" else "not provided"
+                                        else -> if (russian) "неизвестен" else "unknown"
+                                    }
+                                    val verdictText = verdictLabel
+                                    Column(Modifier.fillMaxWidth().padding(start = 8.dp, bottom = 6.dp)
+                                        .testTag("receipt-item-review-${item.id}"),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("${if (russian) "Оценка" else "Verdict"}: $verdictText",
+                                            modifier = Modifier.testTag("receipt-item-review-verdict-${item.id}"))
+                                        Text("${if (russian) "Причина" else "Reason"}: " +
+                                            (item.reviewReason ?: if (russian) "не указана" else "not provided"),
+                                            modifier = Modifier.testTag("receipt-item-review-reason-${item.id}"))
+                                        Text("${if (russian) "Действие" else "Action"}: " +
+                                            (item.reviewAction ?: if (russian) "не указано" else "not provided"),
+                                            modifier = Modifier.testTag("receipt-item-review-action-${item.id}"))
+                                        Text("${if (russian) "Совет" else "Advice"}: " +
+                                            (item.advice ?: if (russian) "не указан" else "not provided"),
+                                            modifier = Modifier.testTag("receipt-item-review-advice-${item.id}"))
+                                        val provider = item.reviewProvider ?: if (russian) "не указан" else "not provided"
+                                        val model = item.reviewModelVersion ?: if (russian) "не указана" else "not provided"
+                                        val prompt = item.reviewPromptVersion ?: if (russian) "не указана" else "not provided"
+                                        val algorithm = item.reviewAlgorithmVersion ?: if (russian) "не указан" else "not provided"
+                                        Text("${if (russian) "Источник" else "Source"}: $sourceLabel · " +
+                                            "${if (russian) "провайдер" else "provider"} $provider · " +
+                                            "${if (russian) "модель" else "model"} $model · " +
+                                            "${if (russian) "промпт" else "prompt"} $prompt · " +
+                                            "${if (russian) "алгоритм" else "algorithm"} $algorithm",
+                                            modifier = Modifier.testTag("receipt-item-review-source-${item.id}"))
                                     }
                                 }
                                 if (canWrite && editingItemId == item.id) {

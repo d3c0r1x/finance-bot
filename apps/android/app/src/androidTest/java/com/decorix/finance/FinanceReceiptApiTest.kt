@@ -335,6 +335,121 @@ class FinanceReceiptApiTest {
         assertEquals("еда", org.json.JSONObject(request.body.readUtf8()).getString("categoryCode"))
     }
 
+    @Test fun reviewReceiptBasketPostsAuthenticatedVersionedEmptyRequestAndParsesAdviceWithoutChangingMoney() {
+        val response = org.json.JSONObject(receiptJson())
+            .put("version", 5)
+            .put("cashTotal", "245.70")
+            .put("itemsTotal", "245.70")
+        val items = org.json.JSONArray()
+            .put(org.json.JSONObject()
+                .put("id", "item-rule-1").put("name", "Пиво безалкогольное")
+                .put("quantity", "1").put("unitPrice", "125.00").put("lineSum", "125.00")
+                .put("productKey", "pivo-bezalkogolnoe").put("provenance", "ocr")
+                .put("confidence", 0.92).put("categoryCode", "еда")
+                .put("verdict", "harmful").put("advice", "Ограничить покупку")
+                .put("reviewReason", "Правило исключает этот товар")
+                .put("reviewAction", "limit purchase").put("verdictSource", "rule")
+                .put("reviewProvider", "ollama").put("reviewModelVersion", "basket-test-v1")
+                .put("reviewPromptVersion", "receipt-basket.v1")
+                .put("reviewAlgorithmVersion", "receipt-basket-review.v1").put("version", 3))
+            .put(org.json.JSONObject()
+                .put("id", "item-model-2").put("name", "Хлеб")
+                .put("quantity", "1").put("unitPrice", "120.70").put("lineSum", "120.70")
+                .put("productKey", org.json.JSONObject.NULL).put("provenance", "ocr")
+                .put("confidence", org.json.JSONObject.NULL).put("categoryCode", "еда")
+                .put("verdict", "useful").put("advice", "Оставить в корзине")
+                .put("reviewReason", "Основной продукт").put("reviewAction", "keep")
+                .put("verdictSource", "model").put("reviewProvider", "ollama")
+                .put("reviewModelVersion", "basket-test-v1").put("reviewPromptVersion", "receipt-basket.v1")
+                .put("reviewAlgorithmVersion", "receipt-basket-review.v1").put("version", 4))
+        response.put("items", items).put("itemCount", 2)
+        server.enqueue(MockResponse().setBody(response.toString()))
+        val api = api()
+        api.saveTokens("receipt-writer-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val reviewed = api.reviewReceiptBasket("tenant-17", "receipt-42", 4)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/basket-review", request.path)
+        assertEquals("Bearer receipt-writer-token", request.getHeader("Authorization"))
+        assertEquals("\"4\"", request.getHeader("If-Match"))
+        assertEquals("", request.body.readUtf8())
+        assertEquals(5L, reviewed.version)
+        assertEquals("245.70", reviewed.cashTotal)
+        assertEquals("245.70", reviewed.itemsTotal)
+        assertEquals(2, reviewed.itemCount)
+        assertEquals("harmful", reviewed.items[0].verdict)
+        assertEquals("Ограничить покупку", reviewed.items[0].advice)
+        assertEquals("Правило исключает этот товар", reviewed.items[0].reviewReason)
+        assertEquals("limit purchase", reviewed.items[0].reviewAction)
+        assertEquals("rule", reviewed.items[0].verdictSource)
+        assertEquals("ollama", reviewed.items[0].reviewProvider)
+        assertEquals("basket-test-v1", reviewed.items[0].reviewModelVersion)
+        assertEquals("receipt-basket.v1", reviewed.items[0].reviewPromptVersion)
+        assertEquals("receipt-basket-review.v1", reviewed.items[0].reviewAlgorithmVersion)
+        assertEquals(3L, reviewed.items[0].version)
+        assertEquals("useful", reviewed.items[1].verdict)
+        assertEquals("model", reviewed.items[1].verdictSource)
+        assertEquals("120.70", reviewed.items[1].lineSum)
+    }
+
+    @Test fun reviewReceiptBasketPreservesConflictAndStaleVersionFailures() {
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""{"detail":"receipt_not_editable"}"""))
+        server.enqueue(MockResponse().setResponseCode(412).setBody("""{"detail":"stale_version"}"""))
+        val api = api()
+        api.saveTokens("receipt-writer-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val conflict = runCatching { api.reviewReceiptBasket("tenant-17", "receipt-42", 4) }.exceptionOrNull()
+        val stale = runCatching { api.reviewReceiptBasket("tenant-17", "receipt-42", 4) }.exceptionOrNull()
+
+        assertTrue("Basket-review 409 must remain an API failure", conflict is ApiFailure)
+        assertEquals(409, (conflict as ApiFailure).status)
+        assertTrue("Basket-review 412 must remain an API failure", stale is ApiFailure)
+        assertEquals(412, (stale as ApiFailure).status)
+        repeat(2) {
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/basket-review", request.path)
+            assertEquals("Bearer receipt-writer-token", request.getHeader("Authorization"))
+            assertEquals("\"4\"", request.getHeader("If-Match"))
+            assertEquals("", request.body.readUtf8())
+        }
+    }
+
+    @Test fun reviewReceiptBasketPreservesGatewayAndServiceUnavailableFailures() {
+        listOf(502, 503).forEach { status ->
+            server.enqueue(MockResponse().setResponseCode(status).setBody("""{"detail":"temporary_upstream_failure"}"""))
+        }
+        val api = api()
+        api.saveTokens("receipt-writer-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        listOf(502, 503).forEach { status ->
+            val failure = runCatching { api.reviewReceiptBasket("tenant-17", "receipt-42", 4) }.exceptionOrNull()
+            assertTrue("Basket-review HTTP $status must remain an API failure", failure is ApiFailure)
+            assertEquals(status, (failure as ApiFailure).status)
+            assertTrue(failure.message.orEmpty().contains("temporary_upstream_failure"))
+
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("POST", request.method)
+            assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/basket-review", request.path)
+            assertEquals("Bearer receipt-writer-token", request.getHeader("Authorization"))
+            assertEquals("\"4\"", request.getHeader("If-Match"))
+            assertEquals("", request.body.readUtf8())
+        }
+    }
+
+    @Test fun reviewReceiptBasketRejectsNonpositiveExpectedVersionBeforeRequest() {
+        val api = api()
+
+        val zeroVersion = runCatching { api.reviewReceiptBasket("tenant-17", "receipt-42", 0) }.exceptionOrNull()
+        val negativeVersion = runCatching { api.reviewReceiptBasket("tenant-17", "receipt-42", -1) }.exceptionOrNull()
+
+        assertTrue("A zero basket-review version must be rejected locally", zeroVersion is IllegalArgumentException)
+        assertTrue("A negative basket-review version must be rejected locally", negativeVersion is IllegalArgumentException)
+        assertNull("Invalid versions must not send a request", server.takeRequest(200, TimeUnit.MILLISECONDS))
+    }
+
     @Test fun receiptItemsFetchesOrderedPagesOfEightWithExactValuesAndOwnerAuthorization() {
         val pageOneItems = (1..8).map(::receiptItemJson)
         val pageTwoItems = listOf(receiptItemJson(9))

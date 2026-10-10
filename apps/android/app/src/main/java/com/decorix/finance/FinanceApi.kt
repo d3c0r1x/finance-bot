@@ -191,6 +191,15 @@ class FinanceApi internal constructor(
         )))
     }
 
+    fun reviewReceiptBasket(tenantId: String, receiptId: String, expectedVersion: Long): FinanceReceipt {
+        require(expectedVersion > 0) { "Invalid receipt version" }
+        val emptyBody = ByteArray(0).toRequestBody("application/json".toMediaType())
+        return FinanceModels.receipt(JSONObject(executeRequest(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/basket-review", "POST",
+            emptyBody, ifMatchVersion = expectedVersion,
+        )))
+    }
+
     fun transactions(tenantId: String, search: String = "", type: String = "all", cursor: String? = null,
                      from: String? = null, to: String? = null, memberId: String? = null): FinanceTransactionPage {
         val filters = FinanceModels.transactionQuery(cursor = cursor, from = from, to = to,
