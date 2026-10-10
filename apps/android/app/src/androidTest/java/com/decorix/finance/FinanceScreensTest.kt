@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -475,6 +476,29 @@ class FinanceScreensTest {
         compose.onNodeWithTag("onboarding-budget-apply").assertIsDisplayed()
         compose.onNodeWithTag("onboarding-budget-keep").assertIsDisplayed()
         assertEquals(emptyList<String>(), applied)
+    }
+
+    @Test fun budgetProposalPreviewShowsCoreAmountsInRussianAndEnglishUntilExplicitApply() {
+        var applied = emptyList<String>()
+        reachOnboardingBudgetChoice(applied = { applied = applied + it })
+
+        compose.onNodeWithTag("onboarding-budget-proposal-total")
+            .assertTextContains("Предложенный общий лимит: 70 000,00 ₽")
+        compose.onNodeWithText("еда · 20 000,00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Предложение не меняет лимиты. Примените его только если суммы вам подходят.")
+            .assertIsDisplayed()
+        assertEquals(emptyList<String>(), applied)
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("onboarding-budget-proposal-total")
+            .assertTextContains("Suggested total limit: 70,000.00 RUB")
+        compose.onNodeWithText("20,000.00 RUB", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("This suggestion does not change your limits. Apply it only if the amounts work for you.")
+            .assertIsDisplayed()
+        assertEquals(emptyList<String>(), applied)
+
+        compose.onNodeWithTag("onboarding-budget-apply").performClick()
+        assertEquals(listOf("proposal-7"), applied)
     }
 
     @Test fun keepingBudgetProposalNeverAppliesItAndApplyRequiresExplicitTap() {

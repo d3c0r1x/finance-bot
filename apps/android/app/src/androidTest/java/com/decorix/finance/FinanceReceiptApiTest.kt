@@ -951,6 +951,60 @@ class FinanceReceiptApiTest {
         assertEquals(listOf(applyKey, applyKey), applyRequests.map { it.getHeader("Idempotency-Key") })
     }
 
+    @Test fun budgetProposalUsesCoreAmountsAndCreationDoesNotApplyThem() {
+        server.enqueue(MockResponse().setBody("""
+            {"id":"proposal-core","monthlyIncome":"100000.00","totalLimit":"70000.00",
+             "limits":{"food":"21345.67"},"status":"pending","proposalSource":"income",
+             "historyDays":0,"modelVersion":null}
+        """.trimIndent()))
+
+        val api = api()
+        val proposal = api.proposeBudget("tenant-17", "100000.00", "budget-preview-key-0001")
+
+        assertEquals("70000.00", proposal.totalLimit)
+        assertEquals(mapOf("food" to "21345.67"), proposal.limits)
+        assertEquals("pending", proposal.status)
+        assertEquals(1, server.requestCount)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/budget-proposals", request.path)
+        assertEquals("budget-preview-key-0001", request.getHeader("Idempotency-Key"))
+        assertEquals("{\"monthlyIncome\":\"100000.00\"}", request.body.readUtf8())
+        assertNull("Proposal creation must not issue a budget mutation", server.takeRequest(100, TimeUnit.MILLISECONDS))
+    }
+
+    @Test fun historyProposalEligibilityAndThirtyDayThresholdComeFromCoreResponse() {
+        server.enqueue(MockResponse().setBody("""
+            {"id":"proposal-30d","monthlyIncome":"100000.00","totalLimit":"70000.00",
+             "limits":{"food":"21000.00"},"status":"pending","proposalSource":"history",
+             "historyDays":30,"modelVersion":"budget-proposal.v1"}
+        """.trimIndent()))
+        server.enqueue(MockResponse().setResponseCode(409).setBody("""
+            {"type":"about:blank","title":"Conflict","status":409,"detail":"At least 30 days of history are required"}
+        """.trimIndent()))
+
+        val api = api()
+        val eligible = api.proposeBudgetFromHistory("tenant-17", "budget-history-30d-0001")
+        assertEquals(30, eligible.historyDays)
+        assertEquals("70000.00", eligible.totalLimit)
+        val acceptedRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", acceptedRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/budget-proposals/history", acceptedRequest.path)
+
+        val failure = try {
+            api.proposeBudgetFromHistory("tenant-17", "budget-history-under-30-0001")
+            null
+        } catch (error: ApiFailure) {
+            error
+        }
+        assertNotNull("Core must decide and report when history is below 30 days", failure)
+        assertEquals(409, requireNotNull(failure).status)
+        val rejectedRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", rejectedRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/budget-proposals/history", rejectedRequest.path)
+        assertEquals(2, server.requestCount)
+    }
+
     @Test fun personalBudgetUpdateSendsScopeAmountPeriodVersionAndParsesEffectiveOverride() {
         server.enqueue(MockResponse().setBody(budgetOverviewJson(
             personalOverrides = """{"food":"18000.25"}""",
