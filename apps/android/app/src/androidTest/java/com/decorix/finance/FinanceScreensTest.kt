@@ -150,6 +150,24 @@ class FinanceScreensTest {
         assertEquals("debt-1", forecastDebtId)
     }
 
+    @Test fun postedDebtPaymentCanBeVoidedAndPassesCoreTransactionToHandler() {
+        var voided: FinanceTransaction? = null
+        val payment = transaction().copy(
+            id = "debt-payment-1", type = "debt_payment", categoryCode = "долги", debtId = "debt-1",
+            amount = "1200.00", description = "Платёж по долгу",
+        )
+        show(
+            FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), transactions = listOf(payment)),
+            onVoidTransaction = { voided = it },
+        )
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
+        compose.onNodeWithTag("transaction-void-debt-payment-1").performScrollTo().performClick()
+
+        assertEquals(payment, voided)
+    }
+
     @Test fun rollingFoodStatusUsesSameCoreWindowAmountsAndStatusesAcrossScreensInRussianAndEnglish() {
         val food = RollingFoodStatus(
             fromDate = "2026-10-02", toDate = "2026-10-08", limit = "1000.00", spent = "950.00",

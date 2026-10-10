@@ -96,6 +96,34 @@ class FinanceReceiptApiTest {
         }
     }
 
+    @Test fun voidingDebtPaymentUsesVersionedTenantTransactionEndpoint() {
+        server.enqueue(MockResponse().setBody(
+            """{"id":"debt-payment-1","tenantId":"tenant-17","type":"debt_payment","amount":"1200.00","currency":"RUB","categoryCode":"долги","subcategoryCode":null,"description":"Debt payment","source":"manual","occurredAt":"2026-10-10T12:00:00Z","accountId":null,"status":"voided","version":6,"createdAt":"2026-10-10T12:00:00Z","memberName":"User","debtId":"debt-22","ownerUserId":"user-17"}""",
+        ))
+        val api = api().also {
+            it.saveTokens("access-token", "refresh-token", System.currentTimeMillis() + 60_000)
+        }
+        val payment = FinanceTransaction(
+            id = "debt-payment-1", tenantId = "tenant-17", type = "debt_payment", amount = "1200.00",
+            currency = "RUB", categoryCode = "долги", subcategoryCode = null, description = "Debt payment",
+            source = "manual", occurredAt = "2026-10-10T12:00:00Z", accountId = null,
+            status = "posted", version = 5, createdAt = "2026-10-10T12:00:00Z", memberName = "User",
+            debtId = "debt-22", ownerUserId = "user-17",
+        )
+
+        val voided = api.voidTransaction("tenant-17", payment)
+
+        assertEquals("voided", voided.status)
+        assertEquals(6L, voided.version)
+        assertEquals("debt-22", voided.debtId)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/transactions/debt-payment-1/void", request.path)
+        assertEquals("{}", request.body.readUtf8())
+        assertEquals("\"5\"", request.getHeader("If-Match"))
+        assertUuidIdempotencyKey(request)
+    }
+
     @Test fun photoUploadRefreshesAfter401AndReplaysSameMultipartFileAndKey() {
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"expired"}"""))
         server.enqueue(MockResponse().setBody("""{"access_token":"fresh-token","refresh_token":"refresh-next","expires_in":300}"""))

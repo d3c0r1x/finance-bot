@@ -1850,3 +1850,11 @@ Updated: 2026-10-11, Europe/Moscow.
 - Independent review found no production blocker. Android F27 remains PARTIAL because live authenticated Android-to-Core OIDC and tenant-isolation E2E are not tested; Core atomicity and duplicate-payment behavior remain covered by the existing PostgreSQL acceptance suite. Full F59 parity remains open.
 - Commit: `b771eb3` (`feat(F27): show Android debt terms`). F27 implementation, tests and parity evidence are committed; this progress SHA record is a post-commit update. Push after recording it.
 - Next: continue F59 on the next approved Android parity gap; leave pre-existing user-owned untracked files untouched.
+
+## F59.3 F28 Android debt-payment reversal evidence — GREEN; COMMIT_PENDING — 2026-10-11 02:50 MSK
+
+- Scope: verify Android exposes cancellation for posted debt-payment transactions and sends the exact Core transaction into the existing void handler. Core owns the versioned reversal and audit; no balance math moves to Android.
+- Verification: test-only goal because the generic transaction void route and debt balance refresh already exist. Added Compose coverage that scrolls to the debt-payment history row and asserts its ID, debt ID, version, amount and type reach the void callback. Added MockWebServer coverage for tenant/transaction-scoped POST, empty body, quoted If-Match, UUID Idempotency-Key, and Core's `voided` response. First UI run showed the LazyColumn row was not composed until scrolling to history index 3; corrected test navigation, then focused Android API 27 UI/API checks passed 2/2.
+- Core PostgreSQL evidence remains the authoritative proof of exact principal restoration (including capped overpayment) and audit behavior; these Android mocks do not claim to prove that server behavior or live OIDC integration.
+- Android `:app:assembleDebugAndroidTest` passes. F28 Android remains PARTIAL pending a live authenticated Android/Core reversal and refreshed-balance E2E. F27's full 220-test instrumentation, focused F27 8/8, JVM 35/35, and contracts 78/2 remain the prior verified regression baseline.
+- Next: validate the parity contracts, commit the two F28 test files plus this status, then push; preserve unrelated worktree files.

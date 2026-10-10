@@ -590,7 +590,9 @@ features:
       scenario: "Android counterpart for F28: Правка остатка долга через панель, возврат при отмене платежа"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F28 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+      evidence: "Android shows the void action for a posted debt-payment transaction and forwards that exact Core transaction to the handler. MockWebServer verifies tenant/transaction-scoped void endpoint, quoted If-Match, UUID Idempotency-Key, and the returned voided transaction. Existing Core PostgreSQL acceptance verifies exact principal restoration, including capped overpayment. Focused API 27 Android UI/API checks 2/2 pass."
+      gap: "MockWebServer does not verify live Android-to-Core authentication or observe debt balance restoration after a real payment reversal; live authenticated OIDC/tenant E2E remains unverified."
     intentional_differences: []
   - id: F29
     feature: "Прогноз погашения с процентами; `services/analytics.py`"
