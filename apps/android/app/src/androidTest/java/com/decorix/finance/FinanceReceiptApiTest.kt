@@ -951,6 +951,72 @@ class FinanceReceiptApiTest {
         assertEquals(listOf(applyKey, applyKey), applyRequests.map { it.getHeader("Idempotency-Key") })
     }
 
+    @Test fun personalBudgetUpdateSendsScopeAmountPeriodVersionAndParsesEffectiveOverride() {
+        server.enqueue(MockResponse().setBody(budgetOverviewJson(
+            personalOverrides = """{"food":"18000.25"}""",
+            effectiveLimits = """{"food":"18000.25"}""",
+            personalVersions = """{"food":5}""",
+        )))
+        val api = api()
+        api.saveTokens("budget-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val result = api.updateBudget("tenant-17", "food", "personal", " 18000,25 ", "monthly", 4)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PUT", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/budgets/food", request.path)
+        assertEquals("Bearer budget-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"4\"", request.getHeader("If-Match"))
+        assertTrue("A personal budget mutation must be idempotent", request.getHeader("Idempotency-Key")
+            ?.matches(Regex("[0-9a-fA-F-]{36}")) == true)
+        assertEquals(
+            """{"scope":"personal","amount":"18000.25","period":"monthly"}""",
+            request.body.readUtf8(),
+        )
+        assertEquals(mapOf("food" to "20000.00"), result.familyLimits)
+        assertEquals(mapOf("food" to "18000.25"), result.personalOverrides)
+        assertEquals(mapOf("food" to "18000.25"), result.effectiveLimits)
+        assertEquals(mapOf("food" to 1L), result.familyVersions)
+        assertEquals(mapOf("food" to 5L), result.personalVersions)
+    }
+
+    @Test fun personalBudgetResetDeletesOverridesAndParsesFamilyInheritance() {
+        server.enqueue(MockResponse().setBody(budgetOverviewJson()))
+        val api = api()
+        api.saveTokens("budget-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val result = api.resetPersonalBudgets("tenant-17")
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("DELETE", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/budgets/personal-overrides", request.path)
+        assertEquals("Bearer budget-owner-token", request.getHeader("Authorization"))
+        assertTrue("Resetting personal budgets must be idempotent", request.getHeader("Idempotency-Key")
+            ?.matches(Regex("[0-9a-fA-F-]{36}")) == true)
+        assertNull(request.getHeader("If-Match"))
+        assertEquals("", request.body.readUtf8())
+        assertEquals(mapOf("food" to "20000.00"), result.familyLimits)
+        assertTrue(result.personalOverrides.isEmpty())
+        assertEquals(mapOf("food" to "20000.00"), result.effectiveLimits)
+        assertEquals(1L, result.familyVersions["food"])
+    }
+
+    @Test fun familyMonthlyReportUsesFamilyEndpointAndPreservesCoreBudgetAmounts() {
+        server.enqueue(MockResponse().setBody(familyReportJson()))
+        val api = api()
+        api.saveTokens("report-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val report = api.report("tenant-17", "month", "family", "2026-10", "", "")
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/reports/family?period=month&month=2026-10", request.path)
+        assertEquals("Bearer report-owner-token", request.getHeader("Authorization"))
+        assertEquals("family", report.scope)
+        assertEquals("50000.00", report.monthlyBudgetLimit)
+        assertEquals("-14000.50", report.monthlyBudgetRemaining)
+    }
+
     @Test fun laterTenantCreateRecoversCommittedTenantBeforePostingAgain() {
         val listRequests = AtomicInteger()
         val createRequests = AtomicInteger()
@@ -1274,10 +1340,14 @@ class FinanceReceiptApiTest {
          "historyDays":90,"modelVersion":null}
     """.trimIndent()
 
-    private fun budgetOverviewJson() = """
+    private fun budgetOverviewJson(
+        personalOverrides: String = "{}",
+        effectiveLimits: String = """{"food":"20000.00"}""",
+        personalVersions: String = "{}",
+    ) = """
         {"currency":"RUB","month":"2026-10","familyLimits":{"food":"20000.00"},
-         "personalOverrides":{},"effectiveLimits":{"food":"20000.00"},"monthlySpent":{"food":"0.00"},
-         "limitStatus":{"food":"normal"},"familyVersions":{"food":1},"personalVersions":{},
+         "personalOverrides":$personalOverrides,"effectiveLimits":$effectiveLimits,"monthlySpent":{"food":"0.00"},
+         "limitStatus":{"food":"normal"},"familyVersions":{"food":1},"personalVersions":$personalVersions,
          "familyTotalLimit":"50000.00","personalTotalOverride":null,"effectiveTotalLimit":"50000.00",
          "totalMonthlySpent":"0.00","totalLimitStatus":"normal","familyTotalVersion":1,
          "personalTotalVersion":0,"rolling7FoodLimit":"1000.00","personalRolling7FoodOverride":null,
@@ -1286,5 +1356,19 @@ class FinanceReceiptApiTest {
          "rolling7FoodStatus":{"fromDate":"2026-09-25","toDate":"2026-10-01","limit":"1000.00",
            "spent":"0.00","remaining":"1000.00","limitStatus":"normal","usualWeeklySpend":null,
            "historyWeeks":0,"paceStatus":"insufficient_history","paceShare":null}}
+    """.trimIndent()
+
+    private fun familyReportJson() = """
+        {"period":"month","scope":"family","fromDate":"2026-10-01","toDate":"2026-10-10",
+         "asOfDate":"2026-10-10","timezone":"Europe/Moscow","currency":"RUB",
+         "incomeTotal":"120000.00","expenseTotal":"64000.50","debtPaymentTotal":"3000.00",
+         "refundTotal":"250.00","transactionCount":12,"expenseByCategory":{},"expenseByDay":{},
+         "weekendSharePercent":null,"monthlyBudgetLimit":"50000.00","monthlyBudgetRemaining":"-14000.50",
+         "rolling7FoodStatus":{"fromDate":"2026-10-04","toDate":"2026-10-10","limit":"1000.00",
+           "spent":"350.25","remaining":"649.75","limitStatus":"normal","usualWeeklySpend":null,
+           "historyWeeks":0,"paceStatus":"insufficient_history","paceShare":null},
+         "waste":{"available":false,"reasonCode":"missing_amounts","completeness":"partial",
+           "reviewedSpend":null,"optionalSpend":null,"optionalShare":null,"reviewedItemCount":0,
+           "optionalItemCount":0,"missingAmountCount":0,"bySource":{},"optionalByDay":{},"topItems":[],"corrected":[]}}
     """.trimIndent()
 }

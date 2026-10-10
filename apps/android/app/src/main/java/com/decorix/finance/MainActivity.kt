@@ -86,6 +86,7 @@ class MainActivity : ComponentActivity() {
     private val receiptBasketReviewGeneration = AtomicLong(0L)
     private val receiptDisputedItemsGeneration = AtomicLong(0L)
     private val receiptRepeatWarningsGeneration = AtomicLong(0L)
+    private val reportRequestGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -1733,13 +1734,35 @@ class MainActivity : ComponentActivity() {
 
     private fun loadReport(period: String, scope: String, month: String, from: String, to: String) {
         val tenantId = activeTenantId()
+        val requestGeneration = reportRequestGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
         ui = ui.copy(busy = true, error = null)
         executor.execute {
             runCatching { api.report(tenantId, period, scope, month, from, to) }
-                .onSuccess { report -> ui = ui.copy(busy = false, report = report) }
+                .onSuccess { report ->
+                    if (ReportResponsePolicy.canApply(
+                            requestTenantId = tenantId,
+                            activeTenantId = ui.tenants.firstOrNull()?.id,
+                            authenticated = ui.authenticated,
+                            requestGeneration = requestGeneration,
+                            currentRequestGeneration = reportRequestGeneration.get(),
+                            sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
+                        )) {
+                        ui = ui.copy(busy = false, report = report)
+                    }
+                }
                 .onFailure { error ->
-                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
-                    else ui = ui.copy(busy = false, error = error.message ?: "Request failed")
+                    if (ReportResponsePolicy.canApply(
+                            requestTenantId = tenantId,
+                            activeTenantId = ui.tenants.firstOrNull()?.id,
+                            authenticated = ui.authenticated,
+                            requestGeneration = requestGeneration,
+                            currentRequestGeneration = reportRequestGeneration.get(),
+                            sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
+                        )) {
+                        if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                        else ui = ui.copy(busy = false, error = error.message ?: "Request failed")
+                    }
                 }
         }
     }
@@ -2616,7 +2639,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onRetry = onPersonalInflationLoad)
                     "recurring" -> RecurringScreen(Modifier.weight(1f), state, language, onRetry = onRecurringLoad,
                         onRecurringDecision = onRecurringDecision)
-                    "budgets" -> BudgetScreen(state, language, onBudgetUpdate, onBudgetReset, onBudgetProposal, onBudgetApply)
+                    "budgets" -> BudgetScreen(Modifier.weight(1f), state, language, onBudgetUpdate, onBudgetReset,
+                        onBudgetProposal, onBudgetApply)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad)
                     "profile" -> ProfileScreen(Modifier.weight(1f), state, language, onProfileSave,
@@ -4966,7 +4990,9 @@ private fun ReportScreen(state: FinanceUiState, language: String,
     val russian = language == "ru"
     val initialMonth = state.report?.fromDate?.take(7) ?: YearMonth.now().toString()
     var period by androidx.compose.runtime.remember { mutableStateOf("month") }
-    var scope by androidx.compose.runtime.remember { mutableStateOf("personal") }
+    var scope by androidx.compose.runtime.remember {
+        mutableStateOf(if (state.report?.scope == "family") "family" else "personal")
+    }
     var month by androidx.compose.runtime.remember { mutableStateOf(initialMonth) }
     var from by androidx.compose.runtime.remember { mutableStateOf(YearMonth.now().atDay(1).toString()) }
     var to by androidx.compose.runtime.remember { mutableStateOf(LocalDate.now().toString()) }
@@ -5142,7 +5168,7 @@ private fun normalizedIncomeInput(value: String): String? {
 }
 
 @androidx.compose.runtime.Composable
-private fun BudgetScreen(state: FinanceUiState, language: String,
+private fun BudgetScreen(modifier: Modifier, state: FinanceUiState, language: String,
                          onUpdate: (String, String, String, String, Long) -> Unit,
                          onReset: () -> Unit, onPropose: (String?) -> Unit, onApply: (String) -> Unit) {
     val russian = language == "ru"
@@ -5161,16 +5187,35 @@ private fun BudgetScreen(state: FinanceUiState, language: String,
         Text(if (russian) "Бюджет пока не загружен" else "Budget is not loaded")
         return
     }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val familyScope = scope == "family"
+    val displayedTotalLimit = if (familyScope) budget.familyTotalLimit else budget.effectiveTotalLimit
+    val displayedCategoryLimits = if (familyScope) budget.familyLimits else budget.effectiveLimits
+    val rollingFoodLimit = if (familyScope) budget.rolling7FoodLimit else budget.rolling7FoodStatus.limit
+    val rollingFoodStatus = if (familyScope) "" else " · ${formatSemanticStatus("paceStatus", budget.rolling7FoodStatus.paceStatus, language)}"
+    val totalLimitStatus = if (familyScope) "" else " · ${formatSemanticStatus("limitStatus", budget.totalLimitStatus, language)}"
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (russian) "Лимиты · ${budget.month}" else "Limits · ${budget.month}", style = MaterialTheme.typography.titleLarge)
-        Text(if (russian) "Расход еды за 7 дней: " +
-            "${formatMoney(budget.rolling7FoodStatus.spent, language)} / " +
-            "${formatMoney(budget.rolling7FoodStatus.limit, language)} · " +
-            formatSemanticStatus("paceStatus", budget.rolling7FoodStatus.paceStatus, language)
-            else "Food over 7 days: " +
+        Text(if (familyScope) {
+            if (russian) "Семейный лимит за месяц: ${formatMoney(displayedTotalLimit, language)}"
+            else "Family monthly limit: ${formatMoney(displayedTotalLimit, language)}"
+        } else {
+            if (russian) "Лимит за месяц: ${formatMoney(displayedTotalLimit, language)} · потрачено " +
+                "${formatMoney(budget.totalMonthlySpent, language)}$totalLimitStatus"
+            else "Monthly limit: ${formatMoney(displayedTotalLimit, language)} · spent " +
+                "${formatMoney(budget.totalMonthlySpent, language)}$totalLimitStatus"
+        })
+        if (familyScope) {
+            Text(if (russian) "Семейный лимит еды за 7 дней: ${formatMoney(rollingFoodLimit, language)}"
+                else "Family 7-day food limit: ${formatMoney(rollingFoodLimit, language)}")
+        } else {
+            Text(if (russian) "Расход еды за 7 дней: " +
                 "${formatMoney(budget.rolling7FoodStatus.spent, language)} / " +
-                "${formatMoney(budget.rolling7FoodStatus.limit, language)} · " +
-                formatSemanticStatus("paceStatus", budget.rolling7FoodStatus.paceStatus, language))
+                "${formatMoney(rollingFoodLimit, language)}$rollingFoodStatus"
+                else "Food over 7 days: " +
+                    "${formatMoney(budget.rolling7FoodStatus.spent, language)} / " +
+                    "${formatMoney(rollingFoodLimit, language)}$rollingFoodStatus")
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = { scope = "family" }) { Text(if (russian) "Семейный" else "Family") }
             TextButton(onClick = { scope = "personal" }) { Text(if (russian) "Личный" else "Personal") }
@@ -5221,24 +5266,20 @@ private fun BudgetScreen(state: FinanceUiState, language: String,
             Text(if (russian) "Предложен лимит ${formatMoney(proposal.totalLimit, language)} · ${proposal.proposalSource} · ${proposal.historyDays} дн."
             else "Suggested total ${formatMoney(proposal.totalLimit, language)} · ${proposal.proposalSource} · ${proposal.historyDays} days")
         }
-        Text(if (russian) "Лимит за месяц: ${formatMoney(budget.effectiveTotalLimit, language)} · потрачено " +
-            "${formatMoney(budget.totalMonthlySpent, language)} · " +
-            formatSemanticStatus("limitStatus", budget.totalLimitStatus, language)
-            else "Monthly limit: ${formatMoney(budget.effectiveTotalLimit, language)} · spent " +
-                "${formatMoney(budget.totalMonthlySpent, language)} · " +
-                formatSemanticStatus("limitStatus", budget.totalLimitStatus, language))
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(budget.effectiveLimits.toSortedMap().entries.toList()) { entry ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(entry.key, style = MaterialTheme.typography.titleMedium)
-                        val status = budget.limitStatus[entry.key] ?: "disabled"
-                        Text(if (russian) "Действует ${formatMoney(entry.value, language)} · потрачено " +
-                            "${formatMoney(budget.monthlySpent[entry.key] ?: "0.00", language)} · " +
-                            formatSemanticStatus("limitStatus", status, language)
-                            else "Effective ${formatMoney(entry.value, language)} · spent " +
-                                "${formatMoney(budget.monthlySpent[entry.key] ?: "0.00", language)} · " +
-                                formatSemanticStatus("limitStatus", status, language))
+        displayedCategoryLimits.toSortedMap().forEach { (key, limit) ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(key, style = MaterialTheme.typography.titleMedium)
+                    if (familyScope) {
+                        Text(if (russian) "Семейный лимит: ${formatMoney(limit, language)}"
+                            else "Family limit: ${formatMoney(limit, language)}")
+                    } else {
+                        val status = budget.limitStatus[key] ?: "disabled"
+                        val statusSuffix = " · ${formatSemanticStatus("limitStatus", status, language)}"
+                        Text(if (russian) "Действует ${formatMoney(limit, language)} · потрачено " +
+                            "${formatMoney(budget.monthlySpent[key] ?: "0.00", language)}$statusSuffix"
+                            else "Effective ${formatMoney(limit, language)} · spent " +
+                                "${formatMoney(budget.monthlySpent[key] ?: "0.00", language)}$statusSuffix")
                     }
                 }
             }

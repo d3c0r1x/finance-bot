@@ -454,7 +454,10 @@ features:
       scenario: "Android counterpart for F22: Семейные и личные месячные лимиты, общий лимит, reset"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F22 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+        - "apps/android/app/src/test/java/com/decorix/finance/FinanceReportResponsePolicyTest.kt"
+      gap: "Live authenticated Android-to-Core OIDC E2E remains unverified; local API and UI tests use synthetic fixtures."
+      evidence: "Android explicitly labels family monthly/category/rolling limits and never presents one member's spending/status as family data; personal mode retains Core effective values and status. The full budget screen scrolls on Android 6-8. Tests cover RU/EN family display, family and personal category/total version routing, inheritance/reset, viewer denial, family report scope/limit/remaining, and stale report response protection. Android JVM 34/34, API-27 instrumentation 40/40, six focused Compose cases, APK builds/install/launch, and parity contracts 60/60 pass. Fixtures are synthetic."
     intentional_differences: []
   - id: F23
     feature: "Бюджет по доходу: 70%, округление; AI-предложение при ≥30 днях"

@@ -55,12 +55,114 @@ class FinanceScreensTest {
 
         compose.onNodeWithText("Бюджеты").performClick()
         compose.onNodeWithText("Лимиты · 2026-10").assertIsDisplayed()
+        compose.onNodeWithText("Семейный лимит еды за 7 дней: 1 000,00 ₽").assertIsDisplayed()
+        compose.onNodeWithText("Личный").performClick()
         compose.onNodeWithText("Расход еды за 7 дней: 350,25 ₽ / 1 000,00 ₽ · Недостаточно истории").assertIsDisplayed()
 
         compose.onNodeWithText("Долги").performScrollTo().performClick()
         compose.onNodeWithText("Кредитная карта").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Записать платёж").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Прогноз выплаты").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun personalBudgetOverrideUsesPersonalVersionAndShowsInheritedCategories() {
+        var update: List<String>? = null
+        var resets = 0
+        val budgets = budget().copy(
+            familyLimits = mapOf("еда" to "20000.00", "транспорт" to "10000.00"),
+            personalOverrides = mapOf("еда" to "18000.00"),
+            effectiveLimits = mapOf("еда" to "18000.00", "транспорт" to "10000.00"),
+            monthlySpent = mapOf("еда" to "350.25", "транспорт" to "25.00"),
+            limitStatus = mapOf("еда" to "normal", "транспорт" to "normal"),
+            familyVersions = mapOf("еда" to 7L, "транспорт" to 2L),
+            personalVersions = mapOf("еда" to 3L),
+            familyTotalLimit = "50000.00", effectiveTotalLimit = "50000.00",
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budgets),
+            onBudgetUpdate = { key, scope, amount, period, version ->
+                update = listOf(key, scope, amount, period, version.toString())
+            }, onBudgetReset = { resets++ })
+
+        compose.onNodeWithText("Бюджеты").performClick()
+        compose.onNodeWithText("Личный").performClick()
+        compose.onNodeWithText("Лимит за месяц: 50 000,00 ₽", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Действует 18 000,00 ₽", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Действует 10 000,00 ₽", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Категория или __total__").performTextReplacement("еда")
+        compose.onNodeWithText("Лимит, ₽").performTextInput("17500.00")
+        compose.onNodeWithText("Сохранить лимит").performClick()
+
+        assertEquals(listOf("еда", "personal", "17500.00", "monthly", "3"), update)
+        compose.onNodeWithText("Сбросить личные").performClick()
+        assertEquals(1, resets)
+    }
+
+    @Test fun personalTotalBudgetUsesPersonalTotalVersion() {
+        var update: List<String>? = null
+        val budgets = budget().copy(personalTotalOverride = "45000.00", effectiveTotalLimit = "45000.00",
+            personalTotalVersion = 9L)
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budgets),
+            onBudgetUpdate = { key, scope, amount, period, version ->
+                update = listOf(key, scope, amount, period, version.toString())
+            })
+
+        compose.onNodeWithText("Бюджеты").performClick()
+        compose.onNodeWithText("Личный").performClick()
+        compose.onNodeWithText("Лимит за месяц: 45 000,00 ₽", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Лимит, ₽").performTextInput("43000.00")
+        compose.onNodeWithText("Сохранить лимит").performClick()
+
+        assertEquals(listOf("__total__", "personal", "43000.00", "monthly", "9"), update)
+    }
+
+    @Test fun familyBudgetScopeShowsFamilyTotalsAndCategoryLimits() {
+        val updates = mutableListOf<List<String>>()
+        val budgets = budget().copy(
+            familyLimits = mapOf("еда" to "20000.00", "транспорт" to "10000.00"),
+            personalOverrides = mapOf("еда" to "18000.00", "транспорт" to "8000.00"),
+            effectiveLimits = mapOf("еда" to "18000.00", "транспорт" to "8000.00"),
+            familyTotalLimit = "50000.00",
+            personalTotalOverride = "45000.00",
+            effectiveTotalLimit = "45000.00",
+            familyVersions = mapOf("еда" to 7L, "транспорт" to 2L),
+            familyTotalVersion = 11L,
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), budgets = budgets),
+            onBudgetUpdate = { key, scope, amount, period, version ->
+                updates += listOf(key, scope, amount, period, version.toString())
+            })
+
+        compose.onNodeWithText("Бюджеты").performClick()
+        compose.onNodeWithText("Личный").performClick()
+        compose.onNodeWithText("Семейный").performClick()
+
+        compose.onNodeWithText("Семейный лимит за месяц: 50 000,00 ₽")
+            .assertIsDisplayed()
+        compose.onNodeWithText("Семейный лимит: 20 000,00 ₽", substring = true)
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Семейный лимит: 10 000,00 ₽", substring = true)
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Семейный лимит за месяц: 50 000,00 ₽ · потрачено", substring = true)
+            .assertDoesNotExist()
+        compose.onNodeWithText("Семейный лимит: 20 000,00 ₽ · потрачено", substring = true)
+            .assertDoesNotExist()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Family monthly limit: 50,000.00 RUB", substring = true)
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Family limit: 20,000.00 RUB", substring = true)
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Family 7-day food limit: 1,000.00 RUB")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("RU").performClick()
+
+        compose.onNodeWithText("Лимит, ₽").performScrollTo().performTextReplacement("52000.00")
+        compose.onNodeWithText("Сохранить лимит").performScrollTo().performClick()
+        assertEquals(listOf("__total__", "family", "52000.00", "monthly", "11"), updates[0])
+        compose.onNodeWithText("Категория или __total__").performScrollTo().performTextReplacement("еда")
+        compose.onNodeWithText("Лимит, ₽").performScrollTo().performTextReplacement("22000.00")
+        compose.onNodeWithText("Сохранить лимит").performScrollTo().performClick()
+        assertEquals(listOf("еда", "family", "22000.00", "monthly", "7"), updates[1])
     }
 
     @Test fun shoppingSuggestionsAreLocalizedAndNeverPresentedAsInventory() {
@@ -254,7 +356,12 @@ class FinanceScreensTest {
         compose.onNodeWithText("Бюджеты").performClick()
         compose.onNodeWithText("Лимит, ₽").assertIsNotEnabled()
         compose.onNodeWithText("Сохранить лимит").assertIsNotEnabled()
-        compose.onNodeWithText("У вас нет прав изменять этот бюджет").assertIsDisplayed()
+        compose.onNodeWithText("У вас нет прав изменять этот бюджет").performScrollTo().assertIsDisplayed()
+
+        compose.onNodeWithText("Личный").performClick()
+        compose.onNodeWithText("Лимит, ₽").assertIsNotEnabled()
+        compose.onNodeWithText("Сохранить лимит").assertIsNotEnabled()
+        compose.onNodeWithText("Сбросить личные").performScrollTo().assertIsNotEnabled()
     }
 
     @Test fun onboardingCreatesTenantWithMemberNameAndOptionalIncome() {
@@ -628,6 +735,20 @@ class FinanceScreensTest {
 
         assertEquals(listOf("custom", "family", "${java.time.YearMonth.now()}",
             "${java.time.YearMonth.now().atDay(1)}", "${java.time.LocalDate.now()}"), requested)
+    }
+
+    @Test fun reloadingDisplayedFamilyReportKeepsFamilyBudgetScope() {
+        var requestedScope: String? = null
+        val familyReport = report().copy(monthlyBudgetLimit = "50000.00", monthlyBudgetRemaining = "-14000.50")
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), report = familyReport),
+            onReportLoad = { _, scope, _, _, _ -> requestedScope = scope })
+
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithText("Показать отчёт").performClick()
+
+        assertEquals("family", requestedScope)
+        compose.onNodeWithText("Лимит месяца: 50 000,00 ₽ · остаток -14 000,50 ₽")
+            .performScrollTo().assertIsDisplayed()
     }
 
     @Test fun reportScreenShowsServerDailyExpensesForZeroAndNonzeroDays() {
@@ -1009,6 +1130,8 @@ class FinanceScreensTest {
     private fun show(state: FinanceUiState,
                      onReportLoad: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
                      onCreateTenant: (String, String, String?) -> Unit = { _, _, _ -> },
+                     onBudgetUpdate: (String, String, String, String, Long) -> Unit = { _, _, _, _, _ -> },
+                     onBudgetReset: () -> Unit = {},
                      onBudgetApply: (String) -> Unit = {},
                      onBudgetProposal: (String?) -> Unit = {},
                      onTransactionMutation: () -> Unit = {},
@@ -1057,7 +1180,7 @@ class FinanceScreensTest {
                 onConfirmDraft = { id, version -> onTransactionMutation(); onConfirmDraft(id, version) },
                 onCancelDraft = { id, version -> onTransactionMutation(); onCancelDraft(id, version) },
                 onLogout = {},
-                onBudgetUpdate = { _, _, _, _, _ -> }, onBudgetReset = {},
+                onBudgetUpdate = onBudgetUpdate, onBudgetReset = onBudgetReset,
                 onBudgetProposal = onBudgetProposal, onBudgetApply = onBudgetApply,
                 onDebtCreate = { _, _, _, _ -> }, onDebtPay = { _, _, _ -> }, onDebtAdjust = { _, _, _ -> }, onDebtForecast = {},
                 onReportLoad = onReportLoad,
