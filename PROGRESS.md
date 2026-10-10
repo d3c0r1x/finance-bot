@@ -63,8 +63,8 @@ Updated: 2026-10-10, Europe/Moscow.
 ## Current goal
 
 - ID and outcome: E4.112 — F03.2 Android repeat setup from the existing profile.
-- Status: locally GREEN and committed as `018084d`; F03 Android remains PARTIAL pending authenticated Android-to-Core/OIDC end-to-end verification. F15.5 remains awaiting the user's answer to its design question.
-- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, implementation commit `018084d`.
+- Status: locally GREEN; implementation commit `018084d` is pushed (remote branch confirmed at `f390ab4`). F03 Android remains PARTIAL pending authenticated Android-to-Core/OIDC end-to-end verification. F15.5 remains awaiting the user's answer to its design question.
+- Repository / branch / HEAD: `d3c0r1x/finance-bot`, `feat/saas-rewrite`, `f390ab4`.
 - Updated at: 2026-10-10 Europe/Moscow.
 
 ## Verification evidence
@@ -87,7 +87,7 @@ Updated: 2026-10-10, Europe/Moscow.
 - GREEN: full API 27 instrumentation 145/145; focused F03 UI tests 3/3; `FinanceReceiptApiTest` 21/21; Gradle JVM unit tests pass; `assembleDebug` and `assembleDebugAndroidTest` pass; debug APK installed and instrumentation run on isolated Android 8.1/API 27 emulator `emulator-5554`. `git diff --check` passes. Synthetic data only.
 - The parity registry now points to both Compose and API tests and states the remaining live OIDC/Core gate. No live authenticated Android-to-Core E2E was run; F03 Android remains partial. No backend code changed.
 - Preserve user-owned untracked `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/`.
-- Commit: `018084d` (`feat(F03): add Android repeat profile setup`). Push verification pending. Next: continue the next independently executable V1 parity goal. Keep F15.5 design pending until the user's answer arrives.
+- Commit: `018084d` (`feat(F03): add Android repeat profile setup`), pushed; remote branch verified at `f390ab4`. `gh run list --commit f390ab4` returned no workflow run. Next: continue the next independently executable V1 parity goal. Keep F15.5 design pending until the user's answer arrives.
 | F41.1 Go baseline | `go test ./... -count=1` | HEAD `7a0f992` before F41 code; Go 1.27.1 SHA-256-verified portable toolchain | PASS | advice, prices, recurring and projector tests all pass |
 | F41.1 observed RED | `go test ./advice -run TestBuildEvidenceGroups -count=1` | new test only, no F41 production code | FAIL expected | Compiler reports missing `EvidenceRequest`, `EvidenceLine`, `BuildEvidenceGroups`, `EvidenceAlgorithmVersion` |
 | F41.1 HTTP/contract RED | focused Go HTTP and Python contract tests | F41.1 tests before handler/schema | FAIL expected | Missing `NewEvidenceHandler` and OpenAPI evidence-groups path |

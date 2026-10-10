@@ -33,7 +33,7 @@ Updated: 2026-10-10, Europe/Moscow.
 - Remote CI: `gh run list --commit 69dcb25 --limit 10` returned no runs; GitHub CI is not confirmed.
 - E4.109 F15.3 Android explicit receipt-total synchronization is GREEN and pushed in `7498080269fa176d41b615bd3fe7aa93fd1aadb0`: exact totals, writer-only explicit action, quoted version guard, Core-authoritative positive/complete validation, localized 409/412 recovery, viewer read-only, no transaction creation. Full API 27 instrumentation 130/130, JVM 15/15; debug APK installed and launched on isolated API 27 emulator. No GitHub workflow run was found for this commit.
 - F15.5 Android receipt-item delete is queued behind the user's unanswered design question; do not invent delete semantics before that answer.
-- F03.2 Android repeat setup from profile is locally GREEN and committed as `018084d`. F03 Android remains partial pending authenticated Core/OIDC end-to-end proof. F15 and F59 remain partial; production/OIDC E2E and full F01–F60 parity remain.
+- F03.2 Android repeat setup from profile is locally GREEN; implementation commit `018084d` is pushed and remote branch is verified at `f390ab4`. F03 Android remains partial pending authenticated Core/OIDC end-to-end proof. F15 and F59 remain partial; production/OIDC E2E and full F01–F60 parity remain.
 
 ## Goals
 
@@ -1731,4 +1731,4 @@ Updated: 2026-10-10, Europe/Moscow.
 - GREEN: full API 27 instrumentation 145/145; focused F03 UI tests 3/3; `FinanceReceiptApiTest` 21/21; Gradle JVM unit tests pass; `assembleDebug` and `assembleDebugAndroidTest` pass; debug APK installed and instrumentation run on isolated Android 8.1/API 27 emulator `emulator-5554`. `git diff --check` passes. Synthetic data only.
 - The parity registry now points to both Compose and API tests and states the remaining live OIDC/Core gate. No live authenticated Android-to-Core E2E was run; F03 Android remains partial. No backend code changed.
 - Preserve user-owned untracked `.android-user/`, `.freebuff/`, `.pnpm-store/`, `CODEX_AUTONOMOUS.md`, `apps/android/current-screen.png`, and `tmp/`.
-- Commit: `018084d` (`feat(F03): add Android repeat profile setup`). Push verification pending. Next: continue the next independently executable V1 parity goal. Keep F15.5 design pending until the user's answer arrives.
+- Commit: `018084d` (`feat(F03): add Android repeat profile setup`), pushed; remote branch verified at `f390ab4`. `gh run list --commit f390ab4` returned no workflow run. Next: continue the next independently executable V1 parity goal. Keep F15.5 design pending until the user's answer arrives.
