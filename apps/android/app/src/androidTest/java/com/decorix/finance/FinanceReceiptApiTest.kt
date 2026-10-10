@@ -394,6 +394,50 @@ class FinanceReceiptApiTest {
         assertEquals("120.70", reviewed.items[1].lineSum)
     }
 
+    @Test fun reviewReceiptBasketPreservesIdentityAndReviewMetadataForDuplicateNamesAndLegacyUnknownSource() {
+        val firstId = "00000000-0000-4000-8000-000000000181"
+        val secondId = "00000000-0000-4000-8000-000000000182"
+        val response = org.json.JSONObject(receiptJson()).put("version", 2)
+        val items = org.json.JSONArray()
+            .put(org.json.JSONObject()
+                .put("id", firstId).put("name", "Одинаковый товар")
+                .put("quantity", "1").put("unitPrice", "100.00").put("lineSum", "100.00")
+                .put("productKey", "same-product").put("provenance", "ocr")
+                .put("confidence", 0.9).put("categoryCode", "еда")
+                .put("verdict", "harmful").put("advice", "Первый совет")
+                .put("reviewReason", "Первое основание").put("reviewAction", "limit purchase")
+                .put("verdictSource", "rule").put("version", 3))
+            .put(org.json.JSONObject()
+                .put("id", secondId).put("name", "Одинаковый товар")
+                .put("quantity", "1").put("unitPrice", "100.00").put("lineSum", "100.00")
+                .put("productKey", "same-product").put("provenance", "ocr")
+                .put("confidence", 0.9).put("categoryCode", "еда")
+                .put("verdict", "useful").put("advice", "Второй совет")
+                .put("reviewReason", "Второе основание").put("reviewAction", "keep")
+                .put("verdictSource", "unknown").put("version", 4))
+        response.put("items", items).put("itemCount", 2)
+        server.enqueue(MockResponse().setBody(response.toString()))
+        val api = api()
+        api.saveTokens("receipt-writer-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val reviewed = api.reviewReceiptBasket("tenant-17", "receipt-42", 1)
+
+        assertEquals(2, reviewed.items.size)
+        assertEquals("Одинаковый товар", reviewed.items[0].name)
+        assertEquals("Одинаковый товар", reviewed.items[1].name)
+        assertEquals(firstId, reviewed.items[0].id)
+        assertEquals(secondId, reviewed.items[1].id)
+        assertEquals("harmful", reviewed.items[0].verdict)
+        assertEquals("Первый совет", reviewed.items[0].advice)
+        assertEquals("Первое основание", reviewed.items[0].reviewReason)
+        assertEquals("rule", reviewed.items[0].verdictSource)
+        assertEquals("useful", reviewed.items[1].verdict)
+        assertEquals("Второй совет", reviewed.items[1].advice)
+        assertEquals("Второе основание", reviewed.items[1].reviewReason)
+        assertEquals("unknown", reviewed.items[1].verdictSource)
+        assertFalse("Legacy unknown source must not be relabeled as rule", reviewed.items[1].verdictSource == "rule")
+    }
+
     @Test fun reviewReceiptBasketPreservesConflictAndStaleVersionFailures() {
         server.enqueue(MockResponse().setResponseCode(409).setBody("""{"detail":"receipt_not_editable"}"""))
         server.enqueue(MockResponse().setResponseCode(412).setBody("""{"detail":"stale_version"}"""))

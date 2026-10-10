@@ -1756,3 +1756,11 @@ Updated: 2026-10-10, Europe/Moscow.
 - GREEN: `FinanceReceiptApiTest` 31/31 and `FinanceReceiptScreensTest` 51/51; both instrumented classes pass on isolated Android 8.1/API 27 emulator (`OK (82 tests)`). Android JVM tests 19/19. `assembleDebug` and `assembleDebugAndroidTest` pass. Parity-contract regression 63/63. Debug APK installed and `MainActivity` resumed on `emulator-5554`; SHA-256 `A6E8F91CCFA608F5554036A50CB4694A60F9EF4AC5CA66B3DDCB7B50F35FA420`. `git diff --check` clean.
 - No Core/business-rule changes; synthetic fixtures only. Live authenticated Android-to-Core OIDC E2E and Activity-level HTTP 409/412 refresh test remain unverified, so F18 Android stays PARTIAL. Parity registry and F59 plan snapshot updated.
 - Next: F19 Android persistence/display of receipt item verdict and advice; F15.5 deletion semantics remain pending user input.
+
+## E4.116 F19 Android item-ID verdict/advice association — GREEN locally
+
+- Scope: F18's Core-owned basket-review response and Compose receipt rows already carry verdict/advice/source on each receipt item ID. Added focused Android evidence for identical product names with distinct IDs and review metadata; legacy `unknown` source remains unknown through parsing and RU display. No name-based Android matching or duplicate persistence layer added.
+- TDD: test-only F19 slice because audit confirmed the required production API and UI already landed in F18. New API and Compose tests independently prove ID-specific verdict/advice/source values for same-name rows and preserve unknown provenance. Both passed on the first targeted API-27 run.
+- GREEN: focused F19 instrumentation 2/2; prior full F18 API+screen instrumentation 82/82; Android JVM 19/19; debug/test APK builds pass; parity contract 63/63. Existing debug APK remains installed on isolated `emulator-5554`. Synthetic fixtures only.
+- Android F19 remains PARTIAL pending live authenticated Android-to-Core OIDC E2E. Core/PostgreSQL owns durable persistence and duplicate-name item-ID/audit association. Parity registry and F59 plan snapshot updated.
+- Next: F20 Android disagreement controls and disputed-item pagination; F15.5 deletion semantics remain pending user input.

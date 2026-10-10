@@ -384,9 +384,13 @@ features:
     evidence:
       - "PostgreSQL acceptance reviews two identical product names with distinct ordinal advice and amounts, verifies each response stays attached to its receipt item UUID, and confirms each audit snapshot records the same item ID and reason. A legacy row with verdict neutral and source/algorithm unknown remains unknown in the owner API and is never relabeled rule. Full Core check (190 tests, 0 failures, 2 container-gated skips), Python migration/contracts (44 passed, 2 skipped), and RU/EN receipt Web tests (7 passed) pass."
     android:
-      status: missing
-      scenario: "Android counterpart for F19: Сохранение verdict/advice/verdict_source по позициям"
-      gap: "No Android user screen or equivalent flow is verified for F19 yet."
+      status: partial
+      scenario: "Android consumes Core-persisted review metadata and renders each verdict/advice/source under its stable receipt item ID; duplicate product names remain distinct, and legacy unknown provenance stays unknown."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+      gap: "Live authenticated Android-to-Core OIDC E2E remains unverified. Persistence ownership and exact item-ID audit behavior are covered by existing Core/PostgreSQL acceptance; Android tests use synthetic Core-response fixtures."
+      evidence: "API parser and Compose tests prove two same-name items retain distinct IDs, verdicts and advice; legacy unknown source remains unknown. Focused API-27 instrumentation passed 2/2. Android delegates persistence and association to Core."
     intentional_differences: []
   - id: F20
     feature: "«Не согласен» с вердиктом, пагинация спорных строк"

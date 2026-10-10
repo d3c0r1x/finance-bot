@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -1217,6 +1218,43 @@ class FinanceReceiptScreensTest {
         compose.onNodeWithText("0 ₽").assertDoesNotExist()
         assertNull(state.value.receiptDraft?.cashTotal)
         assertNull(state.value.receiptDraft?.itemsTotal)
+    }
+
+    @Test fun basketReviewKeepsCoreAdviceBoundToStableItemIdsWhenNamesMatch() {
+        val sharedName = "Synthetic identical product"
+        val ruleItem = receiptItem(41).copy(name = sharedName, verdict = "harmful",
+            advice = "Core advice for item 41", reviewReason = "Core reason for item 41",
+            reviewAction = "Core action for item 41", verdictSource = "rule",
+            reviewAlgorithmVersion = "receipt-basket.v1")
+        val modelItem = receiptItem(42).copy(name = sharedName, verdict = "useful",
+            advice = "Core advice for item 42", reviewReason = "Core reason for item 42",
+            reviewAction = "Core action for item 42", verdictSource = "model",
+            reviewProvider = "synthetic-provider-42", reviewModelVersion = "synthetic-model-42",
+            reviewPromptVersion = "synthetic-prompt-42", reviewAlgorithmVersion = "receipt-basket.v1")
+        val unknownLegacyItem = receiptItem(43).copy(name = "Synthetic legacy item", verdict = "neutral",
+            advice = "Legacy advice", verdictSource = "unknown", reviewProvider = "unknown",
+            reviewAlgorithmVersion = "unknown")
+        val reviewed = receiptDraft().copy(items = listOf(ruleItem, modelItem, unknownLegacyItem), itemCount = 3)
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = reviewed))
+        show(state.value, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-item-review-${ruleItem.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-item-review-verdict-${ruleItem.id}").assertTextEquals("Оценка: неблагоприятная")
+        compose.onNodeWithTag("receipt-item-review-advice-${ruleItem.id}").assertTextEquals("Совет: Core advice for item 41")
+        compose.onNodeWithTag("receipt-item-review-source-${ruleItem.id}").assertTextEquals(
+            "Источник: правило · провайдер не указан · модель не указана · промпт не указана · алгоритм receipt-basket.v1")
+
+        compose.onNodeWithTag("receipt-item-review-${modelItem.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-item-review-verdict-${modelItem.id}").assertTextEquals("Оценка: полезная")
+        compose.onNodeWithTag("receipt-item-review-advice-${modelItem.id}").assertTextEquals("Совет: Core advice for item 42")
+        compose.onNodeWithTag("receipt-item-review-source-${modelItem.id}").assertTextEquals(
+            "Источник: модель · провайдер synthetic-provider-42 · модель synthetic-model-42 · " +
+                "промпт synthetic-prompt-42 · алгоритм receipt-basket.v1")
+
+        compose.onNodeWithTag("receipt-item-review-${unknownLegacyItem.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-item-review-source-${unknownLegacyItem.id}").assertTextEquals(
+            "Источник: неизвестен · провайдер unknown · модель не указана · промпт не указана · алгоритм unknown")
     }
 
     @Test fun memberBasketReviewRequiresExplicitTapAndShowsReturnedCoreDtoWithoutChangingTotals() {
