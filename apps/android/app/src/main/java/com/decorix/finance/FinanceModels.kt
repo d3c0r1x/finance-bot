@@ -326,6 +326,19 @@ data class FinanceReceiptItemPage(
     val hasMore: Boolean,
 )
 
+data class FinanceReceiptDuplicateCandidate(
+    val id: String,
+    val cashTotal: String,
+    val merchant: String?,
+    val createdAt: String,
+)
+
+data class FinanceReceiptDuplicateCandidates(
+    val receiptId: String,
+    val decision: String,
+    val candidates: List<FinanceReceiptDuplicateCandidate>,
+)
+
 data class FinanceReceiptReading(
     val text: String,
     val words: List<Map<String, Any?>>,
@@ -531,6 +544,23 @@ internal object FinanceModels {
             page = json.getInt("page"),
             totalItems = json.getInt("totalItems"),
             hasMore = json.getBoolean("hasMore"),
+        )
+    }
+
+    fun receiptDuplicateCandidates(json: JSONObject): FinanceReceiptDuplicateCandidates {
+        val rows = json.getJSONArray("candidates")
+        return FinanceReceiptDuplicateCandidates(
+            receiptId = json.getString("receiptId"),
+            decision = json.getString("decision"),
+            candidates = (0 until rows.length()).map { index ->
+                val candidate = rows.getJSONObject(index)
+                FinanceReceiptDuplicateCandidate(
+                    id = candidate.getString("id"),
+                    cashTotal = candidate.getString("cashTotal"),
+                    merchant = nullableString(candidate, "merchant"),
+                    createdAt = candidate.getString("createdAt"),
+                )
+            },
         )
     }
 

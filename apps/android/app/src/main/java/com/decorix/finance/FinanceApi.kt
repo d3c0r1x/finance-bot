@@ -95,6 +95,42 @@ class FinanceApi internal constructor(
         JSONObject(execute("/api/v1/tenants/$tenantId/receipts/$receiptId", "GET")),
     )
 
+    fun receiptDuplicateCandidates(tenantId: String, receiptId: String): FinanceReceiptDuplicateCandidates =
+        FinanceModels.receiptDuplicateCandidates(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/duplicate-candidates", "GET",
+        )))
+
+    fun decideReceiptDuplicate(tenantId: String, receiptId: String, version: Long,
+                               decision: String, duplicateReceiptId: String?): FinanceReceipt {
+        require(version > 0) { "Invalid receipt version" }
+        require(decision == "independent" || decision == "duplicate") { "Invalid receipt duplicate decision" }
+        require((decision == "independent" && duplicateReceiptId == null)
+            || (decision == "duplicate" && !duplicateReceiptId.isNullOrBlank())) {
+            "Receipt duplicate candidate selection is invalid"
+        }
+        val body = JSONObject()
+            .put("decision", decision)
+            .put("duplicateReceiptId", duplicateReceiptId ?: JSONObject.NULL)
+            .toString()
+        return FinanceModels.receipt(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/duplicate-decision", "PUT",
+            body, ifMatchVersion = version,
+        )))
+    }
+
+    fun confirmReceipt(tenantId: String, receiptId: String, version: Long,
+                       idempotencyKey: String): FinanceReceipt {
+        require(version > 0) { "Invalid receipt version" }
+        require(idempotencyKey.length in 16..128 && idempotencyKey.none(Char::isISOControl)) {
+            "Invalid idempotency key"
+        }
+        val emptyBody = ByteArray(0).toRequestBody("application/json".toMediaType())
+        return FinanceModels.receipt(JSONObject(executeRequest(
+            "/api/v1/tenants/$tenantId/receipts/$receiptId/confirm", "POST", emptyBody,
+            idempotencyKey, version,
+        )))
+    }
+
     fun receiptReading(tenantId: String, receiptId: String): FinanceReceiptReading = FinanceModels.receiptReading(
         JSONObject(execute("/api/v1/tenants/$tenantId/receipts/$receiptId/readings", "GET")),
     )

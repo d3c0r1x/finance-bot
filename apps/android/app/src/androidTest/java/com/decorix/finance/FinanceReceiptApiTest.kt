@@ -184,6 +184,105 @@ class FinanceReceiptApiTest {
         assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
     }
 
+    @Test fun receiptDuplicateCandidatesFetchesAuthenticatedCandidatesAndExactAmounts() {
+        server.enqueue(MockResponse().setBody(receiptDuplicateCandidatesJson()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val result = api.receiptDuplicateCandidates("tenant-17", "receipt-42")
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/duplicate-candidates", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("receipt-42", result.receiptId)
+        assertEquals("unknown", result.decision)
+        assertEquals(1, result.candidates.size)
+        assertEquals("00000000-0000-4000-8000-000000000091", result.candidates.single().id)
+        assertEquals("245.70", result.candidates.single().cashTotal)
+        assertEquals("Synthetic Market", result.candidates.single().merchant)
+        assertEquals("2026-10-08T08:59:00Z", result.candidates.single().createdAt)
+    }
+
+    @Test fun decideReceiptDuplicatePutsExplicitIndependentChoiceWithQuotedVersion() {
+        val response = org.json.JSONObject(receiptJson())
+            .put("duplicateDecision", "independent")
+            .put("version", 2)
+        server.enqueue(MockResponse().setBody(response.toString()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val updated = api.decideReceiptDuplicate("tenant-17", "receipt-42", 1,
+            "independent", null)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PUT", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/duplicate-decision", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"1\"", request.getHeader("If-Match"))
+        val body = org.json.JSONObject(request.body.readUtf8())
+        assertEquals(setOf("decision", "duplicateReceiptId"), body.keys().asSequence().toSet())
+        assertEquals("independent", body.getString("decision"))
+        assertTrue(body.isNull("duplicateReceiptId"))
+        assertEquals("independent", updated.duplicateDecision)
+        assertNull(updated.duplicateOfReceiptId)
+        assertEquals(2L, updated.version)
+        assertNull(updated.transactionId)
+    }
+
+    @Test fun confirmReceiptPostsWithoutBodyWithStableKeyAndParsesPostedTransaction() {
+        val response = org.json.JSONObject(receiptJson())
+            .put("state", "confirmed")
+            .put("version", 2)
+            .put("duplicateDecision", "independent")
+            .put("transactionId", "00000000-0000-4000-8000-000000000092")
+        server.enqueue(MockResponse().setBody(response.toString()))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+        val key = "receipt-confirm-stable-key-0001"
+
+        val confirmed = api.confirmReceipt("tenant-17", "receipt-42", 1, key)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/confirm", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals(key, request.getHeader("Idempotency-Key"))
+        assertEquals("\"1\"", request.getHeader("If-Match"))
+        assertEquals("", request.body.readUtf8())
+        assertEquals("confirmed", confirmed.state)
+        assertEquals(2L, confirmed.version)
+        assertEquals("00000000-0000-4000-8000-000000000092", confirmed.transactionId)
+        assertEquals("245.70", confirmed.cashTotal)
+    }
+
+    @Test fun duplicateDecisionAndConfirmationPreserveStaleVersionFailures() {
+        server.enqueue(MockResponse().setResponseCode(412).setBody("""{"detail":"stale_version"}"""))
+        server.enqueue(MockResponse().setResponseCode(412).setBody("""{"detail":"stale_version"}"""))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val decisionFailure = runCatching {
+            api.decideReceiptDuplicate("tenant-17", "receipt-42", 3, "independent", null)
+        }.exceptionOrNull()
+        val confirmFailure = runCatching {
+            api.confirmReceipt("tenant-17", "receipt-42", 3, "receipt-confirm-stable-key-0002")
+        }.exceptionOrNull()
+
+        assertTrue("Duplicate decision 412 must remain an API failure", decisionFailure is ApiFailure)
+        assertEquals(412, (decisionFailure as ApiFailure).status)
+        assertTrue("Confirmation 412 must remain an API failure", confirmFailure is ApiFailure)
+        assertEquals(412, (confirmFailure as ApiFailure).status)
+        val decision = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PUT", decision.method)
+        assertEquals("\"3\"", decision.getHeader("If-Match"))
+        val confirm = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("POST", confirm.method)
+        assertEquals("\"3\"", confirm.getHeader("If-Match"))
+        assertEquals("receipt-confirm-stable-key-0002", confirm.getHeader("Idempotency-Key"))
+        assertEquals("", confirm.body.readUtf8())
+    }
+
     @Test fun receiptItemsFetchesOrderedPagesOfEightWithExactValuesAndOwnerAuthorization() {
         val pageOneItems = (1..8).map(::receiptItemJson)
         val pageTwoItems = listOf(receiptItemJson(9))
@@ -766,6 +865,12 @@ class FinanceReceiptApiTest {
            "advice":null,"reviewReason":null,"reviewAction":null,"verdictSource":null,"reviewProvider":null,
            "reviewModelVersion":null,"reviewPromptVersion":null,"reviewAlgorithmVersion":null,"version":1}],
          "itemCount":1,"createdAt":"2026-10-08T09:01:00Z"}
+    """.trimIndent()
+
+    private fun receiptDuplicateCandidatesJson() = """
+        {"receiptId":"receipt-42","decision":"unknown","candidates":[
+          {"id":"00000000-0000-4000-8000-000000000091","cashTotal":"245.70",
+           "merchant":"Synthetic Market","createdAt":"2026-10-08T08:59:00Z"}]}
     """.trimIndent()
 
     private fun receiptReadingJson(

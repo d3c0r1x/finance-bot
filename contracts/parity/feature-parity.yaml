@@ -313,9 +313,14 @@ features:
     evidence:
       - "Owner-scoped API lists prior same-owner receipts with the same total in the preceding ten minutes. Versioned duplicate/independent decisions are reversible and audited; a suspected duplicate cannot be confirmed, while two same-amount receipts marked independent produce distinct transactions. Receipt creation and confirmation idempotency keys replay without duplicate records. PostgreSQL API, policy, CSRF BFF, contract and RU/EN Web tests pass."
     android:
-      status: missing
-      scenario: "Android counterpart for F16: Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
-      gap: "No Android user screen or equivalent flow is verified for F16 yet."
+      status: partial
+      scenario: "Android checks same-owner receipt candidates, lets the user mark a receipt duplicate or independent, and creates an expense only through explicit confirmation with a stable idempotency key."
+      gap: "The local Android flow and emulator checks pass, but live authenticated Android-to-Core OIDC end-to-end verification remains open."
+      evidence: "Android API 27 local verification: full instrumentation 155/155, FinanceReceiptApiTest 25/25, FinanceReceiptScreensTest 41/41, JVM tests 17/17. Debug APK built, installed, and exercised on the isolated API 27 emulator."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/ReceiptConflictRecoveryPolicyTest.kt
     intentional_differences: []
   - id: F17
     feature: "Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"

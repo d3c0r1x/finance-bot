@@ -77,6 +77,177 @@ class FinanceReceiptScreensTest {
         assertEquals(emptyList<String>(), confirmed)
     }
 
+    @Test fun receiptDuplicateMustBeResolvedAndIndependentReceiptRequiresExplicitConfirm() {
+        val receipt = receiptDraft().copy(version = 4, cashTotal = "245.70", itemsTotal = "245.70")
+        val prior = FinanceReceiptDuplicateCandidate("receipt-prior", "245.70", "Магазин Тест",
+            "2026-10-08T09:05:00Z")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt,
+            receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(receipt.id, "unknown", listOf(prior)),
+            receiptDuplicateCandidatesReceiptId = receipt.id))
+        val decisions = mutableListOf<Triple<String, Long, Pair<String, String?>>>()
+        val confirmations = mutableListOf<Pair<String, Long>>()
+        val created = mutableListOf<String>()
+        show(state.value, onCreate = { type, amount, _ -> created += "$type:$amount" },
+            onReceiptDuplicateDecision = { id, version, decision, candidateId ->
+                decisions += Triple(id, version, decision to candidateId)
+                state.value = state.value.copy(receiptDraft = receipt.copy(version = version + 1,
+                    duplicateDecision = decision, duplicateOfReceiptId = candidateId),
+                    receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(id, decision,
+                        if (decision == "duplicate") listOf(prior) else emptyList()),
+                    receiptDuplicateCandidatesReceiptId = id)
+            },
+            onReceiptConfirm = { id, version, _ -> confirmations += id to version },
+            stateHolder = state)
+
+        compose.onNodeWithTag("receipt-duplicate-candidate-${prior.id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsNotEnabled()
+        assertEquals(emptyList<Pair<String, Long>>(), confirmations)
+
+        compose.onNodeWithTag("receipt-duplicate-mark-${prior.id}").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(Triple(receipt.id, 4L, "duplicate" to prior.id)), decisions)
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsNotEnabled()
+
+        compose.onNodeWithTag("receipt-independent").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(Triple(receipt.id, 4L, "duplicate" to prior.id),
+            Triple(receipt.id, 5L, "independent" to null)), decisions)
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsEnabled()
+        assertEquals(emptyList<Pair<String, Long>>(), confirmations)
+        compose.onNodeWithTag("receipt-confirm").performClick()
+        assertEquals(listOf(receipt.id to 6L), confirmations)
+        assertEquals(emptyList<String>(), created)
+    }
+
+    @Test fun receiptConfirmationRetryReusesIdempotencyKeyAndPostsOnlyOnce() {
+        val receipt = receiptDraft().copy(version = 8, cashTotal = "245.70", itemsTotal = "245.70",
+            duplicateDecision = "independent")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt,
+            receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(receipt.id, "independent", emptyList()),
+            receiptDuplicateCandidatesReceiptId = receipt.id))
+        val keys = mutableListOf<String>()
+        val confirms = mutableListOf<Pair<String, Long>>()
+        val created = mutableListOf<String>()
+        show(state.value, onCreate = { type, amount, _ -> created += "$type:$amount" },
+            onReceiptConfirm = { id, version, key ->
+                confirms += id to version
+                keys += key
+                state.value = if (confirms.size == 1) state.value.copy(receiptConfirmError = "request")
+                else state.value.copy(receiptDraft = receipt.copy(state = "confirmed", version = version + 1,
+                    transactionId = "posted-expense-2"), receiptConfirmError = null)
+            }, stateHolder = state)
+
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-confirm-retry").performScrollTo().assertIsEnabled().performClick()
+        compose.waitForIdle()
+
+        assertEquals(listOf(receipt.id to 8L, receipt.id to 8L), confirms)
+        assertEquals(2, keys.size)
+        assertFalse(keys.first().isBlank())
+        assertEquals(keys.first(), keys.last())
+        compose.onNodeWithTag("receipt-confirmed").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("posted-expense-2").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-confirm").assertDoesNotExist()
+        assertEquals(emptyList<String>(), created)
+    }
+
+    @Test fun receiptWithoutCandidatesStillNeedsExplicitConfirm() {
+        val receipt = receiptDraft().copy(version = 2, cashTotal = "245.70", itemsTotal = "245.70",
+            duplicateDecision = "unknown")
+        val state = FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), receiptDraft = receipt,
+            receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(receipt.id, "unknown", emptyList()),
+            receiptDuplicateCandidatesReceiptId = receipt.id)
+        val confirms = mutableListOf<Pair<String, Long>>()
+        show(state, onReceiptConfirm = { id, version, _ -> confirms += id to version })
+
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsEnabled()
+        assertEquals(emptyList<Pair<String, Long>>(), confirms)
+        compose.onNodeWithTag("receipt-confirm").performClick()
+        assertEquals(listOf(receipt.id to receipt.version), confirms)
+    }
+
+    @Test fun receiptMarkedDuplicateCanBeReversedWhenRefreshedCandidatesAreEmpty() {
+        val receipt = receiptDraft().copy(version = 6, cashTotal = "245.70", itemsTotal = "245.70",
+            duplicateDecision = "duplicate", duplicateOfReceiptId = "receipt-prior")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt,
+            receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(receipt.id, "duplicate", emptyList()),
+            receiptDuplicateCandidatesReceiptId = receipt.id))
+        val decisions = mutableListOf<Triple<String, Long, Pair<String, String?>>>()
+        val confirmations = mutableListOf<Pair<String, Long>>()
+        val created = mutableListOf<String>()
+        show(state.value, stateHolder = state,
+            onCreate = { type, amount, _ -> created += "$type:$amount" },
+            onReceiptDuplicateDecision = { id, version, decision, candidateId ->
+                decisions += Triple(id, version, decision to candidateId)
+                state.value = state.value.copy(receiptDraft = receipt.copy(version = version + 1,
+                    duplicateDecision = decision, duplicateOfReceiptId = candidateId),
+                    receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(id, decision, emptyList()),
+                    receiptDuplicateCandidatesReceiptId = id)
+            },
+            onReceiptConfirm = { id, version, _ -> confirmations += id to version })
+
+        compose.onNodeWithTag("receipt-duplicate-empty").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsNotEnabled()
+        assertEquals(emptyList<Pair<String, Long>>(), confirmations)
+
+        compose.onNodeWithTag("receipt-independent").performScrollTo().performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(Triple(receipt.id, 6L, "independent" to null)), decisions)
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsEnabled()
+        assertEquals(emptyList<Pair<String, Long>>(), confirmations)
+        compose.onNodeWithTag("receipt-confirm").performClick()
+        assertEquals(listOf(receipt.id to 7L), confirmations)
+        assertEquals(emptyList<String>(), created)
+    }
+
+    @Test fun receiptWithDifferentCashAndItemTotalsCannotBeConfirmed() {
+        val receipt = receiptDraft().copy(version = 3, cashTotal = "245.70", itemsTotal = "244.70",
+            duplicateDecision = "independent")
+        val state = FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), receiptDraft = receipt,
+            receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(receipt.id, "independent", emptyList()),
+            receiptDuplicateCandidatesReceiptId = receipt.id)
+        var confirms = 0
+        show(state, onReceiptConfirm = { _, _, _ -> confirms++ })
+
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsNotEnabled()
+        assertEquals(0, confirms)
+    }
+
+    @Test fun receiptDuplicateAndLookupFailureNeverEnableConfirmAndViewerCannotDecide() {
+        val receipt = receiptDraft().copy(cashTotal = "245.70", itemsTotal = "245.70", duplicateDecision = "duplicate",
+            duplicateOfReceiptId = "receipt-prior")
+        val candidate = FinanceReceiptDuplicateCandidate("receipt-prior", "245.70", "Магазин Тест",
+            "2026-10-08T09:05:00Z")
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt,
+            receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(receipt.id, "duplicate", listOf(candidate)),
+            receiptDuplicateCandidatesReceiptId = receipt.id))
+        var decisions = 0
+        show(state.value, onReceiptDuplicateDecision = { _, _, _, _ -> decisions++ },
+            onReceiptConfirm = { _, _, _ -> error("duplicate must not be confirmed") }, stateHolder = state)
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsNotEnabled()
+        assertEquals(0, decisions)
+
+        val failedLookup = state.value.copy(receiptDraft = receipt.copy(duplicateDecision = "unknown",
+            duplicateOfReceiptId = null), receiptDuplicateCandidates = null,
+            receiptDuplicateCandidatesError = "unavailable")
+        state.value = failedLookup
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-confirm").performScrollTo().assertIsNotEnabled()
+
+        state.value = failedLookup.copy(tenants = listOf(tenant("viewer")),
+            receiptDuplicateCandidates = FinanceReceiptDuplicateCandidates(receipt.id, "unknown", listOf(candidate)),
+            receiptDuplicateCandidatesError = null)
+        compose.waitForIdle()
+        compose.onNodeWithTag("receipt-confirm").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-duplicate-mark-${candidate.id}").assertDoesNotExist()
+        assertEquals(0, decisions)
+    }
+
     @Test fun ownerBrowsesReceiptItemsEightThenOneThenEightWithoutMutationOrCashTotalChange() {
         val firstPage = receiptItemPage((1..8).map(::receiptItem), page = 1, totalItems = 9, hasMore = true)
         val secondPage = receiptItemPage(listOf(receiptItem(9)), page = 2, totalItems = 9, hasMore = false)
@@ -1095,6 +1266,9 @@ class FinanceReceiptScreensTest {
                      onReceiptItemAddRefresh: (String) -> Unit = {},
                      onReceiptItemUpdate: (String, String, Long, String, String, String, String) -> Unit =
                          { _, _, _, _, _, _, _ -> },
+                     onReceiptDuplicateDecision: (String, Long, String, String?) -> Unit =
+                         { _, _, _, _ -> },
+                     onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
         val language = mutableStateOf("ru")
         compose.setContent {
@@ -1112,7 +1286,9 @@ class FinanceReceiptScreensTest {
                     onReceiptTotalSync = onReceiptTotalSync,
                     onReceiptTotalSyncRefresh = onReceiptTotalSyncRefresh,
                     onReceiptItemAdd = onReceiptItemAdd,
-                    onReceiptItemAddRefresh = onReceiptItemAddRefresh)
+                    onReceiptItemAddRefresh = onReceiptItemAddRefresh,
+                    onReceiptDuplicateDecision = onReceiptDuplicateDecision,
+                    onReceiptConfirm = onReceiptConfirm)
             }
         }
         compose.waitForIdle()

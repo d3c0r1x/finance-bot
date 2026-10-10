@@ -80,6 +80,8 @@ class MainActivity : ComponentActivity() {
     private val receiptItemEditGeneration = AtomicLong(0L)
     private val receiptItemAddGeneration = AtomicLong(0L)
     private val receiptTotalSyncGeneration = AtomicLong(0L)
+    private val receiptDuplicateGeneration = AtomicLong(0L)
+    private val receiptConfirmGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -148,7 +150,10 @@ class MainActivity : ComponentActivity() {
                         onReceiptItemAdd = ::addReceiptItem,
                         onReceiptItemAddRefresh = ::refreshReceiptItemAdd,
                         onReceiptTotalSync = ::syncReceiptTotal,
-                        onReceiptTotalSyncRefresh = ::refreshReceiptTotalSync)
+                        onReceiptTotalSyncRefresh = ::refreshReceiptTotalSync,
+                        onReceiptDuplicateCandidates = ::loadReceiptDuplicateCandidates,
+                        onReceiptDuplicateDecision = ::decideReceiptDuplicate,
+                        onReceiptConfirm = ::confirmReceipt)
                 }
             }
         }
@@ -382,6 +387,145 @@ class MainActivity : ComponentActivity() {
                             receiptReadingError = "unavailable")
                     }
                 }
+        }
+    }
+
+    private fun loadReceiptDuplicateCandidates(receiptId: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || ui.receiptDraft?.id != receiptId ||
+            ui.receiptDraft?.state == "confirmed" ||
+            (ui.receiptDuplicateCandidatesLoading && ui.receiptDuplicateCandidatesReceiptId == receiptId)) return
+        val generation = receiptDuplicateGeneration.incrementAndGet()
+        ui = ui.copy(receiptDuplicateCandidates = null, receiptDuplicateCandidatesReceiptId = receiptId,
+            receiptDuplicateCandidatesLoading = true, receiptDuplicateCandidatesError = null)
+        executor.execute {
+            runCatching {
+                val latestReceipt = api.receipt(tenant.id, receiptId)
+                latestReceipt to api.receiptDuplicateCandidates(tenant.id, receiptId)
+            }.onSuccess { (latestReceipt, candidates) ->
+                    if (receiptDuplicateGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptDraft = latestReceipt, receiptDuplicateCandidates = candidates,
+                            receiptDuplicateCandidatesReceiptId = receiptId,
+                            receiptDuplicateCandidatesLoading = false, receiptDuplicateCandidatesError = null)
+                    }
+                }
+                .onFailure {
+                    if (receiptDuplicateGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptDuplicateCandidates = null,
+                            receiptDuplicateCandidatesReceiptId = receiptId,
+                            receiptDuplicateCandidatesLoading = false, receiptDuplicateCandidatesError = "unavailable")
+                    }
+                }
+        }
+    }
+
+    private fun decideReceiptDuplicate(receiptId: String, version: Long, decision: String,
+                                       duplicateReceiptId: String?) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        val candidates = ui.receiptDuplicateCandidates?.takeIf { it.receiptId == receiptId } ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || ui.busy || ui.receiptDuplicateDecisionInProgress ||
+            ui.receiptConfirming || receipt.version != version || decision !in setOf("independent", "duplicate") ||
+            (decision == "independent" && duplicateReceiptId != null) ||
+            (decision == "duplicate" && candidates.candidates.none { it.id == duplicateReceiptId })) return
+        val generation = receiptDuplicateGeneration.incrementAndGet()
+        ui = ui.copy(receiptDuplicateDecisionInProgress = true, receiptDuplicateDecisionError = null)
+        executor.execute {
+            runCatching { api.decideReceiptDuplicate(tenant.id, receiptId, version, decision, duplicateReceiptId) }
+                .onSuccess { updated ->
+                    if (receiptDuplicateGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptDraft = updated,
+                            receiptDuplicateCandidates = candidates.copy(decision = updated.duplicateDecision),
+                            receiptDuplicateCandidatesReceiptId = receiptId,
+                            receiptDuplicateCandidatesLoading = false, receiptDuplicateCandidatesError = null,
+                            receiptDuplicateDecisionInProgress = false, receiptDuplicateDecisionError = null)
+                    }
+                }
+                .onFailure { failure ->
+                    if (receiptDuplicateGeneration.get() != generation || !ui.authenticated ||
+                        ui.tenants.firstOrNull()?.id != tenant.id || ui.receiptDraft?.id != receiptId) return@onFailure
+                    val status = (failure as? ApiFailure)?.status
+                    if (ReceiptReviewRecoveryPolicy.actionFor(status) ==
+                        ReceiptReviewRecoveryAction.REFRESH_RECEIPT_AND_CANDIDATES) {
+                        refreshReceiptDuplicateReview(tenant.id, receiptId, generation,
+                            decisionError = if (status == 409) "candidate_conflict" else "stale_version",
+                            confirmationAttempt = false)
+                    } else {
+                        ui = ui.copy(receiptDuplicateDecisionInProgress = false,
+                            receiptDuplicateDecisionError = "unavailable")
+                    }
+                }
+        }
+    }
+
+    private fun confirmReceipt(receiptId: String, version: Long, idempotencyKey: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        val candidates = ui.receiptDuplicateCandidates?.takeIf { it.receiptId == receiptId } ?: return
+        val cash = receipt.cashTotal?.toBigDecimalOrNull()
+        val items = receipt.itemsTotal?.toBigDecimalOrNull()
+        val totalsReconciled = cash != null && items != null && cash.compareTo(items) == 0
+        val unresolved = candidates.candidates.isNotEmpty() && receipt.duplicateDecision == "unknown"
+        if (!ui.authenticated || tenant.role == "viewer" || ui.busy || ui.receiptConfirming ||
+            ui.receiptDuplicateDecisionInProgress || receipt.version != version || !totalsReconciled ||
+            receipt.state !in setOf("draft", "review_required") || candidates.decision != receipt.duplicateDecision ||
+            receipt.duplicateDecision == "duplicate" || unresolved ||
+            ui.receiptDuplicateCandidatesLoading || ui.receiptDuplicateCandidatesError != null ||
+            ui.receiptDuplicateCandidatesReceiptId != receiptId || idempotencyKey.length !in 16..128 ||
+            idempotencyKey.any(Char::isISOControl)) return
+        val generation = receiptConfirmGeneration.incrementAndGet()
+        ui = ui.copy(receiptConfirming = true, receiptConfirmError = null)
+        executor.execute {
+            runCatching { api.confirmReceipt(tenant.id, receiptId, version, idempotencyKey) }
+                .onSuccess { confirmed ->
+                    if (receiptConfirmGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
+                        ui = ui.copy(receiptDraft = confirmed, receiptConfirming = false, receiptConfirmError = null)
+                    }
+                }
+                .onFailure { failure ->
+                    if (receiptConfirmGeneration.get() != generation || !ui.authenticated ||
+                        ui.tenants.firstOrNull()?.id != tenant.id || ui.receiptDraft?.id != receiptId) return@onFailure
+                    val status = (failure as? ApiFailure)?.status
+                    if (ReceiptReviewRecoveryPolicy.actionFor(status) ==
+                        ReceiptReviewRecoveryAction.REFRESH_RECEIPT_AND_CANDIDATES) {
+                        refreshReceiptDuplicateReview(tenant.id, receiptId, generation,
+                            confirmError = if (status == 409) "candidate_conflict" else "stale_version",
+                            confirmationAttempt = true)
+                    } else {
+                        ui = ui.copy(receiptConfirming = false, receiptConfirmError = "unavailable")
+                    }
+                }
+        }
+    }
+
+    private fun refreshReceiptDuplicateReview(tenantId: String, receiptId: String, generation: Long,
+                                              confirmError: String? = null, decisionError: String? = null,
+                                              confirmationAttempt: Boolean) {
+        runCatching {
+            val latestReceipt = api.receipt(tenantId, receiptId)
+            latestReceipt to api.receiptDuplicateCandidates(tenantId, receiptId)
+        }.onSuccess { (latestReceipt, candidates) ->
+            val currentGeneration = if (confirmationAttempt) receiptConfirmGeneration else receiptDuplicateGeneration
+            if (currentGeneration.get() != generation ||
+                !ui.authenticated || ui.tenants.firstOrNull()?.id != tenantId || ui.receiptDraft?.id != receiptId) return
+            ui = ui.copy(receiptDraft = latestReceipt, receiptDuplicateCandidates = candidates,
+                receiptDuplicateCandidatesReceiptId = receiptId, receiptDuplicateCandidatesLoading = false,
+                receiptDuplicateCandidatesError = null, receiptDuplicateDecisionInProgress = false,
+                receiptDuplicateDecisionError = decisionError, receiptConfirming = false,
+                receiptConfirmError = confirmError)
+        }.onFailure {
+            val currentGeneration = if (confirmationAttempt) receiptConfirmGeneration else receiptDuplicateGeneration
+            if (currentGeneration.get() != generation) return@onFailure
+            if (!ui.authenticated || ui.tenants.firstOrNull()?.id != tenantId || ui.receiptDraft?.id != receiptId) return@onFailure
+            ui = ui.copy(receiptDuplicateCandidates = null, receiptDuplicateCandidatesLoading = false,
+                receiptDuplicateCandidatesError = "unavailable", receiptDuplicateDecisionInProgress = false,
+                receiptDuplicateDecisionError = if (decisionError != null) "refresh_unavailable" else decisionError,
+                receiptConfirming = false,
+                receiptConfirmError = if (confirmError != null) "refresh_unavailable" else confirmError)
         }
     }
 
@@ -1527,6 +1671,14 @@ data class FinanceUiState(
     val receiptItemAddSavedToken: String? = null,
     val receiptTotalSyncError: String? = null,
     val receiptTotalSyncInProgress: Boolean = false,
+    val receiptDuplicateCandidates: FinanceReceiptDuplicateCandidates? = null,
+    val receiptDuplicateCandidatesReceiptId: String? = null,
+    val receiptDuplicateCandidatesLoading: Boolean = false,
+    val receiptDuplicateCandidatesError: String? = null,
+    val receiptDuplicateDecisionInProgress: Boolean = false,
+    val receiptDuplicateDecisionError: String? = null,
+    val receiptConfirming: Boolean = false,
+    val receiptConfirmError: String? = null,
     val receiptUploadInProgress: Boolean = false,
     val receiptUploadError: String? = null,
     val receiptCanRetryUpload: Boolean = false,
@@ -1604,6 +1756,18 @@ internal fun updateReceiptItemWithPageRefresh(
 
 data class FinanceTenant(val id: String, val name: String, val role: String, val timezone: String)
 
+internal enum class ReceiptReviewRecoveryAction {
+    REFRESH_RECEIPT_AND_CANDIDATES,
+    SHOW_ERROR,
+}
+
+internal object ReceiptReviewRecoveryPolicy {
+    fun actionFor(httpStatus: Int?): ReceiptReviewRecoveryAction = when (httpStatus) {
+        409, 412 -> ReceiptReviewRecoveryAction.REFRESH_RECEIPT_AND_CANDIDATES
+        else -> ReceiptReviewRecoveryAction.SHOW_ERROR
+    }
+}
+
 @androidx.compose.runtime.Composable
 internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: (String) -> Unit,
                           onLogin: () -> Unit, onRefresh: () -> Unit,
@@ -1652,7 +1816,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptTotalSyncRefresh: (String) -> Unit = {},
                           onReceiptItemAdd: (String, Long, String, String, String, String) -> Unit =
                               { _, _, _, _, _, _ -> },
-                          onReceiptItemAddRefresh: (String) -> Unit = {}) {
+                          onReceiptItemAddRefresh: (String) -> Unit = {},
+                          onReceiptDuplicateCandidates: (String) -> Unit = {},
+                          onReceiptDuplicateDecision: (String, Long, String, String?) -> Unit = { _, _, _, _ -> },
+                          onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> }) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -1944,10 +2111,14 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptItemEditError, state.receiptItemEditSavedToken,
                         state.receiptTotalSyncError, state.receiptTotalSyncInProgress,
                         state.receiptItemAddError, state.receiptItemAddNeedsRefresh,
-                        state.receiptItemAddSavedToken,
+                        state.receiptItemAddSavedToken, state.receiptDuplicateCandidates,
+                        state.receiptDuplicateCandidatesReceiptId, state.receiptDuplicateCandidatesLoading,
+                        state.receiptDuplicateCandidatesError, state.receiptDuplicateDecisionInProgress,
+                        state.receiptDuplicateDecisionError, state.receiptConfirming, state.receiptConfirmError,
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
                         onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
-                        onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh)
+                        onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh,
+                        onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -2167,6 +2338,11 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 receiptTotalSyncError: String?, receiptTotalSyncInProgress: Boolean,
                                 receiptItemAddError: String?, receiptItemAddNeedsRefresh: Boolean,
                                 receiptItemAddSavedToken: String?,
+                                duplicateCandidates: FinanceReceiptDuplicateCandidates?,
+                                duplicateCandidatesReceiptId: String?, duplicateCandidatesLoading: Boolean,
+                                duplicateCandidatesError: String?, duplicateDecisionInProgress: Boolean,
+                                duplicateDecisionError: String?, receiptConfirming: Boolean,
+                                receiptConfirmError: String?,
                                 onPick: () -> Unit,
                                 onRefresh: () -> Unit, onRetry: () -> Unit, onDiscard: () -> Unit,
                                 onLoadReading: (String) -> Unit,
@@ -2176,7 +2352,13 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onSyncTotal: (String, Long) -> Unit,
                                 onRefreshTotalSync: (String) -> Unit,
                                 onAddItem: (String, Long, String, String, String, String) -> Unit,
-                                onRefreshAddItem: (String) -> Unit) {
+                                onRefreshAddItem: (String) -> Unit,
+                                onLoadDuplicateCandidates: (String) -> Unit,
+                                onDuplicateDecision: (String, Long, String, String?) -> Unit,
+                                onConfirmReceipt: (String, Long, String) -> Unit) {
+    val confirmationIdempotencyKey = androidx.compose.runtime.remember(receipt?.tenantId, receipt?.id) {
+        receipt?.let { receiptConfirmationIdempotencyKey(it.tenantId, it.id) }.orEmpty()
+    }
     var pageNumber by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableIntStateOf(1)
     }
@@ -2202,6 +2384,14 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
     var addQuantity by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("1") }
     var addUnitPrice by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("") }
     var addLineSum by androidx.compose.runtime.remember(receipt?.id) { androidx.compose.runtime.mutableStateOf("") }
+    LaunchedEffect(receipt?.id, canWrite, duplicateCandidatesReceiptId,
+        duplicateCandidatesLoading, duplicateCandidatesError) {
+        val draft = receipt ?: return@LaunchedEffect
+        if (canWrite && draft.state != "confirmed" && duplicateCandidatesReceiptId != draft.id &&
+            !duplicateCandidatesLoading && duplicateCandidatesError == null) {
+            onLoadDuplicateCandidates(draft.id)
+        }
+    }
     androidx.compose.runtime.LaunchedEffect(receiptItemAddSavedToken) {
         if (receiptItemAddSavedToken != null) {
             addingItem = false
@@ -2358,6 +2548,143 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 Text(if (russian) "Синхронизировать итог" else "Sync receipt total")
                             }
                         }
+                    }
+                }
+            }
+            receipt?.let { draft ->
+                val review = duplicateCandidates?.takeIf {
+                    it.receiptId == draft.id && duplicateCandidatesReceiptId == draft.id
+                }
+                val matches = review?.candidates.orEmpty()
+                val cash = draft.cashTotal?.toBigDecimalOrNull()
+                val items = draft.itemsTotal?.toBigDecimalOrNull()
+                val totalsReconciled = cash != null && items != null && cash.compareTo(items) == 0
+                val candidatesReady = review != null && !duplicateCandidatesLoading && duplicateCandidatesError == null
+                val unresolvedCandidate = matches.isNotEmpty() && draft.duplicateDecision == "unknown"
+                val canConfirmReceipt = canWrite && draft.state in setOf("draft", "review_required") &&
+                    draft.transactionId == null && totalsReconciled && candidatesReady &&
+                    review?.decision == draft.duplicateDecision && !unresolvedCandidate &&
+                    draft.duplicateDecision != "duplicate" && !busy && !duplicateDecisionInProgress &&
+                    !receiptConfirming
+
+                if (canWrite && draft.state != "confirmed") {
+                    Card(Modifier.fillMaxWidth().testTag("receipt-duplicate-review")) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(if (russian) "Проверка возможного дубля" else "Possible duplicate review",
+                                style = MaterialTheme.typography.titleSmall)
+                            when {
+                                duplicateCandidatesLoading -> Text(if (russian) "Ищем похожие чеки…"
+                                    else "Checking for matching receipts…",
+                                    modifier = Modifier.testTag("receipt-duplicate-loading"))
+                                duplicateCandidatesError != null || review == null -> {
+                                    Text(if (russian) "Не удалось проверить похожие чеки. Подтверждение временно недоступно."
+                                        else "Could not check for matching receipts. Confirmation is unavailable.",
+                                        modifier = Modifier.testTag("receipt-duplicate-error"),
+                                        color = MaterialTheme.colorScheme.error)
+                                    TextButton(modifier = Modifier.testTag("receipt-duplicate-refresh"),
+                                        enabled = !busy && !duplicateCandidatesLoading,
+                                        onClick = { onLoadDuplicateCandidates(draft.id) }) {
+                                        Text(if (russian) "Повторить проверку" else "Retry check")
+                                    }
+                                }
+                                matches.isEmpty() -> {
+                                    Text(if (russian) "Совпадений за последние 10 минут нет."
+                                        else "No matches in the last 10 minutes.",
+                                        modifier = Modifier.testTag("receipt-duplicate-empty"))
+                                    if (draft.duplicateDecision == "duplicate") {
+                                        TextButton(modifier = Modifier.testTag("receipt-independent"),
+                                            enabled = !busy && !duplicateDecisionInProgress && !receiptConfirming,
+                                            onClick = { onDuplicateDecision(draft.id, draft.version,
+                                                "independent", null) }) {
+                                            Text(if (russian) "Это отдельная покупка" else "This is a separate purchase")
+                                        }
+                                    }
+                                }
+                                else -> {
+                                    Text(if (russian) "Возможные совпадения за последние 10 минут:"
+                                        else "Possible matches from the last 10 minutes:")
+                                    matches.forEach { candidate ->
+                                        Column(Modifier.fillMaxWidth().testTag("receipt-duplicate-candidate-${candidate.id}")) {
+                                            Text("${candidate.merchant ?: if (russian) "Чек" else "Receipt"} · " +
+                                                formatMoney(candidate.cashTotal, language, draft.currency))
+                                            if (draft.duplicateOfReceiptId == candidate.id &&
+                                                draft.duplicateDecision == "duplicate") {
+                                                Text(if (russian) "Отмечен как дубль" else "Marked as duplicate")
+                                            }
+                                            TextButton(
+                                                modifier = Modifier.testTag("receipt-duplicate-mark-${candidate.id}"),
+                                                enabled = !busy && !duplicateDecisionInProgress && !receiptConfirming,
+                                                onClick = { onDuplicateDecision(draft.id, draft.version,
+                                                    "duplicate", candidate.id) }) {
+                                                Text(if (russian) "Это дубль" else "This is a duplicate")
+                                            }
+                                        }
+                                    }
+                                    TextButton(modifier = Modifier.testTag("receipt-independent"),
+                                        enabled = !busy && !duplicateDecisionInProgress && !receiptConfirming,
+                                        onClick = { onDuplicateDecision(draft.id, draft.version,
+                                            "independent", null) }) {
+                                        Text(if (russian) "Это отдельная покупка" else "This is a separate purchase")
+                                    }
+                                }
+                            }
+                            if (review != null && !duplicateCandidatesLoading && duplicateCandidatesError == null) {
+                                val decisionText = when (draft.duplicateDecision) {
+                                    "independent" -> if (russian) "Решение: отдельная покупка"
+                                        else "Decision: separate purchase"
+                                    "duplicate" -> if (russian) "Решение: дубль — расход не будет создан"
+                                        else "Decision: duplicate — no expense will be created"
+                                    else -> if (russian) "Решение не выбрано"
+                                        else "No decision selected"
+                                }
+                                Text(decisionText, modifier = Modifier.testTag("receipt-duplicate-decision"))
+                            }
+                            duplicateDecisionError?.let { code ->
+                                Text(if (russian) when (code) {
+                                    "candidate_conflict" -> "Список возможных дублей изменился. Проверьте его и выберите решение снова."
+                                    "stale_version" -> "Чек изменился. Данные обновлены; проверьте решение ещё раз."
+                                    "refresh_unavailable" -> "Не удалось обновить чек. Повторите проверку."
+                                    else -> "Не удалось сохранить решение. Повторите попытку."
+                                } else when (code) {
+                                    "candidate_conflict" -> "Possible matches changed. Review them and choose your decision again."
+                                    "stale_version" -> "Receipt changed. Details refreshed; review your decision again."
+                                    "refresh_unavailable" -> "Could not refresh the receipt. Retry the check."
+                                    else -> "Could not save the decision. Please retry."
+                                }, modifier = Modifier.testTag("receipt-duplicate-decision-error"),
+                                    color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
+
+                if (canWrite && draft.state == "confirmed") {
+                    Text(if (russian) "Расход подтверждён" else "Expense confirmed",
+                        modifier = Modifier.fillMaxWidth().testTag("receipt-confirmed"))
+                    draft.transactionId?.let { id ->
+                        Text(id, modifier = Modifier.testTag("receipt-transaction-id"))
+                    }
+                } else if (canWrite && draft.state in setOf("draft", "review_required")) {
+                    receiptConfirmError?.let { code ->
+                        Text(if (russian) when (code) {
+                            "candidate_conflict" -> "Список возможных дублей изменился. Проверьте чек и подтвердите расход снова."
+                            "stale_version" -> "Чек изменился. Данные обновлены; проверьте его перед повтором."
+                            "refresh_unavailable" -> "Не удалось обновить чек. Повторите проверку перед подтверждением."
+                            else -> "Не удалось подтвердить расход. Повторите попытку."
+                        } else when (code) {
+                            "candidate_conflict" -> "Possible matches changed. Review the receipt and confirm the expense again."
+                            "stale_version" -> "Receipt changed. Details refreshed; review it before retrying."
+                            "refresh_unavailable" -> "Could not refresh the receipt. Retry the check before confirming."
+                            else -> "Could not confirm the expense. Please retry."
+                        }, modifier = Modifier.testTag("receipt-confirm-error"),
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                    Button(modifier = Modifier.testTag(if (receiptConfirmError == null)
+                        "receipt-confirm" else "receipt-confirm-retry"),
+                        enabled = canConfirmReceipt && receiptConfirmError != "refresh_unavailable",
+                        onClick = { onConfirmReceipt(draft.id, draft.version, confirmationIdempotencyKey) }) {
+                        Text(if (receiptConfirmError != null) {
+                            if (russian) "Повторить подтверждение" else "Retry confirmation"
+                        } else if (russian) "Подтвердить расход" else "Confirm expense")
                     }
                 }
             }
@@ -2671,6 +2998,12 @@ internal fun receiptPollDelayMillis(state: String, attempt: Int): Long? {
         "retryable" -> 5_000L
         else -> null
     }
+}
+
+private fun receiptConfirmationIdempotencyKey(tenantId: String, receiptId: String): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest("$tenantId:$receiptId".toByteArray(Charsets.UTF_8))
+    return "receipt-confirm-${digest.joinToString("") { "%02x".format(it) }}"
 }
 
 private fun receiptStageLabel(stage: String, language: String): String = if (language == "ru") when (stage) {
