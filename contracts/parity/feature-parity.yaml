@@ -967,22 +967,31 @@ features:
     evidence:
       - "F43.1 adds deterministic Go calculation for repeated harmful-item ceiling, four member-local weekly trend buckets, cadence after advice, and separate F42 annotations. F43.2 adds member-scoped durable jobs, watermark snapshots, bounded retries, current-input write guard, public/BFF APIs and service-authenticated worker endpoints. F43.3 runs the worker in the existing analytics-api behind explicit opt-in configuration. F43.4 adds RU/EN Web reporting, pending/processing polling, stale/partial/unavailable states, writer-only explicit enqueue, theoretical-ceiling wording and non-causality copy. RED/GREEN: focused Web suite 7/7; full Web suite 67/67; production TypeScript/Vite build passes; Core PostgreSQL acceptance and migration/contracts suites passed; Go `test ./... -count=1` and `vet ./...` passed; `git diff --check` passes. Telegram report routes serve a separate period-based finance DTO and do not expose the stored F43 job/report DTO; F43 remains available in Web rather than introducing a second calculation. Public runtime/HTTPS and remote GitHub CI remain separate deployment gates."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F43: advice analytics report, weekly trend, and cautious savings effect"
-      gap: "No Android view or request flow exists for the member-scoped F43 advice analytics report."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceAdviceAnalyticsApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceAdviceAnalyticsScreensTest.kt
+      gap: "Local API 27 acceptance is green; live authenticated Android-to-Core OIDC F43 request and durable worker completion are not verified."
+      evidence:
+        - "Android adds strict exact-decimal/null DTO parsing, latest-job GET, explicit writer-only POST enqueue with 401 replay disabled, and UUID-scoped job polling. Reports localizes RU/EN theoretical savings, real weekly buckets, observational effects, and separate F42 recalculation evidence; viewer can read but cannot enqueue. Polling stops on terminal state, tenant/session/request guards reject stale responses, and the F43 section follows existing report totals to preserve prior report visibility."
+        - "Observed RED: AndroidTest compilation failed before F43 DTO/API/Reports UI existed; a USD screen test also failed to compile before currency was passed from the member profile/report. Fixed invalid fixtures to model partial/unavailable Core responses faithfully. GREEN: API 7/7 and F43 screen 10/10 direct instrumentation on isolated Android 8.1/API 27; combined F43 plus F42/report/model regression 151/151; contracts 60/60; debug and AndroidTest APK builds pass; git diff --check passes. Live authenticated OIDC/Core remains unverified."
     intentional_differences:
       - "F43 analytics is exposed in Web; the Telegram report endpoint cannot consume the stored F43 DTO without a new Core route and Telegram UI contract."
   - id: F44
     feature: "Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
     target: "J goals; G candidate features"
     acceptance: "30 дней от принятия; одна активная legacy-цель; новая единица не переписывает обещание"
-    status: in_progress
+    status: complete
     tests:
       - services/analytics-go/advice/f44_test.go
       - services/analytics-go/advice/f44_api_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/GoalServiceTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+      - apps/web/src/GoalsPanel.test.tsx
       - tools/contracts/test_contracts.py
     evidence:
-      - "F44.1 Go candidate calculation and authenticated internal API are implemented with golden fixture, count/sum boundaries, confirmed-decision eligibility, group rules and limits. F44.2 Core persistence/one-active-goal/immutable accepted terms and F44.3 Web proposal UI remain open; F44 is not complete."
+      - "F44.1 Go candidates, nullable amount handling and authenticated internal API pass Go/contract gates; F44.2 adds member-scoped preference, durable accepted goal, Core API/BFF and 50,000 combined payload bound with PostgreSQL/Core/contract gates; F44.3 adds RU/EN Web candidates and active-goal UI with writer/viewer actions (72 tests, production build and Core regression). F44.1–F44.3 are locally green and pushed; GitHub workflows did not start. Android counterpart remains separately missing."
     android:
       status: missing
       scenario: "Android counterpart for F44: Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
@@ -992,9 +1001,14 @@ features:
     feature: "Ход цели, заметка при покупке, завершение, история, следующий кандидат"
     target: "J lifecycle; G progress inputs"
     acceptance: "Закрытие один раз; архив переживает снятие цели; legacy история до 24 записей переносится вся"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/analytics-go/advice/f45_test.go
+      - services/analytics-go/advice/f45_api_test.go
+      - services/core/src/test/java/com/decorix/finance/core/api/GoalServiceTest.java
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+    evidence:
+      - "F45.1–F45.4 code acceptance is locally green and pushed (37f84ba, afcde2d, 85c30d1, plus follow-up commits). Durable member progress, completion/history, cancellation and next candidates are implemented. Legacy SQLite rehearsal/import is a separate E8 migration gate and remains unverified; Android counterpart remains missing."
     android:
       status: missing
       scenario: "Android counterpart for F45: Ход цели, заметка при покупке, завершение, история, следующий кандидат"
@@ -1004,9 +1018,13 @@ features:
     feature: "Однократное сообщение исхода цели после успешной отправки"
     target: "J notification intent + delivery result; P send"
     acceptance: "При сбое итог не теряется; граница неопределённой внешней доставки документирована"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - services/python/telegram_gateway/tests/test_digest.py
+      - services/python/telegram_gateway/tests/test_core_client.py
+      - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
+    evidence:
+      - "Weekly Telegram digest outcome delivery is complete locally and pushed as 9455567. Delivery is acknowledged only after Telegram success, with retry/terminal delivery lifecycle and OpenAPI/gateway/Core/Go/Web regression green. GitHub returned no workflow run; Android counterpart remains missing."
     android:
       status: missing
       scenario: "Android counterpart for F46: Однократное сообщение исхода цели после успешной отправки"

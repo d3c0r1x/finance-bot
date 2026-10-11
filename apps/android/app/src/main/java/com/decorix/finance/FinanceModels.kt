@@ -274,6 +274,107 @@ data class FinancePersonalInflation(
     val falling: List<FinancePersonalInflationItem>,
 )
 
+data class FinanceAdviceAnalyticsJob(
+    val id: String?,
+    val state: String?,
+    val inputWatermark: String?,
+    val algorithmVersion: String?,
+    val completeness: String?,
+    val errorCode: String?,
+    val report: FinanceAdviceAnalyticsReport?,
+    val updatedAt: String,
+)
+
+data class FinanceAdviceAnalyticsReport(
+    val algorithmVersion: String,
+    val inputWatermark: String,
+    val completeness: String,
+    val reasonCode: String,
+    val savings: FinanceAdviceSavings,
+    val trend: FinanceAdviceTrend,
+    val effects: FinanceAdviceEffects,
+    val recalculation: FinanceAdviceRecalculation,
+)
+
+data class FinanceAdviceSavings(
+    val available: Boolean,
+    val reasonCode: String,
+    val label: String,
+    val days: Int,
+    val monthlyCeiling: String?,
+    val shareOfIncome: String?,
+    val shareOfLimit: String?,
+    val groups: List<FinanceAdviceSavingsGroup>,
+)
+
+data class FinanceAdviceSavingsGroup(
+    val productKey: String,
+    val name: String,
+    val count: Int,
+    val spend: String,
+    val monthlyCeiling: String?,
+)
+
+data class FinanceAdviceTrend(
+    val available: Boolean,
+    val reasonCode: String,
+    val delta: String?,
+    val direction: String,
+    val weeks: List<FinanceAdviceWeek>,
+)
+
+data class FinanceAdviceWeek(
+    val start: String,
+    val end: String,
+    val spend: String,
+    val optionalSpend: String,
+    val optionalShare: String,
+    val itemCount: Int,
+    val recalculated: Boolean,
+)
+
+data class FinanceAdviceEffects(
+    val effects: List<FinanceAdviceEffect>,
+    val pending: List<FinanceAdvicePendingEffect>,
+    val causalityClaim: Boolean,
+)
+
+data class FinanceAdviceEffect(
+    val productKey: String,
+    val name: String,
+    val advice: String,
+    val beforeCount: Int,
+    val afterCount: Int,
+    val daysBefore: Int,
+    val daysAfter: Int,
+    val intervalBefore: String,
+    val intervalAfter: String?,
+    val change: String,
+    val direction: String,
+    val afterSpend: String?,
+)
+
+data class FinanceAdvicePendingEffect(
+    val productKey: String,
+    val name: String,
+    val daysAfter: Int,
+    val daysLeft: Int,
+)
+
+data class FinanceAdviceRecalculation(
+    val available: Boolean,
+    val changedItemCount: Int,
+    val optionalSpendDelta: String?,
+    val windows: List<FinanceAdviceRecalculationWindow>,
+)
+
+data class FinanceAdviceRecalculationWindow(
+    val start: String,
+    val end: String,
+    val changedItemCount: Int,
+    val optionalSpendDelta: String?,
+)
+
 data class FinanceRecurringSeries(
     val id: String, val key: String, val name: String, val category: String?, val type: String, val currency: String,
     val amount: String, val minAmount: String, val maxAmount: String, val periodCode: String, val periodDays: Int,
@@ -1488,6 +1589,218 @@ internal object FinanceModels {
         require(reason != "no_optional_items" || banned.isEmpty() && guesses.isEmpty()) { "Empty advice has evidence" }
         return FinanceDoNotBuy(available, reason, banned, guesses)
     }
+
+    fun adviceAnalyticsJob(json: JSONObject): FinanceAdviceAnalyticsJob {
+        requireAdviceFields(json, setOf("id", "state", "inputWatermark", "algorithmVersion", "completeness",
+            "errorCode", "report", "updatedAt"))
+        val id = requiredNullableString(json, "id")
+        val state = requiredNullableString(json, "state")
+        val watermark = requiredNullableString(json, "inputWatermark")
+        val algorithm = requiredNullableString(json, "algorithmVersion")
+        val completeness = requiredNullableString(json, "completeness")
+        val errorCode = requiredNullableString(json, "errorCode")
+        val reportJson = requiredNullableObject(json, "report")
+        val updatedAt = json.get("updatedAt") as? String
+            ?: throw IllegalArgumentException("Invalid advice analytics updatedAt")
+        require(runCatching { Instant.parse(updatedAt) }.isSuccess) { "Invalid advice analytics updatedAt" }
+
+        if (id == null) {
+            require(state == null && watermark == null && algorithm == null && completeness == null
+                && errorCode == null && reportJson == null) { "Empty advice analytics job contains state" }
+            return FinanceAdviceAnalyticsJob(null, null, null, null, null, null, null, updatedAt)
+        }
+        require(isCanonicalUuid(id) && state in setOf("pending", "processing", "ready", "failed", "stale")
+            && watermark != null && isAdviceWatermark(watermark)
+            && algorithm == "advice-f43.v1"
+            && (completeness == null || completeness in setOf("complete", "partial"))) {
+            "Invalid advice analytics job identity or state"
+        }
+        val report = reportJson?.let { adviceAnalyticsReport(it, watermark, completeness) }
+        require((state == "ready") == (report != null) || state == "stale") {
+            "Advice analytics ready state must carry its report"
+        }
+        require(if (state == "failed") errorCode != null else state == "stale" || errorCode == null) {
+            "Advice analytics error state is inconsistent"
+        }
+        require(report == null || report.completeness == completeness) {
+            "Advice analytics completeness does not match report"
+        }
+        return FinanceAdviceAnalyticsJob(id, state, watermark, algorithm, completeness, errorCode, report, updatedAt)
+    }
+
+    private fun adviceAnalyticsReport(
+        json: JSONObject,
+        jobWatermark: String,
+        jobCompleteness: String?,
+    ): FinanceAdviceAnalyticsReport {
+        requireAdviceFields(json, setOf("algorithmVersion", "inputWatermark", "completeness", "reasonCode",
+            "savings", "trend", "effects", "recalculation"))
+        val algorithm = json.get("algorithmVersion") as? String
+            ?: throw IllegalArgumentException("Invalid advice analytics algorithm")
+        val watermark = json.get("inputWatermark") as? String
+            ?: throw IllegalArgumentException("Invalid advice analytics watermark")
+        val completeness = json.get("completeness") as? String
+            ?: throw IllegalArgumentException("Invalid advice analytics completeness")
+        val reason = json.get("reasonCode") as? String
+            ?: throw IllegalArgumentException("Invalid advice analytics reason")
+        require(algorithm == "advice-f43.v1" && watermark == jobWatermark && isAdviceWatermark(watermark)
+            && completeness in setOf("complete", "partial") && (jobCompleteness == null || completeness == jobCompleteness)
+            && reason in setOf("available", "missing_amounts", "insufficient_history")) {
+            "Advice analytics report does not match job"
+        }
+
+        val savingsJson = json.getJSONObject("savings")
+        requireAdviceFields(savingsJson, setOf("available", "reasonCode", "label", "days", "monthlyCeiling",
+            "shareOfIncome", "shareOfLimit", "groups"))
+        val savingsAvailable = requiredBoolean(savingsJson, "available")
+        val savingsReason = adviceString(savingsJson, "reasonCode")
+        val savingsLabel = adviceString(savingsJson, "label")
+        val savingsDays = exactInt(savingsJson, "days")
+        val monthlyCeiling = adviceDecimal(savingsJson, "monthlyCeiling", money = true)
+        val shareOfIncome = adviceDecimal(savingsJson, "shareOfIncome")
+        val shareOfLimit = adviceDecimal(savingsJson, "shareOfLimit")
+        val savingsGroupsJson = savingsJson.getJSONArray("groups")
+        require(savingsGroupsJson.length() <= 5) { "Too many advice savings groups" }
+        val savingsGroups = (0 until savingsGroupsJson.length()).map { index ->
+            val group = savingsGroupsJson.getJSONObject(index)
+            requireAdviceFields(group, setOf("productKey", "name", "count", "spend", "monthlyCeiling"))
+            val key = adviceString(group, "productKey")
+            val name = adviceString(group, "name")
+            val count = exactInt(group, "count")
+            val spend = adviceDecimal(group, "spend", money = true)!!
+            val monthly = adviceDecimal(group, "monthlyCeiling", money = true)
+            require(key.isNotBlank() && name.isNotBlank() && name.length <= 200 && count >= 2) {
+                "Invalid advice savings group"
+            }
+            FinanceAdviceSavingsGroup(key, name, count, spend, monthly)
+        }
+        require(savingsDays == 90 && savingsLabel == "theoretical_ceiling_not_actual_savings"
+            && savingsReason in setOf("available", "missing_amounts", "insufficient_history")
+            && (!savingsAvailable || savingsReason == "available" && monthlyCeiling != null && savingsGroups.isNotEmpty())
+            && (monthlyCeiling != null || shareOfIncome == null && shareOfLimit == null)
+            && (completeness != "partial" || !savingsAvailable)) { "Invalid advice savings report" }
+
+        val trendJson = json.getJSONObject("trend")
+        requireAdviceFields(trendJson, setOf("available", "reasonCode", "weeks", "delta", "direction"))
+        val trendAvailable = requiredBoolean(trendJson, "available")
+        val trendReason = adviceString(trendJson, "reasonCode")
+        val trendDelta = adviceDecimal(trendJson, "delta")
+        val direction = adviceString(trendJson, "direction")
+        val weeksJson = trendJson.getJSONArray("weeks")
+        require(weeksJson.length() <= 4) { "Too many advice trend weeks" }
+        val weeks = (0 until weeksJson.length()).map { index ->
+            val week = weeksJson.getJSONObject(index)
+            requireAdviceFields(week, setOf("start", "end", "spend", "optionalSpend", "optionalShare", "itemCount", "recalculated"))
+            val start = adviceString(week, "start")
+            val end = adviceString(week, "end")
+            runCatching { LocalDate.parse(start); LocalDate.parse(end) }
+                .getOrElse { throw IllegalArgumentException("Invalid advice trend week date") }
+            val spend = adviceDecimal(week, "spend", money = true)!!
+            val optional = adviceDecimal(week, "optionalSpend", money = true)!!
+            val share = adviceDecimal(week, "optionalShare")!!
+            val count = exactInt(week, "itemCount")
+            val recalculated = requiredBoolean(week, "recalculated")
+            require(start <= end && count > 0) { "Invalid advice trend week" }
+            FinanceAdviceWeek(start, end, spend, optional, share, count, recalculated)
+        }
+        require(trendReason in setOf("available", "missing_amounts", "insufficient_history")
+            && (if (trendAvailable) trendReason == "available" && trendDelta != null && weeks.size >= 2
+                && direction in setOf("up", "down", "steady")
+                else trendDelta == null && (direction.isEmpty() || direction in setOf("up", "down", "steady")))
+            && (completeness != "partial" || !trendAvailable)) { "Invalid advice trend report" }
+
+        val effectsJson = json.getJSONObject("effects")
+        requireAdviceFields(effectsJson, setOf("effects", "pending", "causalityClaim"))
+        val causalityClaim = requiredBoolean(effectsJson, "causalityClaim")
+        require(!causalityClaim) { "Advice analytics cannot claim causality" }
+        val effectsArray = effectsJson.getJSONArray("effects")
+        val pendingArray = effectsJson.getJSONArray("pending")
+        require(effectsArray.length() <= 4 && pendingArray.length() <= 4) { "Too many advice effects" }
+        val effects = (0 until effectsArray.length()).map { index ->
+            val item = effectsArray.getJSONObject(index)
+            requireAdviceFields(item, setOf("productKey", "name", "advice", "beforeCount", "afterCount", "daysBefore",
+                "daysAfter", "intervalBefore", "intervalAfter", "change", "direction", "afterSpend"))
+            val key = adviceString(item, "productKey")
+            val name = adviceString(item, "name")
+            val advice = adviceString(item, "advice")
+            val before = exactInt(item, "beforeCount")
+            val after = exactInt(item, "afterCount")
+            val daysBefore = exactInt(item, "daysBefore")
+            val daysAfter = exactInt(item, "daysAfter")
+            val intervalBefore = adviceDecimal(item, "intervalBefore")!!
+            val intervalAfter = adviceDecimal(item, "intervalAfter")
+            val change = adviceDecimal(item, "change")!!
+            val effectDirection = adviceString(item, "direction")
+            val afterSpend = adviceDecimal(item, "afterSpend", money = true)
+            require(key.isNotBlank() && name.isNotBlank() && advice.length <= 500 && before >= 2 && after >= 0
+                && daysBefore > 0 && daysAfter >= 21 && effectDirection in setOf("less_often", "more_often", "same_frequency")) {
+                "Invalid advice effect"
+            }
+            FinanceAdviceEffect(key, name, advice, before, after, daysBefore, daysAfter,
+                intervalBefore, intervalAfter, change, effectDirection, afterSpend)
+        }
+        val pending = (0 until pendingArray.length()).map { index ->
+            val item = pendingArray.getJSONObject(index)
+            requireAdviceFields(item, setOf("productKey", "name", "daysAfter", "daysLeft"))
+            val key = adviceString(item, "productKey")
+            val name = adviceString(item, "name")
+            val daysAfter = exactInt(item, "daysAfter")
+            val daysLeft = exactInt(item, "daysLeft")
+            require(key.isNotBlank() && name.isNotBlank() && daysAfter in 0..20 && daysLeft == 21 - daysAfter) {
+                "Invalid pending advice effect"
+            }
+            FinanceAdvicePendingEffect(key, name, daysAfter, daysLeft)
+        }
+
+        val recalculationJson = json.getJSONObject("recalculation")
+        requireAdviceFields(recalculationJson, setOf("available", "changedItemCount", "optionalSpendDelta", "windows"))
+        val recalculationAvailable = requiredBoolean(recalculationJson, "available")
+        val changedCount = exactInt(recalculationJson, "changedItemCount")
+        val recalculationDelta = adviceDecimal(recalculationJson, "optionalSpendDelta", money = true)
+        val windowsJson = recalculationJson.getJSONArray("windows")
+        require(windowsJson.length() <= 5000) { "Too many advice recalculation windows" }
+        val windows = (0 until windowsJson.length()).map { index ->
+            val window = windowsJson.getJSONObject(index)
+            requireAdviceFields(window, setOf("start", "end", "changedItemCount", "optionalSpendDelta"))
+            val start = adviceString(window, "start")
+            val end = adviceString(window, "end")
+            runCatching { LocalDate.parse(start); LocalDate.parse(end) }
+                .getOrElse { throw IllegalArgumentException("Invalid advice recalculation window date") }
+            val count = exactInt(window, "changedItemCount")
+            val delta = adviceDecimal(window, "optionalSpendDelta", money = true)
+            require(start <= end && count >= 0) { "Invalid advice recalculation window" }
+            FinanceAdviceRecalculationWindow(start, end, count, delta)
+        }
+        require(changedCount >= 0 && (if (recalculationAvailable) recalculationDelta != null
+            else recalculationDelta == null) && (windows.isNotEmpty() || changedCount == 0)) {
+            "Invalid advice recalculation report"
+        }
+
+        return FinanceAdviceAnalyticsReport(algorithm, watermark, completeness, reason,
+            FinanceAdviceSavings(savingsAvailable, savingsReason, savingsLabel, savingsDays, monthlyCeiling,
+                shareOfIncome, shareOfLimit, savingsGroups),
+            FinanceAdviceTrend(trendAvailable, trendReason, trendDelta, direction, weeks),
+            FinanceAdviceEffects(effects, pending, causalityClaim),
+            FinanceAdviceRecalculation(recalculationAvailable, changedCount, recalculationDelta, windows))
+    }
+
+    private fun requireAdviceFields(json: JSONObject, expected: Set<String>) {
+        require(json.keys().asSequence().toSet() == expected) { "Invalid advice analytics fields" }
+    }
+
+    private fun adviceString(json: JSONObject, field: String): String = json.get(field) as? String
+        ?: throw IllegalArgumentException("Invalid advice analytics string: $field")
+
+    private fun adviceDecimal(json: JSONObject, field: String, money: Boolean = false): String? {
+        val raw = requiredNullableString(json, field) ?: return null
+        val pattern = if (money) Regex("^-?(?:0|[1-9]\\d{0,29})\\.\\d{2}$")
+            else Regex("^-?(?:0|[1-9]\\d{0,29})(?:\\.\\d{1,8})?$")
+        require(pattern.matches(raw) && raw.toBigDecimalOrNull() != null) { "Invalid advice analytics decimal: $field" }
+        return raw
+    }
+
+    private fun isAdviceWatermark(value: String): Boolean = value.matches(Regex("^[1-9]\\d{0,18}$"))
+        && value.toLongOrNull() != null
 
     fun productDecisions(json: JSONObject): FinanceProductDecisions {
         val keys = mutableSetOf<String>()

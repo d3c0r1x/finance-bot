@@ -103,10 +103,12 @@ class MainActivity : ComponentActivity() {
     private val receiptDisputedItemsGeneration = AtomicLong(0L)
     private val receiptRepeatWarningsGeneration = AtomicLong(0L)
     private val reportRequestGeneration = AtomicLong(0L)
+    private val adviceAnalyticsGeneration = AtomicLong(0L)
     private val receiptRecalculationGeneration = AtomicLong(0L)
     private val familyBudgetFoodRequestGeneration = AtomicLong(0L)
     private val shoppingRequestGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
+    @Volatile private var adviceAnalyticsPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
     private var pendingTransactionEdit: FinanceTransactionEdit? = null
@@ -156,6 +158,10 @@ class MainActivity : ComponentActivity() {
                         onBudgetProposal = ::createBudgetProposal, onBudgetApply = ::applyBudgetProposal,
                         onDebtCreate = ::createDebt, onDebtPay = ::payDebt, onDebtAdjust = ::adjustDebt,
                         onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
+                        onAdviceAnalyticsLoad = ::loadAdviceAnalytics,
+                        onAdviceAnalyticsRequest = ::requestAdviceAnalytics,
+                        onAdviceAnalyticsPoll = ::pollAdviceAnalytics,
+                        onAdviceAnalyticsStopPolling = ::stopAdviceAnalyticsPolling,
                         onRecalculationPreview = ::previewReceiptRecalculation,
                         onRecalculationApply = ::applyReceiptRecalculation,
                         onRecalculationHistory = ::loadReceiptRecalculationHistory,
@@ -1936,6 +1942,135 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadAdviceAnalytics() {
+        val tenantId = runCatching { activeTenantId() }.getOrNull() ?: return
+        val requestGeneration = adviceAnalyticsGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        adviceAnalyticsPollTask?.cancel(false)
+        ui = ui.copy(adviceAnalyticsBusy = true, adviceAnalyticsError = null,
+            adviceAnalyticsJob = null)
+        executor.execute {
+            runCatching { api.getAdviceAnalytics(tenantId) }
+                .onSuccess { job ->
+                    if (isCurrentAdviceAnalyticsRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        ui = ui.copy(adviceAnalyticsBusy = false, adviceAnalyticsJob = job,
+                            adviceAnalyticsError = null)
+                        scheduleAdviceAnalyticsPollIfNeeded(tenantId, job, requestGeneration, sessionGeneration)
+                    }
+                }
+                .onFailure { error ->
+                    if (isCurrentAdviceAnalyticsRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else ui = ui.copy(adviceAnalyticsBusy = false,
+                            adviceAnalyticsError = adviceAnalyticsErrorCode(error))
+                    }
+                }
+        }
+    }
+
+    private fun requestAdviceAnalytics() {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (tenant.role !in setOf("owner", "admin", "member") || ui.adviceAnalyticsBusy ||
+            ui.adviceAnalyticsJob?.state in setOf("pending", "processing")) return
+        val tenantId = tenant.id
+        val requestGeneration = adviceAnalyticsGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        adviceAnalyticsPollTask?.cancel(false)
+        ui = ui.copy(adviceAnalyticsBusy = true, adviceAnalyticsError = null)
+        executor.execute {
+            runCatching { api.requestAdviceAnalytics(tenantId) }
+                .onSuccess { job ->
+                    if (isCurrentAdviceAnalyticsRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        ui = ui.copy(adviceAnalyticsBusy = false, adviceAnalyticsJob = job,
+                            adviceAnalyticsError = null)
+                        scheduleAdviceAnalyticsPollIfNeeded(tenantId, job, requestGeneration, sessionGeneration)
+                    }
+                }
+                .onFailure { error ->
+                    if (isCurrentAdviceAnalyticsRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else ui = ui.copy(adviceAnalyticsBusy = false,
+                            adviceAnalyticsError = adviceAnalyticsErrorCode(error))
+                    }
+                }
+        }
+    }
+
+    private fun pollAdviceAnalytics() {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val jobId = ui.adviceAnalyticsJob?.id ?: return
+        val requestGeneration = adviceAnalyticsGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        adviceAnalyticsPollTask?.cancel(false)
+        ui = ui.copy(adviceAnalyticsBusy = true, adviceAnalyticsError = null)
+        fetchAdviceAnalyticsJob(tenantId, jobId, requestGeneration, sessionGeneration)
+    }
+
+    private fun stopAdviceAnalyticsPolling() {
+        adviceAnalyticsGeneration.incrementAndGet()
+        adviceAnalyticsPollTask?.cancel(false)
+        adviceAnalyticsPollTask = null
+        if (ui.adviceAnalyticsBusy) ui = ui.copy(adviceAnalyticsBusy = false)
+    }
+
+    private fun fetchAdviceAnalyticsJob(
+        tenantId: String,
+        jobId: String,
+        requestGeneration: Long,
+        sessionGeneration: Long,
+    ) {
+        executor.execute {
+            runCatching { api.getAdviceAnalyticsJob(tenantId, jobId) }
+                .onSuccess { job ->
+                    if (isCurrentAdviceAnalyticsRequest(tenantId, requestGeneration, sessionGeneration) &&
+                        ui.adviceAnalyticsJob?.id == jobId) {
+                        ui = ui.copy(adviceAnalyticsBusy = false, adviceAnalyticsJob = job,
+                            adviceAnalyticsError = null)
+                        scheduleAdviceAnalyticsPollIfNeeded(tenantId, job, requestGeneration, sessionGeneration)
+                    }
+                }
+                .onFailure { error ->
+                    if (isCurrentAdviceAnalyticsRequest(tenantId, requestGeneration, sessionGeneration) &&
+                        ui.adviceAnalyticsJob?.id == jobId) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else ui = ui.copy(adviceAnalyticsBusy = false,
+                            adviceAnalyticsError = adviceAnalyticsErrorCode(error))
+                    }
+                }
+        }
+    }
+
+    private fun scheduleAdviceAnalyticsPollIfNeeded(
+        tenantId: String,
+        job: FinanceAdviceAnalyticsJob?,
+        requestGeneration: Long,
+        sessionGeneration: Long,
+    ) {
+        val jobId = job?.id
+        if (jobId == null || job.state !in setOf("pending", "processing")) {
+            adviceAnalyticsPollTask?.cancel(false)
+            adviceAnalyticsPollTask = null
+            return
+        }
+        adviceAnalyticsPollTask?.cancel(false)
+        adviceAnalyticsPollTask = receiptPollExecutor.schedule({
+            if (isCurrentAdviceAnalyticsRequest(tenantId, requestGeneration, sessionGeneration) &&
+                ui.adviceAnalyticsJob?.id == jobId) {
+                fetchAdviceAnalyticsJob(tenantId, jobId, requestGeneration, sessionGeneration)
+            }
+        }, 1500, TimeUnit.MILLISECONDS)
+    }
+
+    private fun isCurrentAdviceAnalyticsRequest(tenantId: String, generation: Long, sessionGeneration: Long): Boolean =
+        ui.authenticated && ui.tenants.firstOrNull()?.id == tenantId &&
+            adviceAnalyticsGeneration.get() == generation && ReceiptOperationGeneration.isCurrent(sessionGeneration)
+
+    private fun adviceAnalyticsErrorCode(error: Throwable): String = when {
+        error is ApiFailure && error.status == 413 -> "too_many_items"
+        error is ApiFailure && error.status in 400..499 -> "request_failed"
+        else -> "unavailable"
+    }
+
     private fun previewReceiptRecalculation() {
         val tenantId = activeTenantId()
         val requestGeneration = receiptRecalculationGeneration.incrementAndGet()
@@ -2331,6 +2466,9 @@ class MainActivity : ComponentActivity() {
 
     private fun logout() {
         receiptRecalculationGeneration.incrementAndGet()
+        adviceAnalyticsGeneration.incrementAndGet()
+        adviceAnalyticsPollTask?.cancel(false)
+        adviceAnalyticsPollTask = null
         invalidateProductCatalogRequests()
         ReceiptOperationGeneration.invalidate()
         receiptDisputedItemsGeneration.incrementAndGet()
@@ -2390,6 +2528,9 @@ data class FinanceUiState(
     val debtForecasts: Map<String, DebtForecast> = emptyMap(),
     val dashboardSummary: DashboardSummary? = null,
     val report: FinanceReport? = null,
+    val adviceAnalyticsJob: FinanceAdviceAnalyticsJob? = null,
+    val adviceAnalyticsBusy: Boolean = false,
+    val adviceAnalyticsError: String? = null,
     val receiptRecalculationPreview: FinanceReceiptRecalculationPreview? = null,
     val receiptRecalculationApplyResult: FinanceReceiptRecalculationApplyResult? = null,
     val receiptRecalculationHistory: FinanceReceiptRecalculationHistoryPage? = null,
@@ -2755,7 +2896,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptDisputedItemsPage: (String, Int) -> Unit = { _, _ -> },
                           onReceiptRepeatWarningsRefresh: (String) -> Unit = {},
                           onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> },
-                          onReceiptPriceComparison: (String, String, String) -> Unit = { _, _, _ -> }) {
+                          onReceiptPriceComparison: (String, String, String) -> Unit = { _, _, _ -> },
+                          onAdviceAnalyticsLoad: () -> Unit = {},
+                          onAdviceAnalyticsRequest: () -> Unit = {},
+                          onAdviceAnalyticsPoll: () -> Unit = {},
+                          onAdviceAnalyticsStopPolling: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -2789,6 +2934,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     val role = state.tenants.firstOrNull()?.role
     val canManageFamilyTransactions = role == "owner" || role == "admin"
     val currentUserId = state.transactionMembers.singleOrNull()?.userId
+    LaunchedEffect(activeScreen, state.tenants.firstOrNull()?.id) {
+        if (activeScreen == "reports" && state.tenants.isNotEmpty()) onAdviceAnalyticsLoad()
+        else onAdviceAnalyticsStopPolling()
+    }
     LaunchedEffect(state.tenants.firstOrNull()?.id, state.budgetProposal?.id, state.busy,
         state.memberProfile?.displayName, state.memberProfile?.plannedIncome, state.memberProfile?.onboardingState,
         onboardingCreatePending, onboardingApplyPending) {
@@ -3105,7 +3254,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
                     "reports" -> ReportScreen(state, language, onReportLoad,
                         onRecalculationPreview, onRecalculationApply,
-                        onRecalculationHistory, onRecalculationDetail)
+                        onRecalculationHistory, onRecalculationDetail,
+                        onAdviceAnalyticsRequest, onAdviceAnalyticsPoll)
                     "profile" -> ProfileScreen(Modifier.weight(1f), state, language, onProfileSave,
                         onRepeatSetup = { name, income ->
                             memberName = name
@@ -5783,7 +5933,9 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                          onRecalculationPreview: () -> Unit,
                          onRecalculationApply: (String) -> Unit,
                          onRecalculationHistory: (String?) -> Unit,
-                         onRecalculationDetail: (String, String?) -> Unit) {
+                         onRecalculationDetail: (String, String?) -> Unit,
+                         onAdviceAnalyticsRequest: () -> Unit = {},
+                         onAdviceAnalyticsPoll: () -> Unit = {}) {
     val russian = language == "ru"
     val initialMonth = state.report?.fromDate?.take(7) ?: YearMonth.now().toString()
     var period by androidx.compose.runtime.remember { mutableStateOf("month") }
@@ -5834,7 +5986,21 @@ private fun ReportScreen(state: FinanceUiState, language: String,
         }
         val report = state.report
         if (report == null) {
-            Text(if (russian) "Выберите период и загрузите отчёт" else "Choose a period and load a report")
+            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                item {
+                    AdviceAnalyticsSection(
+                        role = state.tenants.firstOrNull()?.role,
+                        language = language,
+                        currency = state.report?.currency ?: state.memberProfile?.currency ?: "RUB",
+                        job = state.adviceAnalyticsJob,
+                        busy = state.adviceAnalyticsBusy,
+                        error = state.adviceAnalyticsError,
+                        onRequest = onAdviceAnalyticsRequest,
+                        onPoll = onAdviceAnalyticsPoll,
+                    )
+                }
+                item { Text(if (russian) "Выберите период и загрузите отчёт" else "Choose a period and load a report") }
+            }
         } else {
             Text(if (russian) "${report.fromDate} — ${report.toDate} · ${report.timezone}" else "${report.fromDate} — ${report.toDate} · ${report.timezone}")
             val categoryMaximum = report.expenseByCategory.values.maxByOrNull {
@@ -5953,6 +6119,18 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                         onApply = onRecalculationApply,
                         onLoadHistory = onRecalculationHistory,
                         onLoadDetail = onRecalculationDetail,
+                    )
+                }
+                item {
+                    AdviceAnalyticsSection(
+                        role = state.tenants.firstOrNull()?.role,
+                        language = language,
+                        currency = report.currency,
+                        job = state.adviceAnalyticsJob,
+                        busy = state.adviceAnalyticsBusy,
+                        error = state.adviceAnalyticsError,
+                        onRequest = onAdviceAnalyticsRequest,
+                        onPoll = onAdviceAnalyticsPoll,
                     )
                 }
             }

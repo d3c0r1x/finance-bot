@@ -454,6 +454,27 @@ class FinanceApi internal constructor(
         execute("/api/v1/tenants/$tenantId/analytics/personal-inflation", "GET"),
     ))
 
+    fun getAdviceAnalytics(tenantId: String): FinanceAdviceAnalyticsJob {
+        require(isUuid(tenantId)) { "Invalid tenant id" }
+        return FinanceModels.adviceAnalyticsJob(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/analytics/advice", "GET",
+        )))
+    }
+
+    fun requestAdviceAnalytics(tenantId: String): FinanceAdviceAnalyticsJob {
+        require(isUuid(tenantId)) { "Invalid tenant id" }
+        return FinanceModels.adviceAnalyticsJob(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/analytics/advice", "POST", "{}", retryUnauthorized = false,
+        )))
+    }
+
+    fun getAdviceAnalyticsJob(tenantId: String, jobId: String): FinanceAdviceAnalyticsJob {
+        require(isUuid(tenantId) && isUuid(jobId)) { "Invalid advice analytics job identity" }
+        return FinanceModels.adviceAnalyticsJob(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/analytics/advice/jobs/$jobId", "GET",
+        )))
+    }
+
     fun recurringProjection(tenantId: String): FinanceRecurringProjection = FinanceModels.recurringProjection(JSONObject(
         execute("/api/v1/tenants/$tenantId/analytics/recurring", "GET"),
     ))
