@@ -534,7 +534,21 @@ class MainActivity : ComponentActivity() {
                 .onSuccess { confirmed ->
                     if (receiptConfirmGeneration.get() == generation && ui.authenticated &&
                         ui.tenants.firstOrNull()?.id == tenant.id && ui.receiptDraft?.id == receiptId) {
-                        ui = ui.copy(receiptDraft = confirmed, receiptConfirming = false, receiptConfirmError = null)
+                        val invalidateGoalCache = GoalResponsePolicy.shouldInvalidateGoalCache(
+                            confirmationSucceeded = true,
+                            cachedTenantId = ui.goalTenantId,
+                            confirmedTenantId = tenant.id,
+                        )
+                        if (invalidateGoalCache) goalRequestGeneration.incrementAndGet()
+                        ui = ui.copy(
+                            receiptDraft = confirmed,
+                            receiptConfirming = false,
+                            receiptConfirmError = null,
+                            goalOverview = if (invalidateGoalCache) null else ui.goalOverview,
+                            goalTenantId = if (invalidateGoalCache) null else ui.goalTenantId,
+                            goalBusy = if (invalidateGoalCache) false else ui.goalBusy,
+                            goalError = if (invalidateGoalCache) null else ui.goalError,
+                        )
                     }
                 }
                 .onFailure { failure ->

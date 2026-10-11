@@ -1018,9 +1018,14 @@ features:
     evidence:
       - "F45.1–F45.4 code acceptance is locally green and pushed (37f84ba, afcde2d, 85c30d1, plus follow-up commits). Durable member progress, completion/history, cancellation and next candidates are implemented. Legacy SQLite rehearsal/import is a separate E8 migration gate and remains unverified; Android counterpart remains missing."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F45: Ход цели, заметка при покупке, завершение, история, следующий кандидат"
-      gap: "No Android user screen or equivalent flow is verified for F45 yet."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceGoalsScreensTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/GoalResponsePolicyTest.kt
+      gap: "Synthetic Android 8.1/API 27 progress/history and cache-policy tests pass. Live authenticated Android-to-Core OIDC and real tenant-isolation remain unverified; legacy SQLite history rehearsal remains the separate E8 gate."
+      evidence:
+        - "F45.5 renders Core activeProgress and all returned history rows in Core order, preserves unknown amounts/verdicts, reads candidates without auto-accept and hides mutations for viewers. Confirmed receipt clears only a matching tenant goal cache after existing session/tenant/receipt guards; request generation fences stale GET responses. Local API 27 direct instrumentation: 178 regression tests plus RU count-progress check 1/1; GoalResponsePolicy JVM tests pass; contracts 60/60; debug and AndroidTest APK builds pass. Live OIDC and production SQLite rehearsal remain unverified."
     intentional_differences: []
   - id: F46
     feature: "Однократное сообщение исхода цели после успешной отправки"

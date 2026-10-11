@@ -124,6 +124,36 @@ internal fun GoalsSection(
                 }
             }
 
+            if (overview.active != null && overview.activeProgress != null) {
+                GoalProgressCard(
+                    goal = overview.active,
+                    progress = overview.activeProgress,
+                    language = language,
+                )
+            }
+
+            if (overview.history.isNotEmpty()) {
+                Text(if (russian) "История целей" else "Goal history", style = MaterialTheme.typography.titleSmall)
+                overview.history.forEach { outcome ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(outcome.name, style = MaterialTheme.typography.titleSmall)
+                            Text(goalDate(outcome.completedAt, language))
+                            Text(goalOutcomeText(outcome, language))
+                            Text(
+                                if (outcome.unit == "count") {
+                                    "${outcome.bought} / ${outcome.countTarget}"
+                                } else if (outcome.spent == null) {
+                                    "—"
+                                } else {
+                                    "${formatMoney(outcome.spent, language)} / ${formatMoney(outcome.monthlyLimit, language)}"
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
             if (overview.candidates.isNotEmpty()) {
                 Text(if (russian) "Предложения" else "Suggestions", style = MaterialTheme.typography.titleSmall)
                 overview.candidates.forEach { candidate ->
@@ -200,6 +230,63 @@ internal fun GoalsSection(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun GoalProgressCard(
+    goal: FinanceMemberGoal,
+    progress: FinanceGoalProgress,
+    language: String,
+) {
+    val russian = language == "ru"
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(if (russian) "Ход цели" else "Goal progress", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (progress.unit == "count") {
+                    if (russian) "Подтверждённые покупки: ${progress.bought} из ${goal.countTarget}"
+                    else "Confirmed purchases: ${progress.bought} of ${goal.countTarget}"
+                } else {
+                    if (russian) "Потрачено за цель: ${formatMoney(progress.spent, language)} из ${formatMoney(goal.monthlyLimit, language)}"
+                    else "Spent toward goal: ${formatMoney(progress.spent, language)} of ${formatMoney(goal.monthlyLimit, language)}"
+                },
+            )
+            if (progress.unit == "count" && progress.spent != null) {
+                Text(
+                    if (russian) "Потрачено за цель: ${formatMoney(progress.spent, language)}"
+                    else "Spent toward goal: ${formatMoney(progress.spent, language)}",
+                )
+            }
+            if (progress.amountsUnknown) {
+                Text(
+                    if (russian) "Суммы чеков неизвестны — итог по деньгам не вычисляю."
+                    else "Some receipt amounts are unknown; monetary outcome is not calculated.",
+                )
+            }
+            if (progress.met != null) {
+                Text(
+                    if (progress.over == true) {
+                        if (russian) "Лимит уже превышен." else "The limit has been exceeded."
+                    } else {
+                        if (russian) "Пока укладываетесь в цель." else "You are within the goal so far."
+                    },
+                )
+            }
+            Text(
+                if (russian) "Осталось дней: ${progress.daysLeft}"
+                else "${progress.daysLeft} days left",
+            )
+        }
+    }
+}
+
+private fun goalOutcomeText(outcome: FinanceGoalOutcome, language: String): String {
+    val russian = language == "ru"
+    return when (outcome.met) {
+        true -> if (russian) "Выполнена" else "Met"
+        false -> if (russian) "Не выполнена" else "Not met"
+        null -> if (russian) "Итог по деньгам неизвестен" else "Monetary outcome is unknown"
     }
 }
 

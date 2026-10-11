@@ -2,6 +2,12 @@ package com.decorix.finance
 
 /** Keeps late goal responses from crossing account, tenant, screen or request boundaries. */
 internal object GoalResponsePolicy {
+    fun shouldInvalidateGoalCache(
+        confirmationSucceeded: Boolean,
+        cachedTenantId: String?,
+        confirmedTenantId: String,
+    ): Boolean = confirmationSucceeded && cachedTenantId == confirmedTenantId
+
     fun canApply(
         authenticated: Boolean,
         requestTenantId: String,

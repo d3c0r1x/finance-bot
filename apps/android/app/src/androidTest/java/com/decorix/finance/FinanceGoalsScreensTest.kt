@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,6 +21,86 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class FinanceGoalsScreensTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun countProgressRendersCorePurchaseAndSpendValuesInEnglish() {
+        show(language = "en", overview = overview(active = activeGoal()).copy(
+            activeProgress = progress(unit = "count", bought = 1, spent = "45.67",
+                amountsUnknown = false, over = false, met = false),
+        ))
+
+        compose.onNodeWithText("Goal progress").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Confirmed purchases: 1 of 2").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Spent toward goal: 45.67 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("20 days left").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun countProgressFormatsKnownSpendInRussianWithoutRecalculation() {
+        show(overview = overview(active = activeGoal()).copy(
+            activeProgress = progress(unit = "count", bought = 1, spent = "45.67",
+                amountsUnknown = false, over = false, met = true),
+        ))
+
+        compose.onNodeWithText("Подтверждённые покупки: 1 из 2").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Потрачено за цель: 45,67 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Пока укладываетесь в цель.").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun unknownSumProgressDoesNotInventSpendOrVerdictInRussian() {
+        show(overview = overview(active = activeGoal().copy(unit = "sum", monthlyLimit = "100.00")).copy(
+            activeProgress = progress(unit = "sum", bought = 3, spent = null,
+                amountsUnknown = true, over = null, met = null),
+        ))
+
+        compose.onNodeWithText("Ход цели").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Потрачено за цель: — из 100,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Суммы чеков неизвестны — итог по деньгам не вычисляю.")
+            .performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("Пока укладываетесь в цель.").assertCountEquals(0)
+        compose.onAllNodesWithText("Лимит уже превышен.").assertCountEquals(0)
+        compose.onAllNodesWithText("0,00 ₽").assertCountEquals(0)
+    }
+
+    @Test fun historyPreservesCoreOrderAndShowsLegacyUnknownOutcome() {
+        val completed = outcome(id = "recent", name = "Первый товар", spent = "12.30", met = true)
+        val legacy = outcome(id = "legacy", goalId = null, name = "Старый товар", spent = null,
+            met = null, origin = "legacy")
+        show(overview = overview().copy(history = listOf(completed, legacy)))
+
+        compose.onNodeWithText("История целей").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Первый товар").assertExists()
+        compose.onNodeWithText("Старый товар").assertExists()
+        val firstTop = compose.onNodeWithText("Первый товар").fetchSemanticsNode().boundsInRoot.top
+        val legacyTop = compose.onNodeWithText("Старый товар").fetchSemanticsNode().boundsInRoot.top
+        assertTrue("Core newest-first outcome order must stay unchanged", firstTop < legacyTop)
+        compose.onNodeWithText("Итог по деньгам неизвестен").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun returnedCandidateAfterCompletionIsAvailableButNeverAutoAccepted() {
+        val accepted = mutableListOf<Pair<String, String>>()
+        show(overview = overview().copy(
+            active = null,
+            activeProgress = null,
+            history = listOf(outcome(id = "done", name = "Чипсы", spent = "88.00", met = false)),
+        ), onAccept = { key, watermark -> accepted += key to watermark })
+
+        assertEquals(emptyList<Pair<String, String>>(), accepted)
+        compose.onNodeWithText("Поставить цель: Чипсы").performScrollTo().assertIsEnabled()
+        assertEquals("Displaying a candidate must not accept it", emptyList<Pair<String, String>>(), accepted)
+    }
+
+    @Test fun viewerCanReadProgressAndHistoryWithoutGoalActions() {
+        show(role = "viewer", overview = overview(active = activeGoal()).copy(
+            activeProgress = progress(unit = "count", bought = 1, spent = null,
+                amountsUnknown = true, over = null, met = null),
+            history = listOf(outcome(id = "legacy", goalId = null, name = "Архивная цель",
+                spent = null, met = null, origin = "legacy")),
+        ), onAccept = { _, _ -> error("viewer cannot accept") })
+
+        compose.onNodeWithText("Подтверждённые покупки: 1 из 2").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Архивная цель").performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("Отменить цель").assertCountEquals(0)
+        compose.onAllNodesWithText("Поставить цель: Чипсы").assertCountEquals(0)
+    }
 
     @Test fun writerChoosesCountOrSumAndSavesOnlyAfterExplicitAction() {
         val saved = mutableListOf<String>()
@@ -221,5 +302,31 @@ class FinanceGoalsScreensTest {
         unit = "count", monthlyRate = "4.00", countTarget = 2, monthlySpend = null, monthlyLimit = null,
         evidenceCount = 4, inputWatermark = "17", acceptedAt = "2026-10-07T10:00:00Z",
         endsAt = "2026-11-06T10:00:00Z", status = "active", version = 1,
+    )
+
+    private fun progress(
+        unit: String,
+        bought: Int,
+        spent: String?,
+        amountsUnknown: Boolean,
+        over: Boolean?,
+        met: Boolean?,
+    ) = FinanceGoalProgress(
+        algorithmVersion = "goal-progress-f45.v1", inputWatermark = "41", unit = unit,
+        bought = bought, spent = spent, amountsUnknown = amountsUnknown, over = over, met = met,
+        finished = false, daysLeft = 20, windowStart = "2026-10-01", windowEnd = "2026-10-31",
+    )
+
+    private fun outcome(
+        id: String,
+        goalId: String? = "goal-$id",
+        name: String,
+        spent: String?,
+        met: Boolean?,
+        origin: String = "goal",
+    ) = FinanceGoalOutcome(
+        id = id, goalId = goalId, key = id, name = name, scope = "product", unit = "count",
+        countTarget = 2, monthlyLimit = null, bought = 2, spent = spent, met = met,
+        acceptedAt = "2026-09-01T00:00:00Z", completedAt = "2026-10-01T00:00:00Z", origin = origin,
     )
 }

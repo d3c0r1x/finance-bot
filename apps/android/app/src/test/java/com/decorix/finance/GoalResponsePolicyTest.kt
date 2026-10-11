@@ -5,6 +5,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GoalResponsePolicyTest {
+    @Test fun receiptConfirmationInvalidatesOnlySuccessfulMatchingCachedGoalTenant() {
+        assertTrue(GoalResponsePolicy.shouldInvalidateGoalCache(
+            confirmationSucceeded = true, cachedTenantId = TENANT_A, confirmedTenantId = TENANT_A,
+        ))
+        assertFalse(GoalResponsePolicy.shouldInvalidateGoalCache(
+            confirmationSucceeded = false, cachedTenantId = TENANT_A, confirmedTenantId = TENANT_A,
+        ))
+        assertFalse(GoalResponsePolicy.shouldInvalidateGoalCache(
+            confirmationSucceeded = true, cachedTenantId = TENANT_B, confirmedTenantId = TENANT_A,
+        ))
+        assertFalse(GoalResponsePolicy.shouldInvalidateGoalCache(
+            confirmationSucceeded = true, cachedTenantId = null, confirmedTenantId = TENANT_A,
+        ))
+    }
+
     @Test fun appliesOnlyToCurrentAuthenticatedTenantSessionAndRequest() {
         assertTrue(GoalResponsePolicy.canApply(
             authenticated = true, requestTenantId = TENANT_A, activeTenantId = TENANT_A,
