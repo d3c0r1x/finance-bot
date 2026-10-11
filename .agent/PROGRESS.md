@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 13:52 MSK, Europe/Moscow.
+Updated: 2026-10-11 13:54 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -2138,7 +2138,7 @@ Updated: 2026-10-11 13:52 MSK, Europe/Moscow.
 - Plan: `docs/superpowers/plans/2026-10-11-f52-android-csv-export.md`.
 - Next: continue the next missing F59 Android behavior; retain deployment and live Core gates as open.
 
-## F59.25 F53 Android refresh with preserved member filter — GREEN locally; COMMIT_PENDING — 2026-10-11
+## F59.25 F53 Android refresh with preserved member filter — GREEN locally; COMMITTED/PUSHED — 2026-10-11
 
 - Plan: F53 requires refresh/F5 behavior; the existing Android participant flow is approved and already passes its route/filter acceptance. Extend it with a visible Transactions refresh action.
 - TDD RED: expanded `managerCanOpenMemberTransactionsFromMembersScreen` to set search, type and date filters, navigate through «Участники», then assert refresh resends the exact same query and selected member ID. API-27 run failed at the missing `transaction-refresh` control (1 failed test in 89).
@@ -2146,5 +2146,5 @@ Updated: 2026-10-11 13:52 MSK, Europe/Moscow.
 - Regression: the first full class run found an ambiguous English `Refresh` text selector because another screen control uses the same word. The test now uses the unique `transaction-refresh` tag and checks the localized label.
 - GREEN: focused member-navigation/refresh test 1/1; complete `FinanceScreensTest` 89/89 on isolated Android 8.1/API 27 `emulator-5554`, including RU/EN invalid-date rejection and exact query preservation. Android JVM 73/73; debug and AndroidTest APK assembly passed; parity/contract tests 67/67; `git diff --check` clean. Live Core/OIDC and real member authorization remain unverified.
 - Review: independent read-only review found no concrete defects in filter preservation, date validation or busy-state gating. Review confirms tests exercise Compose callback wiring only, not live Core/OIDC.
-- Commit state: COMMIT_PENDING. Files: `MainActivity.kt`, `FinanceScreensTest.kt`, F53 registry evidence, F53 plan follow-up, and this progress record. Preserve all user-owned untracked paths.
-- Next: commit and push F59.25; then continue an independently closable V1 slice. Keep live OIDC/Core and M2 public-runtime blockers explicit.
+- Commit/push: `88b30c713f9d349e6e7f3cad4f2fd8cfc99059cd` (`feat(F53): refresh Android transaction filters`) pushed to `origin/feat/saas-rewrite`; `git ls-remote` confirmed exact remote SHA. Only `MainActivity.kt`, `FinanceScreensTest.kt`, F53 registry evidence, F53 plan follow-up and progress were committed. User-owned untracked paths remain untouched.
+- Next: continue an independently closable V1 slice. Keep live OIDC/Core and M2 public-runtime blockers explicit.
