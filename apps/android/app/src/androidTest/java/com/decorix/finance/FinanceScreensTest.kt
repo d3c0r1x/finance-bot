@@ -1753,6 +1753,22 @@ class FinanceScreensTest {
         assertEquals(listOf("зарп", "expense", "2026-10-01", "2026-10-31", "member-42"), applied)
     }
 
+    @Test fun selectedNavigationTabFollowsTheVisibleScreen() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))))
+
+        compose.onNodeWithTag("navigation-tab-overview")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+        compose.onNodeWithTag("navigation-tab-transactions")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, false))
+
+        compose.onNodeWithTag("navigation-tab-transactions").performScrollTo().performClick()
+
+        compose.onNodeWithTag("navigation-tab-transactions")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+        compose.onNodeWithTag("navigation-tab-overview")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, false))
+    }
+
     @Test fun managerCanOpenMemberTransactionsFromMembersScreen() {
         val selectedScopes = mutableListOf<String>()
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
@@ -1763,7 +1779,12 @@ class FinanceScreensTest {
         compose.onNodeWithTag("member-navigation-member-42").performScrollTo().performClick()
 
         compose.onNodeWithTag("transaction-history").assertIsDisplayed()
+        compose.onNodeWithText("Участник: Taylor Display").assertIsDisplayed()
         assertEquals(listOf("member-42"), selectedScopes)
+        compose.onNodeWithTag("navigation-tab-transactions")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+        compose.onNodeWithTag("navigation-tab-members")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, false))
     }
 
     @Test fun viewerCannotOpenFamilyMembersScreen() {

@@ -15,5 +15,12 @@
 
 - Owner/admin can see Core-provided members and tap one to open their transaction list; the existing filter callback receives that exact member ID.
 - Viewer cannot open a family member list or widen transaction scope.
+- The selected Android route is visually and accessibly indicated, including when member selection navigates to filtered transactions.
 - Existing own-profile edit and transaction filtering remain unchanged.
 - No live OIDC/Core authorization or production member-data claim is inferred from mock Compose coverage.
+
+## Active-route follow-up
+
+- Keep the existing route `TextButton` and its full hit target. Add a stable tag and selected semantics, plus a distinct Material selected color treatment, derived from the same `activeScreen` state that chooses the visible content.
+- Verify overview selection on entry, selected-state movement after tab navigation, and member-to-transactions navigation preserving the exact member filter while moving the selected state to Transactions. Viewer still has no member route.
+- Run the full `FinanceScreensTest` instrumentation class on the isolated API-27 emulator and record F53 as Android-partial while refresh semantics and live Core/OIDC remain open.
