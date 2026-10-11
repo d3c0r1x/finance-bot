@@ -4901,13 +4901,15 @@ private fun ProfileScreen(modifier: Modifier, state: FinanceUiState, language: S
                 TextButton(onClick = { digestLanguage = "en" }, enabled = !state.busy) { Text("English") }
             }
             Row {
-                Checkbox(checked = dailyEnabled, onCheckedChange = { dailyEnabled = it }, enabled = !state.busy)
+                Checkbox(checked = dailyEnabled, onCheckedChange = { dailyEnabled = it }, enabled = !state.busy,
+                    modifier = Modifier.testTag("daily-digest-enabled"))
                 Text(if (russian) "Ежедневная сводка" else "Daily digest", Modifier.padding(top = 12.dp))
             }
             OutlinedTextField(dailyTime, { dailyTime = it }, enabled = !state.busy, singleLine = true,
                 label = { Text(if (russian) "Время ежедневной сводки" else "Daily digest time") })
             Row {
-                Checkbox(checked = weeklyEnabled, onCheckedChange = { weeklyEnabled = it }, enabled = !state.busy)
+                Checkbox(checked = weeklyEnabled, onCheckedChange = { weeklyEnabled = it }, enabled = !state.busy,
+                    modifier = Modifier.testTag("weekly-digest-enabled"))
                 Text(if (russian) "Недельная сводка" else "Weekly digest", Modifier.padding(top = 12.dp))
             }
             val weekdays = if (russian) listOf("Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье")

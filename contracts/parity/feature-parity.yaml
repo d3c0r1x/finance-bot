@@ -683,7 +683,8 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F32 acceptance condition or live Core integration."
+      evidence: "Android UI tests cover independent daily/weekly switches, malformed local time and incomplete quiet-hours rejection in RU/EN, clearing both quiet-hours together, and exact callback values. MockWebServer verifies tenant-scoped GET/PATCH, Bearer auth, schedule/language fields, explicit nulls, server-owned timezone, and If-Match versions."
+      gap: "Settings UI and wire contract use synthetic state/MockWebServer; live authenticated Android-to-Core OIDC roundtrip remains unverified. Durable scheduling, retry, deduplication, quiet-hours, and no-data behavior are covered by Core/PostgreSQL and Python worker tests above."
     intentional_differences: []
   - id: F33
     feature: "Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"

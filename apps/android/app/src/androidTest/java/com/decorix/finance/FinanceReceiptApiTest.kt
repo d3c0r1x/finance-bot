@@ -34,6 +34,96 @@ class FinanceReceiptApiTest {
         override fun after() = server.shutdown()
     }
 
+    @Test fun notificationPreferencesUseTenantScopedLocaleAndVersionedPatchWithoutClientTimezone() {
+        server.enqueue(MockResponse().setBody(notificationPreferencesJson(
+            timezone = "Europe/Moscow", language = "ru", dailyEnabled = true,
+            dailyLocalTime = "08:15", weeklyEnabled = false, weeklyDayOfWeek = 1,
+            weeklyLocalTime = "09:30", quietHoursStart = "22:00", quietHoursEnd = "07:00", version = 12,
+        )))
+        server.enqueue(MockResponse().setBody(notificationPreferencesJson(
+            timezone = "Europe/Moscow", language = "en", dailyEnabled = false,
+            dailyLocalTime = "07:05", weeklyEnabled = true, weeklyDayOfWeek = 5,
+            weeklyLocalTime = "10:45", quietHoursStart = null, quietHoursEnd = null, version = 13,
+        )))
+        server.enqueue(MockResponse().setBody(notificationPreferencesJson(
+            timezone = "Europe/Moscow", language = "en", dailyEnabled = false,
+            dailyLocalTime = "07:05", weeklyEnabled = true, weeklyDayOfWeek = 5,
+            weeklyLocalTime = "10:45", quietHoursStart = "23:15", quietHoursEnd = "06:30", version = 14,
+        )))
+
+        val api = api().also {
+            it.saveTokens("notification-token", "refresh-token", System.currentTimeMillis() + 60_000)
+        }
+        val loaded = api.notificationPreferences("tenant-17")
+        val cleared = api.updateNotificationPreferences("tenant-17", loaded.copy(
+            language = "en", dailyEnabled = false, dailyLocalTime = "07:05",
+            weeklyEnabled = true, weeklyDayOfWeek = 5, weeklyLocalTime = "10:45",
+            quietHoursStart = null, quietHoursEnd = null,
+        ))
+        val configured = api.updateNotificationPreferences("tenant-17", cleared.copy(
+            quietHoursStart = "23:15", quietHoursEnd = "06:30",
+        ))
+
+        assertEquals("Europe/Moscow", loaded.timezone)
+        assertEquals("ru", loaded.language)
+        assertTrue(loaded.dailyEnabled)
+        assertEquals("08:15", loaded.dailyLocalTime)
+        assertFalse(loaded.weeklyEnabled)
+        assertEquals(1, loaded.weeklyDayOfWeek)
+        assertEquals("09:30", loaded.weeklyLocalTime)
+        assertEquals("22:00", loaded.quietHoursStart)
+        assertEquals("07:00", loaded.quietHoursEnd)
+        assertEquals(12L, loaded.version)
+        assertEquals("en", cleared.language)
+        assertFalse(cleared.dailyEnabled)
+        assertEquals("07:05", cleared.dailyLocalTime)
+        assertTrue(cleared.weeklyEnabled)
+        assertEquals(5, cleared.weeklyDayOfWeek)
+        assertEquals("10:45", cleared.weeklyLocalTime)
+        assertNull(cleared.quietHoursStart)
+        assertNull(cleared.quietHoursEnd)
+        assertEquals(13L, cleared.version)
+        assertEquals("23:15", configured.quietHoursStart)
+        assertEquals("06:30", configured.quietHoursEnd)
+        assertEquals(14L, configured.version)
+
+        val get = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", get.method)
+        assertEquals("/api/v1/tenants/tenant-17/notification-preferences", get.path)
+        assertEquals("Bearer notification-token", get.getHeader("Authorization"))
+
+        val clear = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PATCH", clear.method)
+        assertEquals("/api/v1/tenants/tenant-17/notification-preferences", clear.path)
+        assertEquals("Bearer notification-token", clear.getHeader("Authorization"))
+        assertEquals("\"12\"", clear.getHeader("If-Match"))
+        val clearBody = org.json.JSONObject(clear.body.readUtf8())
+        assertEquals("en", clearBody.getString("language"))
+        assertFalse(clearBody.getBoolean("dailyEnabled"))
+        assertEquals("07:05", clearBody.getString("dailyLocalTime"))
+        assertTrue(clearBody.getBoolean("weeklyEnabled"))
+        assertEquals(5, clearBody.getInt("weeklyDayOfWeek"))
+        assertEquals("10:45", clearBody.getString("weeklyLocalTime"))
+        assertTrue(clearBody.has("quietHoursStart"))
+        assertTrue(clearBody.isNull("quietHoursStart"))
+        assertTrue(clearBody.has("quietHoursEnd"))
+        assertTrue(clearBody.isNull("quietHoursEnd"))
+        assertFalse("timezone must remain server-owned", clearBody.has("timezone"))
+        assertFalse("server link state must not be writable through preferences", clearBody.has("telegramLinked"))
+        assertFalse("version is carried by If-Match, not the patch body", clearBody.has("version"))
+
+        val configure = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("PATCH", configure.method)
+        assertEquals("/api/v1/tenants/tenant-17/notification-preferences", configure.path)
+        assertEquals("Bearer notification-token", configure.getHeader("Authorization"))
+        assertEquals("\"13\"", configure.getHeader("If-Match"))
+        val configureBody = org.json.JSONObject(configure.body.readUtf8())
+        assertEquals("en", configureBody.getString("language"))
+        assertEquals("23:15", configureBody.getString("quietHoursStart"))
+        assertEquals("06:30", configureBody.getString("quietHoursEnd"))
+        assertFalse("timezone must remain server-owned", configureBody.has("timezone"))
+    }
+
     @Test fun debtLifecycleUsesTenantScopedVersionedIdempotentRequestsAndParsesForecast() {
         server.enqueue(MockResponse().setBody(debtJson(currentBalance = "9000.00", version = 7)))
         server.enqueue(MockResponse().setBody("""{"debt":${debtJson(currentBalance = "8279.50", version = 8)}}"""))
@@ -1419,6 +1509,31 @@ class FinanceReceiptApiTest {
         ))
         return key
     }
+
+    private fun notificationPreferencesJson(
+        timezone: String,
+        language: String,
+        dailyEnabled: Boolean,
+        dailyLocalTime: String,
+        weeklyEnabled: Boolean,
+        weeklyDayOfWeek: Int,
+        weeklyLocalTime: String,
+        quietHoursStart: String?,
+        quietHoursEnd: String?,
+        version: Long,
+    ) = org.json.JSONObject()
+        .put("timezone", timezone)
+        .put("telegramLinked", true)
+        .put("language", language)
+        .put("dailyEnabled", dailyEnabled)
+        .put("dailyLocalTime", dailyLocalTime)
+        .put("weeklyEnabled", weeklyEnabled)
+        .put("weeklyDayOfWeek", weeklyDayOfWeek)
+        .put("weeklyLocalTime", weeklyLocalTime)
+        .put("quietHoursStart", quietHoursStart ?: org.json.JSONObject.NULL)
+        .put("quietHoursEnd", quietHoursEnd ?: org.json.JSONObject.NULL)
+        .put("version", version)
+        .toString()
 
     private fun debtJson(currentBalance: String, version: Long) = """
         {"id":"debt-22","tenantId":"tenant-17","name":"Credit card","openingBalance":"10000.00",

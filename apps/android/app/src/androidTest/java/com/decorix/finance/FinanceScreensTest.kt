@@ -6,6 +6,8 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -1065,6 +1067,69 @@ class FinanceScreensTest {
 
         assertEquals(preferences.copy(language = "en", dailyLocalTime = "08:30", weeklyDayOfWeek = 1,
             quietHoursStart = "22:00", quietHoursEnd = "07:00"), saved)
+    }
+
+    @Test fun profileCanIndependentlyDisableDailyAndEnableWeeklyDigests() {
+        var saved: FinanceNotificationPreferences? = null
+        val preferences = FinanceNotificationPreferences("Europe/Moscow", true, "ru", true, "21:00",
+            false, 7, "19:00", null, null, 0L)
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            memberProfile = FinanceMemberProfile("Алексей", null, "complete", "Europe/Moscow", "RUB"),
+            notificationPreferences = preferences), onNotificationPreferencesSave = { saved = it })
+
+        compose.onNodeWithText("Профиль").performScrollTo().performClick()
+        compose.onNodeWithTag("daily-digest-enabled").performScrollTo().assertIsOn().performClick().assertIsOff()
+        compose.onNodeWithTag("weekly-digest-enabled").performScrollTo().assertIsOff().performClick().assertIsOn()
+        compose.onNodeWithText("Сохранить расписание").performScrollTo().performClick()
+
+        assertEquals(preferences.copy(dailyEnabled = false, weeklyEnabled = true), saved)
+    }
+
+    @Test fun profileClearsBothQuietHoursTogether() {
+        var saved: FinanceNotificationPreferences? = null
+        val preferences = FinanceNotificationPreferences("Europe/Moscow", true, "ru", true, "21:00",
+            true, 7, "19:00", "22:00", "07:00", 0L)
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            memberProfile = FinanceMemberProfile("Алексей", null, "complete", "Europe/Moscow", "RUB"),
+            notificationPreferences = preferences), onNotificationPreferencesSave = { saved = it })
+
+        compose.onNodeWithText("Профиль").performScrollTo().performClick()
+        compose.onNodeWithText("Начало тихих часов").performScrollTo().performTextReplacement("")
+        compose.onNodeWithText("Конец тихих часов").performScrollTo().performTextReplacement("")
+        compose.onNodeWithText("Сохранить расписание").performScrollTo().assertIsEnabled().performClick()
+
+        assertEquals(preferences.copy(quietHoursStart = null, quietHoursEnd = null), saved)
+    }
+
+    @Test fun profileRejectsMalformedDigestTimeInRussianAndEnglish() {
+        val preferences = FinanceNotificationPreferences("Europe/Moscow", true, "ru", true, "21:00",
+            true, 7, "19:00", null, null, 0L)
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            memberProfile = FinanceMemberProfile("Алексей", null, "complete", "Europe/Moscow", "RUB"),
+            notificationPreferences = preferences))
+
+        compose.onNodeWithText("Профиль").performScrollTo().performClick()
+        compose.onNodeWithText("Время ежедневной сводки").performScrollTo().performTextReplacement("25:99")
+        compose.onNodeWithText("Сохранить расписание").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Daily digest time").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Save schedule").performScrollTo().assertIsNotEnabled()
+    }
+
+    @Test fun profileRejectsOneSidedQuietHoursInRussianAndEnglish() {
+        val preferences = FinanceNotificationPreferences("Europe/Moscow", true, "ru", true, "21:00",
+            true, 7, "19:00", "22:00", "07:00", 0L)
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            memberProfile = FinanceMemberProfile("Алексей", null, "complete", "Europe/Moscow", "RUB"),
+            notificationPreferences = preferences))
+
+        compose.onNodeWithText("Профиль").performScrollTo().performClick()
+        compose.onNodeWithText("Конец тихих часов").performScrollTo().performTextReplacement("")
+        compose.onNodeWithText("Укажите обе границы тихих часов или оставьте обе пустыми.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Сохранить расписание").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Set both quiet-hours times or leave both empty.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Save schedule").performScrollTo().assertIsNotEnabled()
     }
 
     @Test fun dashboardAndReportTabsRenderCoreOwnedTotals() {
