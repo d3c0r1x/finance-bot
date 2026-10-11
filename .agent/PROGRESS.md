@@ -2099,3 +2099,12 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Review: independent review found the mismatched export-ID bug; added a failing regression test and fixed it. Follow-up review found no remaining blocker. Reviewers did not run tests; the results above were run locally.
 - Limits: Android F52 stays PARTIAL. Activity chooser invocation, live Android OIDC/Core role enforcement, export worker/S3, actual browser transfer and byte integrity, background polling cancellation, elapsed-time polling and full RU/EN matrix remain unverified. No live delivery claim.
 - Commits: `6d6f1c2` (`test(F52): verify fresh Android export handoff`) and its progress records were pushed. `git ls-remote` confirmed the branch at `856625a`; `gh run list --commit 6d6f1c2` and the verified current HEAD returned no workflow. Unrelated untracked user files were not staged.
+
+## F59.22 F52 Android lifecycle pause safety — GREEN locally; PARTIAL — 2026-10-11
+
+- TDD RED: added a test against the missing current-generation guard; it failed to compile until the response-acceptance policy existed. An initial instrumentation attempt found the test was dispatching LifecycleRegistry events off the main thread; moved those transitions onto the Compose test main thread and reran.
+- Implementation: status responses now require the exact active request generation. `onPause()` invalidates status and download generations, clears pending link state, and clears the busy flag only when a status request owned it, so a delayed response cannot restore an old signed URL or leave status busy. Compose auto-polling now waits for `RESUMED`; it stays idle at `CREATED`/`STARTED` and cancels its pending delay on `PAUSE`.
+- GREEN: lifecycle status policy test passes; full Android JVM suite 73/73; `FinanceExportsScreensTest` 13/13 on Android 8.1/API 27 `emulator-5554`; debug and AndroidTest APKs assemble; `git diff --check` clean. An independent read-only review confirmed the test-thread issue and verified the distinction between poll-delay cancellation and in-flight HTTP response rejection.
+- Limits: Android F52 remains PARTIAL. The lifecycle registry and generation policy are tested locally, but no delayed live Core HTTP response was induced across Activity pause/resume. Live OIDC/Core roles, export worker/S3 readiness, chooser/browser transfer, and downloaded-byte integrity remain NOT_RUN.
+- Plan: `docs/superpowers/plans/2026-10-11-f52-android-csv-export.md`.
+- Next: continue the next missing F59 Android behavior; retain deployment and live Core gates as open.

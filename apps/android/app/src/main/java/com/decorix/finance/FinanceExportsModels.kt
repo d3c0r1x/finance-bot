@@ -62,6 +62,16 @@ internal data class FinanceExportDownloadContext(
     val screenResumed: Boolean,
 )
 
+internal data class FinanceExportStatusRequest(val generation: Long)
+
+internal object FinanceExportStatusPolicy {
+    fun isCurrent(
+        request: FinanceExportStatusRequest,
+        currentGeneration: Long,
+        screenActive: Boolean,
+    ): Boolean = screenActive && request.generation == currentGeneration
+}
+
 internal object FinanceExportDownloadPolicy {
     fun isCurrent(attempt: FinanceExportDownloadAttempt, context: FinanceExportDownloadContext): Boolean =
         context.authenticated && context.screenActive && context.screenResumed &&

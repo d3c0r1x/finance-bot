@@ -3337,14 +3337,14 @@ class MainActivity : ComponentActivity() {
         val tenant = ui.tenants.firstOrNull() ?: return
         if (!ui.authenticated || ui.exportJob?.id != exportId || ui.exportJobTenantId != tenant.id ||
             ui.exportBusy) return
-        val requestGeneration = exportStatusGeneration.incrementAndGet()
+        val request = FinanceExportStatusRequest(exportStatusGeneration.incrementAndGet())
         val sessionGeneration = api.authSessionGeneration
         exportBusyKind = "status"
         ui = ui.copy(exportBusy = true, exportError = null)
         executor.execute {
             runCatching { api.exportStatus(tenant.id, exportId, sessionGeneration) }
                 .onSuccess { job ->
-                    if (exportStatusGeneration.get() == requestGeneration && exportScreenActive &&
+                    if (FinanceExportStatusPolicy.isCurrent(request, exportStatusGeneration.get(), exportScreenActive) &&
                         api.authSessionGeneration == sessionGeneration && ui.authenticated &&
                         ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
                         exportBusyKind = null
@@ -3376,7 +3376,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 .onFailure { error ->
-                    if (exportStatusGeneration.get() == requestGeneration && exportScreenActive &&
+                    if (FinanceExportStatusPolicy.isCurrent(request, exportStatusGeneration.get(), exportScreenActive) &&
                         api.authSessionGeneration == sessionGeneration && ui.authenticated &&
                         ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
                         exportBusyKind = null
@@ -3536,6 +3536,11 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         pendingExportDownload = null
         exportDownloadGeneration.incrementAndGet()
+        exportStatusGeneration.incrementAndGet()
+        if (exportBusyKind == "status") {
+            exportBusyKind = null
+            ui = ui.copy(exportBusy = false)
+        }
         ui = ui.copy(exportJob = ui.exportJob?.copy(downloadUrl = null))
         super.onPause()
     }

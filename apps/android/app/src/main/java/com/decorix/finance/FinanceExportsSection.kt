@@ -71,13 +71,13 @@ internal fun FinanceExportsSection(
     val polls = remember(job?.id) { mutableIntStateOf(0) }
     val lifecycleOwner = LocalLifecycleOwner.current
     var screenResumed by remember(lifecycleOwner) {
-        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        mutableStateOf(lifecycleOwner.lifecycle.currentState == Lifecycle.State.RESUMED)
     }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> screenResumed = true
+                Lifecycle.Event.ON_RESUME -> screenResumed = true
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> screenResumed = false
                 else -> Unit
             }

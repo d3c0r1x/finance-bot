@@ -1,7 +1,12 @@
 package com.decorix.finance
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -18,6 +23,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -194,6 +200,47 @@ class FinanceExportsScreensTest {
         assertEquals(emptyList<String>(), refreshes)
     }
 
+    @Test fun pausingAppCancelsPendingAutomaticStatusWaitWithoutRefreshing() {
+        val owner = TestLifecycleOwner()
+        compose.runOnIdle {
+            owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        }
+        val waitStarted = AtomicBoolean(false)
+        val waitCancelled = AtomicBoolean(false)
+        val refreshes = mutableListOf<String>()
+        compose.setContent {
+            CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                MaterialTheme {
+                    FinanceExportsSection(
+                        role = "owner", language = "ru", timezone = "UTC", members = emptyList(),
+                        membersLoading = false, job = job("processing"), busy = false, error = null,
+                        onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                        pollDelay = {
+                            suspendCancellableCoroutine { continuation ->
+                                waitStarted.set(true)
+                                continuation.invokeOnCancellation { waitCancelled.set(true) }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        compose.waitForIdle()
+        assertFalse(waitStarted.get())
+        compose.runOnIdle { owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_START) }
+        compose.waitForIdle()
+        assertFalse(waitStarted.get())
+        compose.runOnIdle { owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME) }
+        compose.waitForIdle()
+        assertTrue(waitStarted.get())
+        compose.runOnIdle { owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE) }
+        compose.waitForIdle()
+
+        assertTrue(waitCancelled.get())
+        assertEquals(emptyList<String>(), refreshes)
+    }
+
     @Test fun readyEmptyExportOpensOnlyTheReturnedSignedUrlAfterTap() {
         val opened = mutableListOf<String>()
         compose.setContent {
@@ -255,5 +302,10 @@ class FinanceExportsScreensTest {
         const val MEMBER_ID = "00000000-0000-4000-8000-000000000053"
         const val SECOND_MEMBER_ID = "00000000-0000-4000-8000-000000000054"
         const val DOWNLOAD_URL = "https://files.example.test/private/export.csv?signature=short-lived"
+    }
+
+    private class TestLifecycleOwner : LifecycleOwner {
+        val registry = LifecycleRegistry(this)
+        override val lifecycle: Lifecycle get() = registry
     }
 }
