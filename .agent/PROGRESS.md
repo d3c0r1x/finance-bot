@@ -2071,7 +2071,7 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Parity: global F53 Web is COMPLETE (`5adeccf`, 87 Web tests + production build); registry corrected to reflect that and still marks Android partial. Android local member navigation/profile/filter coverage is green; Android active-route indication, refresh semantics and live OIDC/Core authorization remain unverified.
 - Commit/push: `9094884` (`feat(F53): add Android member transaction navigation`) is on `origin/feat/saas-rewrite`; remote HEAD was verified at that SHA. Next: continue Android parity; F52 external-download handoff/live storage checks remain deployment gaps.
 
-## F59.19 F54 Android capability status — GREEN locally; COMMIT_PENDING — 2026-10-11
+## F59.19 F54 Android capability status — GREEN locally; COMMITTED, PUSH_PENDING — 2026-10-11
 
 - Plan: `docs/superpowers/plans/2026-10-11-f54-android-health-status.md`. F54 Python/Core/Web remains complete; this is the missing Android F59 counterpart.
 - Scope: read-only Android screen calls authenticated `/bff/tenants/{tenantId}/health`. Shows only Core-sanitized local AI, receipt Vision and receipt OCR states; RU/EN labels, safe diagnostic translations, retry and refresh. No provider credentials, URLs, model settings, private diagnostics or backend changes.
@@ -2080,4 +2080,4 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Parity: Android F54 is PARTIAL pending real authenticated Android-to-Core OIDC and tenant-membership verification; provider runtime remains deployment evidence. No live status claim is made.
 - Further GREEN: complete Android JVM suite 69/69; parity/contracts `66 passed`; debug and AndroidTest APKs assemble. Debug APK SHA-256 `C3CD34A59113251EBA0B763B0975BE9C0ADB4C97F3A86FC88929AFD9C5FF102A` installed and launched on `emulator-5554` (process observed).
 - Review: independent read-only review found no implementation blocker. Errors are normalized, stale requests are discarded across session/tenant changes, and Core enforces membership on the route.
-- `git diff --check` clean. Commit and push this scoped F54 Android slice; preserve live OIDC/provider verification as open gates.
+- Implementation commit: `9a1422427bad2e1a582524068567e6cc7db62d23` (`feat(F54): add Android capability status screen`). Push and verify remote HEAD; preserve live OIDC/provider verification as open gates.
