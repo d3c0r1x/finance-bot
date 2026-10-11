@@ -2043,4 +2043,5 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Review: independent read-only review found no concrete blocker in retry state isolation, missing-field parsing, tenant-scoped routes, date validation, or the previously reported screen-exit callbacks.
 - Limits: Android OIDC against live Core, real member roles, running export worker/S3, actual file transfer/byte integrity, deterministic fake-scheduler proof of 5-second/12-request lifecycle cancellation, direct Android intent/session/stale-link safety tests, and full RU/EN state matrix remain NOT_RUN or incomplete. F52 Android stays PARTIAL; no live delivery claim.
 - Emulator note: one delegated `connectedDebugAndroidTest` RED attempt selected both connected AVDs, including `emulator-5558`; after discovery all installs and test executions were pinned explicitly to `emulator-5554`. No further commands targeted `emulator-5558`.
+- Commit: `af2db45` (`feat(F52): add Android CSV export flow`); test-first baseline commit: `7a74cea`.
 - Next: complete F52 Android's remaining targeted lifecycle/download evidence or record required live checks as deployment gates before proceeding to F53 Android.
