@@ -15,6 +15,7 @@ import java.time.Instant
 import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 internal data class FinanceApiEndpoints(val apiBaseUrl: String, val oidcRealmUrl: String)
 
@@ -31,16 +32,24 @@ class FinanceApi internal constructor(
 
     private val tokens = TokenVault(context)
     private val tokenRefreshLock = Any()
+    private val sessionGeneration = AtomicLong(0L)
+    internal val authSessionGeneration: Long get() = sessionGeneration.get()
 
     fun hasSession(): Boolean = tokens.read()?.optString("accessToken")?.isNotBlank() == true
 
     fun saveTokens(accessToken: String, refreshToken: String, expiresAtMillis: Long, idToken: String = "") {
         check(accessToken.isNotBlank()) { "Identity provider returned no access token" }
-        tokens.save(JSONObject().put("accessToken", accessToken).put("refreshToken", refreshToken)
-            .put("expiresAtMillis", expiresAtMillis).put("idToken", idToken))
+        synchronized(tokenRefreshLock) {
+            tokens.save(JSONObject().put("accessToken", accessToken).put("refreshToken", refreshToken)
+                .put("expiresAtMillis", expiresAtMillis).put("idToken", idToken))
+            sessionGeneration.incrementAndGet()
+        }
     }
 
-    fun clearSession() = synchronized(tokenRefreshLock) { tokens.clear() }
+    fun clearSession() = synchronized(tokenRefreshLock) {
+        tokens.clear()
+        sessionGeneration.incrementAndGet()
+    }
 
     fun logout() = synchronized(tokenRefreshLock) {
         val session = tokens.read()
@@ -54,6 +63,7 @@ class FinanceApi internal constructor(
             }
         } finally {
             tokens.clear()
+            sessionGeneration.incrementAndGet()
         }
     }
 
@@ -172,6 +182,15 @@ class FinanceApi internal constructor(
         return FinanceModels.productPriceComparison(
             JSONObject(execute(path, "GET")), receiptId, itemId,
         )
+    }
+
+    fun productCatalog(tenantId: String, query: String): FinanceProductCatalog {
+        val normalizedQuery = query.trim()
+        require(isValidProductCatalogQuery(normalizedQuery)) {
+            "Invalid product catalog query"
+        }
+        val path = "/api/v1/tenants/$tenantId/products?query=${encodeRfc3986(normalizedQuery)}"
+        return FinanceModels.productCatalog(JSONObject(execute(path, "GET")), normalizedQuery)
     }
 
     fun updateReceiptItem(tenantId: String, receiptId: String, itemId: String, version: Long,
@@ -528,31 +547,44 @@ class FinanceApi internal constructor(
 
     private fun executeRequest(path: String, method: String, requestBody: RequestBody?,
                                idempotencyKey: String? = null, ifMatchVersion: Long? = null): String {
-        val original = tokens.read()
-        var accessToken = original?.optString("accessToken")?.takeIf(String::isNotBlank)
-        val expiresAt = original?.optLong("expiresAtMillis", 0L) ?: 0L
-        if (accessToken != null && expiresAt > 0 && expiresAt <= System.currentTimeMillis() + 30_000) {
-            accessToken = refresh(accessToken)
+        val (requestSessionGeneration, original) = synchronized(tokenRefreshLock) {
+            sessionGeneration.get() to tokens.read()
         }
-        var response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
-        if (response.code == 401 && accessToken != null) {
-            response.close()
-            accessToken = refresh(accessToken)
-            response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
-        }
-        response.use {
-            val text = it.body?.string().orEmpty()
-            if (!it.isSuccessful) {
-                val detail = runCatching { JSONObject(text).optString("detail").ifBlank { JSONObject(text).optString("code") } }.getOrNull()
-                if (BuildConfig.DEBUG) android.util.Log.w("FinanceApi",
-                    "$method $path returned HTTP ${it.code}: ${detail?.takeIf(String::isNotBlank) ?: "no detail"}")
-                throw ApiFailure(it.code, detail?.takeIf(String::isNotBlank) ?: "Request failed (${it.code})")
+        try {
+            var accessToken = original?.optString("accessToken")?.takeIf(String::isNotBlank)
+            val expiresAt = original?.optLong("expiresAtMillis", 0L) ?: 0L
+            if (accessToken != null && expiresAt > 0 && expiresAt <= System.currentTimeMillis() + 30_000) {
+                accessToken = refresh(accessToken, requestSessionGeneration)
             }
-            return text
+            var response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
+            if (response.code == 401 && accessToken != null) {
+                response.close()
+                accessToken = refresh(accessToken, requestSessionGeneration)
+                response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
+            }
+            response.use {
+                val text = it.body?.string().orEmpty()
+                if (!it.isSuccessful) {
+                    val detail = runCatching { JSONObject(text).optString("detail").ifBlank { JSONObject(text).optString("code") } }.getOrNull()
+                    if (BuildConfig.DEBUG) android.util.Log.w("FinanceApi",
+                        "$method $path returned HTTP ${it.code}: ${detail?.takeIf(String::isNotBlank) ?: "no detail"}")
+                    throw ApiFailure(it.code, detail?.takeIf(String::isNotBlank) ?: "Request failed (${it.code})",
+                        requestSessionGeneration)
+                }
+                return text
+            }
+        } catch (failure: ApiFailure) {
+            if (failure.status == 401 && failure.authSessionGeneration == null) {
+                throw ApiFailure(401, failure.message ?: "sign_in_required", requestSessionGeneration)
+            }
+            throw failure
         }
     }
 
-    private fun refresh(staleAccessToken: String?): String = synchronized(tokenRefreshLock) {
+    private fun refresh(staleAccessToken: String?, expectedSessionGeneration: Long): String = synchronized(tokenRefreshLock) {
+        if (sessionGeneration.get() != expectedSessionGeneration) {
+            throw ApiFailure(401, "sign_in_required", expectedSessionGeneration)
+        }
         val current = tokens.read() ?: throw ApiFailure(401, "sign_in_required")
         val currentAccessToken = current.optString("accessToken").takeIf(String::isNotBlank)
         val currentExpiresAt = current.optLong("expiresAtMillis", 0L)
@@ -605,4 +637,4 @@ class FinanceApi internal constructor(
     }
 }
 
-class ApiFailure(val status: Int, message: String) : IOException(message)
+class ApiFailure(val status: Int, message: String, val authSessionGeneration: Long? = null) : IOException(message)

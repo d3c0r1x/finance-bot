@@ -349,6 +349,39 @@ data class FinanceProductPricePoint(
     val current: Boolean,
 )
 
+data class FinanceProductCatalogPoint(
+    val receiptId: String,
+    val itemId: String,
+    val purchasedAt: String,
+    val merchant: String?,
+    val name: String,
+    val unitPrice: String,
+    val current: Boolean,
+)
+
+data class FinanceProductCard(
+    val productName: String,
+    val purchaseCount: Int,
+    val usualUnitPrice: String,
+    val hasBaseline: Boolean,
+    val baselineUnitPrice: String?,
+    val lastUnitPrice: String,
+    val lastPurchasedAt: String,
+    val lastMerchant: String?,
+    val cheapestUnitPrice: String,
+    val cheapestMerchant: String?,
+    val totalSpent: String,
+    val change: String?,
+    val relative: String?,
+    val signal: Boolean,
+    val direction: String?,
+    val priorPurchases: Int,
+    val chartAvailable: Boolean,
+    val history: List<FinanceProductCatalogPoint>,
+)
+
+data class FinanceProductCatalog(val mode: String, val query: String, val products: List<FinanceProductCard>)
+
 data class FinanceProductPriceComparison(
     val algorithmVersion: String,
     val productName: String,
@@ -494,6 +527,115 @@ data class TransactionDraftEdit(
 )
 
 internal object FinanceModels {
+    fun productCatalog(json: JSONObject, requestedQuery: String): FinanceProductCatalog {
+        val responseFields = setOf("mode", "query", "products")
+        require(json.keys().asSequence().toSet() == responseFields) { "Invalid product catalog fields" }
+        require(isValidProductCatalogQuery(requestedQuery)) {
+            "Invalid product catalog query"
+        }
+        val normalizedQuery = requestedQuery.trim()
+        val mode = if (normalizedQuery.isEmpty()) "catalog" else "search"
+        val actualMode = json.getString("mode")
+        val query = json.getString("query")
+        val rows = json.getJSONArray("products")
+        val limit = if (mode == "catalog") 10 else 5
+        require(actualMode == mode && query == normalizedQuery && rows.length() <= limit) {
+            "Product catalog query or mode does not match request"
+        }
+
+        val cards = (0 until rows.length()).map { index ->
+            val row = rows.getJSONObject(index)
+            val fields = setOf(
+                "productName", "purchaseCount", "usualUnitPrice", "hasBaseline", "baselineUnitPrice",
+                "lastUnitPrice", "lastPurchasedAt", "lastMerchant", "cheapestUnitPrice", "cheapestMerchant",
+                "totalSpent", "change", "relative", "signal", "direction", "priorPurchases",
+                "chartAvailable", "history",
+            )
+            require(row.keys().asSequence().toSet() == fields) { "Invalid product catalog card fields" }
+            val name = row.getString("productName")
+            val purchaseCount = exactInt(row, "purchaseCount")
+            val usual = row.getString("usualUnitPrice")
+            val hasBaseline = requiredBoolean(row, "hasBaseline")
+            val baseline = requiredNullableString(row, "baselineUnitPrice")
+            val last = row.getString("lastUnitPrice")
+            val lastAt = row.getString("lastPurchasedAt")
+            val lastMerchant = requiredNullableString(row, "lastMerchant")
+            val cheapest = row.getString("cheapestUnitPrice")
+            val cheapestMerchant = requiredNullableString(row, "cheapestMerchant")
+            val totalSpent = row.getString("totalSpent")
+            val change = requiredNullableString(row, "change")
+            val relative = requiredNullableString(row, "relative")
+            val signal = requiredBoolean(row, "signal")
+            val direction = requiredNullableString(row, "direction")
+            val priorPurchases = exactInt(row, "priorPurchases")
+            val chartAvailable = requiredBoolean(row, "chartAvailable")
+            val historyJson = row.getJSONArray("history")
+            val pricePattern = Regex("^\\d{1,30}\\.\\d{6}$")
+            val changePattern = Regex("^-?\\d{1,30}\\.\\d{6}$")
+            val relativePattern = Regex("^-?\\d{1,45}\\.\\d{6}$")
+            val moneyPattern = Regex("^\\d{1,22}\\.\\d{2}$")
+            require(name.isNotBlank() && name.length <= 200 && purchaseCount in 1..5000
+                && (mode != "catalog" || purchaseCount >= 3)
+                && pricePattern.matches(usual) && pricePattern.matches(last) && pricePattern.matches(cheapest)
+                && BigDecimal(usual).signum() > 0 && BigDecimal(last).signum() > 0
+                && BigDecimal(cheapest).signum() > 0
+                && (baseline == null || pricePattern.matches(baseline))
+                && (change == null || changePattern.matches(change))
+                && (relative == null || relativePattern.matches(relative))
+                && moneyPattern.matches(totalSpent) && BigDecimal(totalSpent).signum() >= 0
+                && (lastMerchant == null || lastMerchant.length <= 200)
+                && (cheapestMerchant == null || cheapestMerchant.length <= 200)
+                && runCatching { Instant.parse(lastAt) }.isSuccess
+                && priorPurchases in 0 until purchaseCount
+                && direction in setOf(null, "up", "down")
+                && historyJson.length() in 1..12
+                && historyJson.length() <= purchaseCount
+                && chartAvailable == (historyJson.length() >= 2)) { "Invalid product catalog values" }
+
+            val points = (0 until historyJson.length()).map { pointIndex ->
+                val pointJson = historyJson.getJSONObject(pointIndex)
+                val pointFields = setOf("receiptId", "itemId", "purchasedAt", "merchant", "name", "unitPrice", "current")
+                require(pointJson.keys().asSequence().toSet() == pointFields) { "Invalid product history fields" }
+                val receiptId = pointJson.getString("receiptId")
+                val itemId = pointJson.getString("itemId")
+                val purchasedAt = pointJson.getString("purchasedAt")
+                val merchant = requiredNullableString(pointJson, "merchant")
+                val pointName = pointJson.getString("name")
+                val unitPrice = pointJson.getString("unitPrice")
+                val current = requiredBoolean(pointJson, "current")
+                require(isCanonicalUuid(receiptId) && isCanonicalUuid(itemId)
+                    && runCatching { Instant.parse(purchasedAt) }.isSuccess
+                    && (merchant == null || merchant.length <= 200)
+                    && pointName.isNotBlank() && pointName.length <= 200
+                    && pricePattern.matches(unitPrice) && BigDecimal(unitPrice).signum() > 0
+                    && !current) { "Invalid product history point" }
+                FinanceProductCatalogPoint(receiptId, itemId, purchasedAt, merchant, pointName, unitPrice, current)
+            }
+            val times = points.map { Instant.parse(it.purchasedAt) }
+            require(times.zipWithNext().all { (earlier, later) -> !later.isBefore(earlier) }) {
+                "Product history must be chronological"
+            }
+            val latestPoint = points.last()
+            require(latestPoint.name == name && latestPoint.unitPrice == last
+                && latestPoint.purchasedAt == lastAt && latestPoint.merchant == lastMerchant) {
+                "Product card latest values do not match history"
+            }
+            if (hasBaseline) {
+                require(baseline != null && change != null && relative != null && priorPurchases > 0
+                    && historyJson.length() >= 2 && (!signal && direction == null || signal && direction != null)) {
+                    "Product baseline fields are inconsistent"
+                }
+            } else {
+                require(baseline == null && change == null && relative == null && priorPurchases == 0
+                    && !signal && direction == null) { "Product without baseline has derived values" }
+            }
+            FinanceProductCard(name, purchaseCount, usual, hasBaseline, baseline, last, lastAt, lastMerchant,
+                cheapest, cheapestMerchant, totalSpent, change, relative, signal, direction, priorPurchases,
+                chartAvailable, points)
+        }
+        return FinanceProductCatalog(mode, query, cards)
+    }
+
     fun productPriceComparison(
         json: JSONObject,
         requestedReceiptId: String,
@@ -575,8 +717,8 @@ internal object FinanceModels {
             require(baseline == null && change == null && relative == null
                 && !signal && direction == null && priorPurchases == 0) {
                 "No-baseline comparison must not contain derived values"
-            }
-        }
+    }
+}
 
         return FinanceProductPriceComparison(algorithmVersion, productName, hasBaseline, currentUnitPrice,
             baseline, change, relative, signal, direction, priorPurchases, history)
@@ -1404,4 +1546,17 @@ internal object FinanceModels {
 
     private fun nullableDouble(json: JSONObject, key: String): Double? =
         if (!json.has(key) || json.isNull(key)) null else json.getDouble(key)
+}
+
+internal fun isValidProductCatalogQuery(query: String): Boolean {
+    var index = 0
+    var codePointCount = 0
+    while (index < query.length) {
+        val codePoint = Character.codePointAt(query, index)
+        if (Character.isISOControl(codePoint)) return false
+        codePointCount++
+        if (codePointCount > 80) return false
+        index += Character.charCount(codePoint)
+    }
+    return true
 }

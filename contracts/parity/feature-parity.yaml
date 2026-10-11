@@ -730,9 +730,14 @@ features:
     evidence:
       - "Go implements exact member-scoped catalog/search over confirmed price history; blank-query catalog threshold is 3 purchases, search threshold is 1, and chart requires 2 actual purchase points. Core resolves active membership for Web and authenticated Telegram actor, Web exposes `/products`, and Telegram `/price` renders actual history to PNG. One purchase has no fabricated baseline or chart; cheapest merchant means cheapest observed historical purchase. GREEN: Go suite/vet/Linux build; Core check plus `productCatalogUsesAuthenticatedMemberScope` against an isolated PostgreSQL 18.6 database; Web 40/40 + production build; Python presentation/Telegram 84 passed; contracts 48 passed/2 optional skipped; `git diff --check`. F34 acceptance is complete. F33 live ClickHouse replay remains a separate integration gate."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F34: Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
-      gap: "No Android user screen or equivalent flow is verified for F34 yet."
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceProductCatalogApiTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceProductCatalogModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceProductCatalogScreenTest.kt"
+      evidence: "Android calls only the authenticated tenant Core catalog endpoint and preserves Core's exact six-place prices, count/thresholds, merchants, latest time, baseline and real history. The localized search/catalog screen shows usual/latest/cheapest/spent metrics, accurate insufficient-comparable-history copy, and a chart only for at least two actual points. Token saves serialize with refresh, request token/session-generation snapshots are atomic, and an old request cannot retry with replacement-account credentials. Focused API/model/screen instrumentation passed 21/21 on Android 6/API 23 and 21/21 on Android 7.1/API 25; full isolated Android 8.1/API 27 instrumentation passed 267/267; Android JVM tests 37/37, debug/test APK builds, and 78 parity contracts passed. APK was installed/launched (PID 26857), SHA-256 2AC1DE602C43972DA9D22DABD3BB7F0A530B4074D45B447DD8E7C054C140BFBC."
+      gap: "Synthetic DTO and MockWebServer coverage is local only; live authenticated Android-to-Core OIDC roundtrip remains unverified."
     intentional_differences: []
   - id: F35
     feature: "Покупки по ритму, медиана интервалов, стоимость списка"
@@ -1189,7 +1194,7 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
-      - "Inventory maps all F01-F58: 33 partial, 23 missing, 2 justified platform-specific N/A. Existing F15.1-F15.4 receipt flows and Android 8.1/API 27 instrumentation are locally verified, but feature parity and live authenticated Core/OIDC E2E remain incomplete."
+      - "Inventory maps all F01-F58: 40 partial, 16 missing, 2 justified platform-specific N/A. Android F31-F34 and receipt flows have local test evidence, but feature parity and live authenticated Core/OIDC E2E remain incomplete."
       - "Real OIDC login, live Java/Core operation, and PostgreSQL tenant-isolation E2E remain required before F59 completion."
     intentional_differences: []
   - id: F60

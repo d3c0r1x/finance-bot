@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -42,6 +43,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -61,6 +66,12 @@ import java.security.SecureRandom
 import java.util.Base64
 import java.security.MessageDigest
 import java.time.YearMonth
+import java.math.BigDecimal
+import java.math.RoundingMode
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.time.ZoneId
 import java.time.LocalDate
 import java.util.concurrent.Executors
@@ -85,6 +96,8 @@ class MainActivity : ComponentActivity() {
     private val receiptDuplicateGeneration = AtomicLong(0L)
     private val receiptConfirmGeneration = AtomicLong(0L)
     private val receiptPriceComparisonGeneration = AtomicLong(0L)
+    private val productCatalogGeneration = AtomicLong(0L)
+    private val productCatalogStateLock = Any()
     private val receiptCategoryGeneration = AtomicLong(0L)
     private val receiptBasketReviewGeneration = AtomicLong(0L)
     private val receiptDisputedItemsGeneration = AtomicLong(0L)
@@ -146,6 +159,7 @@ class MainActivity : ComponentActivity() {
                         onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation,
                         onDoNotBuyLoad = ::loadDoNotBuy, onDoNotBuyDecision = ::applyDoNotBuyDecision,
                         onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision,
+                        onProductCatalogLoad = ::loadProductCatalog,
                         onRepeatTransaction = ::repeatTransaction, onVoidTransaction = ::voidTransaction,
                         onTransactionFilter = ::filterTransactions, onTransactionLoadMore = ::loadMoreTransactions,
                         onUpdateTransaction = ::updateTransaction,
@@ -204,6 +218,7 @@ class MainActivity : ComponentActivity() {
             if (exception != null || tokenResponse == null) {
                 ui = ui.copy(error = exception?.errorDescription ?: "Sign in failed")
             } else {
+                invalidateProductCatalogRequests()
                 api.saveTokens(tokenResponse.accessToken.orEmpty(), tokenResponse.refreshToken.orEmpty(),
                     tokenResponse.accessTokenExpirationTime ?: 0L, tokenResponse.idToken.orEmpty())
                 ui = ui.copy(authenticated = true)
@@ -708,12 +723,76 @@ class MainActivity : ComponentActivity() {
                         } != true || ui.productPriceComparisonReceiptId != receiptId ||
                         ui.productPriceComparisonItemId != itemId) return@onFailure
                     if (failure is ApiFailure && failure.status == 401) {
-                        ui = FinanceUiState(error = "Sign in again")
+                        expireAuthenticatedSession(failure)
                     } else {
                         ui = ui.copy(productPriceComparisonLoading = false,
                             productPriceComparisonError = "unavailable")
                     }
                 }
+        }
+    }
+
+    private fun loadProductCatalog(requestedTenantId: String, query: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated || requestedTenantId != tenantId) return
+        val normalizedQuery = query.trim()
+        val generation = synchronized(productCatalogStateLock) {
+            val nextGeneration = productCatalogGeneration.incrementAndGet()
+            ui = ui.copy(productCatalog = null, productCatalogTenantId = tenantId,
+                productCatalogRequestedQuery = normalizedQuery, productCatalogLoading = true,
+                productCatalogError = null)
+            nextGeneration
+        }
+        executor.execute {
+            runCatching { api.productCatalog(tenantId, normalizedQuery) }
+                .onSuccess { catalog ->
+                    runOnUiThread {
+                        synchronized(productCatalogStateLock) {
+                            if (isCurrentProductCatalogRequest(generation, tenantId, normalizedQuery) &&
+                                catalog.query == normalizedQuery) {
+                                ui = ui.copy(productCatalog = catalog, productCatalogLoading = false,
+                                    productCatalogError = null)
+                            }
+                        }
+                    }
+                }
+                .onFailure { failure ->
+                    runOnUiThread {
+                        synchronized(productCatalogStateLock) {
+                            if (!isCurrentProductCatalogRequest(generation, tenantId, normalizedQuery)) return@synchronized
+                            if (failure is ApiFailure && failure.status == 401) {
+                                expireAuthenticatedSession(failure)
+                            } else {
+                                ui = ui.copy(productCatalogLoading = false, productCatalogError = "unavailable")
+                            }
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun isCurrentProductCatalogRequest(generation: Long, tenantId: String, query: String): Boolean =
+        productCatalogGeneration.get() == generation && ui.authenticated &&
+            ui.tenants.firstOrNull()?.id == tenantId && ui.productCatalogTenantId == tenantId &&
+            ui.productCatalogRequestedQuery == query
+
+    private fun invalidateProductCatalogRequests() {
+        synchronized(productCatalogStateLock) {
+            productCatalogGeneration.incrementAndGet()
+            ui = ui.copy(productCatalog = null, productCatalogTenantId = null,
+                productCatalogRequestedQuery = "", productCatalogLoading = false,
+                productCatalogError = null)
+        }
+    }
+
+    private fun expireAuthenticatedSession(failure: ApiFailure? = null) {
+        runOnUiThread {
+            synchronized(productCatalogStateLock) {
+                if (failure?.authSessionGeneration != null && api.hasSession() &&
+                    failure.authSessionGeneration != api.authSessionGeneration) return@synchronized
+                productCatalogGeneration.incrementAndGet()
+                ui = FinanceUiState(error = "Sign in again")
+            }
         }
     }
 
@@ -1647,6 +1726,9 @@ class MainActivity : ComponentActivity() {
                         pendingTransactionEditKey = null
                     }
                     val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
+                    if (!sameTenant) synchronized(productCatalogStateLock) {
+                        productCatalogGeneration.incrementAndGet()
+                    }
                     ui = ui.copy(busy = false, tenants = snapshot.tenants,
                         transactions = snapshot.transactions, transactionNextCursor = snapshot.transactionNextCursor,
                         transactionMembers = snapshot.transactionMembers,
@@ -1662,6 +1744,11 @@ class MainActivity : ComponentActivity() {
                         familyBudgetFoodRefreshToken = ui.familyBudgetFoodRefreshToken + 1,
                         doNotBuy = ui.doNotBuy.takeIf { sameTenant },
                         productDecisions = ui.productDecisions.takeIf { sameTenant },
+                        productCatalog = ui.productCatalog.takeIf { sameTenant },
+                        productCatalogTenantId = ui.productCatalogTenantId.takeIf { sameTenant },
+                        productCatalogRequestedQuery = ui.productCatalogRequestedQuery.takeIf { sameTenant }.orEmpty(),
+                        productCatalogLoading = ui.productCatalogLoading && sameTenant,
+                        productCatalogError = ui.productCatalogError.takeIf { sameTenant },
                         doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
                         doNotBuyLoading = ui.doNotBuyLoading && sameTenant,
                         receiptDisputedItemsPage = ui.receiptDisputedItemsPage.takeIf { sameTenant },
@@ -1680,7 +1767,7 @@ class MainActivity : ComponentActivity() {
             }
             .onFailure { error ->
                     val publishError = {
-                        if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                         else ui = ui.copy(busy = false, error = apiErrorMessage(error))
                     }
                     if (receiptOperationToken == null) publishError()
@@ -1811,7 +1898,7 @@ class MainActivity : ComponentActivity() {
                             currentRequestGeneration = reportRequestGeneration.get(),
                             sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
                         )) {
-                        if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                         else ui = ui.copy(busy = false, error = error.message ?: "Request failed")
                     }
                 }
@@ -1879,7 +1966,7 @@ class MainActivity : ComponentActivity() {
                             currentRequestGeneration = familyBudgetFoodRequestGeneration.get(),
                             sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
                         )) {
-                        if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                         else ui = ui.copy(familyBudgetFoodStatus = null, familyBudgetFoodMonth = month,
                             familyBudgetFoodTenantId = tenantId, familyBudgetFoodLoading = false,
                             familyBudgetFoodError = error.message ?: "Request failed")
@@ -1899,7 +1986,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 .onFailure { error ->
-                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                     else if (ui.tenants.firstOrNull()?.id == tenantId) {
                         ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
                     }
@@ -1919,7 +2006,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 .onFailure { error ->
-                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                     else if (ui.tenants.firstOrNull()?.id == tenantId) {
                         ui = ui.copy(doNotBuyLoading = false, doNotBuyError = error.message ?: "Request failed")
                     }
@@ -1944,7 +2031,7 @@ class MainActivity : ComponentActivity() {
                         }
                 }
             }.onFailure { error ->
-                if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                 else if (ui.tenants.firstOrNull()?.id == tenantId) {
                     ui = ui.copy(doNotBuyLoading = false, doNotBuyError = error.message ?: "Request failed")
                 }
@@ -1964,7 +2051,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 .onFailure { error ->
-                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                     else if (ui.tenants.firstOrNull()?.id == tenantId) {
                         ui = ui.copy(personalInflationLoading = false,
                             personalInflationError = error.message ?: "Request failed")
@@ -1984,7 +2071,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 .onFailure { error ->
-                    if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                     else if (ui.tenants.firstOrNull()?.id == tenantId) {
                         ui = ui.copy(recurringLoading = false, recurringError = error.message ?: "Request failed")
                     }
@@ -2004,7 +2091,7 @@ class MainActivity : ComponentActivity() {
                     ui = ui.copy(recurringLoading = false, recurringProjection = projection, recurringError = null)
                 }
             }.onFailure { error ->
-                if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                 else if (ui.tenants.firstOrNull()?.id == tenantId) {
                     ui = ui.copy(recurringLoading = false, recurringError = error.message ?: "Request failed")
                 }
@@ -2028,7 +2115,7 @@ class MainActivity : ComponentActivity() {
                     ui = ui.copy(shoppingLoading = false, shoppingList = shopping, shoppingError = null)
                 }
             }.onFailure { error ->
-                if (error is ApiFailure && error.status == 401) ui = FinanceUiState(error = "Sign in again")
+                if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                 else if (ui.tenants.firstOrNull()?.id == tenantId) {
                     ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
                 }
@@ -2043,6 +2130,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
+        invalidateProductCatalogRequests()
         ReceiptOperationGeneration.invalidate()
         receiptDisputedItemsGeneration.incrementAndGet()
         receiptReadingGeneration.incrementAndGet()
@@ -2127,6 +2215,11 @@ data class FinanceUiState(
     val productPriceComparisonItemId: String? = null,
     val productPriceComparisonLoading: Boolean = false,
     val productPriceComparisonError: String? = null,
+    val productCatalog: FinanceProductCatalog? = null,
+    val productCatalogTenantId: String? = null,
+    val productCatalogRequestedQuery: String = "",
+    val productCatalogLoading: Boolean = false,
+    val productCatalogError: String? = null,
     val recurringProjection: FinanceRecurringProjection? = null,
     val recurringLoading: Boolean = false,
     val recurringError: String? = null,
@@ -2421,6 +2514,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onDoNotBuyLoad: () -> Unit = {},
                           onDoNotBuyDecision: (String, String) -> Unit = { _, _ -> },
                           onPersonalInflationLoad: () -> Unit = {},
+                          onProductCatalogLoad: (String, String) -> Unit = { _, _ -> },
                           onRecurringLoad: () -> Unit = {},
                           onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> },
                           onRepeatTransaction: (FinanceTransaction) -> Unit = {},
@@ -2701,9 +2795,15 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring", "nobuy").forEach { screen ->
+                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products").forEach { screen ->
                         TextButton(onClick = {
                             activeScreen = screen
+                            val catalogTenantId = state.tenants.firstOrNull()?.id
+                            if (screen == "products" && catalogTenantId != null &&
+                                (state.productCatalogTenantId != catalogTenantId ||
+                                    state.productCatalog == null && !state.productCatalogLoading)) {
+                                onProductCatalogLoad(catalogTenantId, "")
+                            }
                             if (screen == "shopping" && state.shoppingList == null && !state.shoppingLoading) onShoppingLoad()
                             if (screen == "nobuy" && state.doNotBuy == null && !state.doNotBuyLoading) onDoNotBuyLoad()
                             if (screen == "inflation" && state.personalInflation == null && !state.personalInflationLoading) {
@@ -2716,6 +2816,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
                                 "receipts" -> if (russian) "Чеки" else "Receipts"
+                                "products" -> if (russian) "Товары" else "Products"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
                                 "nobuy" -> if (russian) "Не брать" else "Do not buy"
                                 "inflation" -> if (russian) "Динамика цен" else "Price trend"
@@ -2774,6 +2875,18 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onDoNotBuyDecision)
                     "inflation" -> PersonalInflationScreen(Modifier.weight(1f), state, language,
                         onRetry = onPersonalInflationLoad)
+                    "products" -> ProductCatalogScreen(Modifier.weight(1f), language,
+                        state.memberProfile?.currency ?: "RUB",
+                        state.productCatalog?.takeIf { state.productCatalogTenantId == state.tenants.firstOrNull()?.id },
+                        state.productCatalogRequestedQuery, state.productCatalogLoading, state.productCatalogError,
+                        onSearch = { query ->
+                            state.tenants.firstOrNull()?.let { onProductCatalogLoad(it.id, query) }
+                        },
+                        onRetry = {
+                            state.tenants.firstOrNull()?.let {
+                                onProductCatalogLoad(it.id, state.productCatalogRequestedQuery)
+                            }
+                        })
                     "recurring" -> RecurringScreen(Modifier.weight(1f), state, language, onRetry = onRecurringLoad,
                         onRecurringDecision = onRecurringDecision)
                     "budgets" -> BudgetScreen(Modifier.weight(1f), state, language, onBudgetUpdate, onBudgetReset,
@@ -4718,6 +4831,138 @@ private fun PersonalInflationScreen(modifier: Modifier, state: FinanceUiState, l
                 }
             }
         }
+    }
+}
+
+@androidx.compose.runtime.Composable
+internal fun ProductCatalogScreen(
+    modifier: Modifier,
+    language: String,
+    currency: String,
+    catalog: FinanceProductCatalog?,
+    requestedQuery: String,
+    loading: Boolean,
+    error: String?,
+    onSearch: (String) -> Unit,
+    onRetry: () -> Unit,
+) {
+    val russian = language == "ru"
+    var draftQuery by androidx.compose.runtime.remember(requestedQuery) { mutableStateOf(requestedQuery) }
+    LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Text(if (russian) "Товары" else "Products", style = MaterialTheme.typography.headlineSmall)
+            OutlinedTextField(
+                value = draftQuery,
+                onValueChange = { value ->
+                    if (isValidProductCatalogQuery(value)) draftQuery = value
+                },
+                modifier = Modifier.fillMaxWidth().testTag("product-catalog-query"),
+                label = { Text(if (russian) "Поиск товаров" else "Search products") },
+                singleLine = true,
+            )
+            Button(onClick = { onSearch(draftQuery.trim()) }, enabled = !loading,
+                modifier = Modifier.testTag("product-catalog-search")) {
+                Text(if (russian) "Найти" else "Search")
+            }
+        }
+        when {
+            loading -> item { Text(if (russian) "Загрузка…" else "Loading…") }
+            error != null -> item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (russian) "История цен временно недоступна." else "Price history is temporarily unavailable.")
+                    TextButton(onClick = onRetry) { Text(if (russian) "Повторить" else "Retry") }
+                }
+            }
+            catalog == null || catalog.products.isEmpty() -> item {
+                Text(if (requestedQuery.isBlank()) {
+                    if (russian) "Каталог появится после трёх подтверждённых покупок товара."
+                    else "Catalog appears after three confirmed purchases of a product."
+                } else {
+                    if (russian) "Совпадений нет." else "No matches."
+                })
+            }
+            else -> items(catalog.products, key = { "${it.productName}:${it.lastPurchasedAt}" }) { product ->
+                ProductCatalogCardView(product, language, currency)
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun ProductCatalogCardView(product: FinanceProductCard, language: String, currency: String) {
+    val russian = language == "ru"
+    val locale = Locale.forLanguageTag(if (russian) "ru-RU" else "en-US")
+    val dateFormatter = DateTimeFormatter.ofPattern("d MMM yyyy", locale).withZone(ZoneOffset.UTC)
+    val date = runCatching { dateFormatter.format(Instant.parse(product.lastPurchasedAt)) }
+        .getOrDefault(product.lastPurchasedAt.take(10))
+    val purchaseLabel = if (russian) when (product.purchaseCount % 10) {
+        1 -> "покупка"
+        2, 3, 4 -> "покупки"
+        else -> "покупок"
+    } else if (product.purchaseCount == 1) "purchase" else "purchases"
+    val unknownMerchant = if (russian) "магазин не указан" else "store not listed"
+
+    Card(Modifier.fillMaxWidth().testTag("product-card-${product.productName}")) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(product.productName, style = MaterialTheme.typography.titleMedium)
+                Text("${product.purchaseCount} $purchaseLabel")
+            }
+            ProductCatalogMetric("usual-${product.productName}", if (russian) "Обычная цена" else "Usual price",
+                formatMoney(product.usualUnitPrice, language, currency))
+            ProductCatalogMetric("last-${product.productName}", if (russian) "Последняя покупка" else "Last purchase",
+                "${formatMoney(product.lastUnitPrice, language, currency)} · $date · ${product.lastMerchant ?: unknownMerchant}")
+            ProductCatalogMetric("cheapest-${product.productName}", if (russian) "Самая низкая цена" else "Lowest price",
+                "${formatMoney(product.cheapestUnitPrice, language, currency)} · ${product.cheapestMerchant ?: unknownMerchant}")
+            ProductCatalogMetric("spent-${product.productName}", if (russian) "Потрачено" else "Spent",
+                formatMoney(product.totalSpent, language, currency))
+            if (product.hasBaseline && product.baselineUnitPrice != null) {
+                ProductCatalogMetric("baseline-${product.productName}", if (russian) "До последней покупки" else "Before latest purchase",
+                    formatMoney(product.baselineUnitPrice, language, currency))
+            }
+            if (!product.hasBaseline) {
+                Text(if (russian) "Недостаточно сопоставимых покупок."
+                    else "Not enough comparable purchases.")
+            }
+            if (product.chartAvailable && product.history.size >= 2) {
+                val chartDescription = if (russian) "История цены: ${product.productName}"
+                    else "Price history: ${product.productName}"
+                val prices = product.history.map { BigDecimal(it.unitPrice) }
+                val minimum = prices.minOrNull() ?: BigDecimal.ZERO
+                val range = (prices.maxOrNull() ?: minimum).subtract(minimum)
+                val chartColor = MaterialTheme.colorScheme.primary
+                Canvas(Modifier.fillMaxWidth().height(84.dp)
+                    .semantics { contentDescription = chartDescription }) {
+                    val coordinates = prices.mapIndexed { index, price ->
+                        val x = size.width * index / (prices.size - 1)
+                        val relative = if (range.signum() == 0) 0.5f else price.subtract(minimum)
+                            .divide(range, 8, RoundingMode.HALF_UP).toFloat()
+                        Offset(x, size.height - relative * size.height)
+                    }
+                    val chartPath = Path().apply {
+                        moveTo(coordinates.first().x, coordinates.first().y)
+                        coordinates.drop(1).forEach { lineTo(it.x, it.y) }
+                    }
+                    drawPath(chartPath, chartColor,
+                        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+                    coordinates.forEach { point ->
+                        drawCircle(chartColor, radius = 5.dp.toPx(), center = point)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (russian) "Раньше" else "Earlier")
+                    Text(if (russian) "Сейчас" else "Now")
+                }
+            }
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun ProductCatalogMetric(tag: String, label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+        Text(value, modifier = Modifier.testTag("product-metric-$tag"))
     }
 }
 

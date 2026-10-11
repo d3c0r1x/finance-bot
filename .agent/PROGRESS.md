@@ -18,7 +18,7 @@ Updated: 2026-10-11, Europe/Moscow.
 
 ## Current goal
 
-- F59 Android parity remains IN PROGRESS. F59.1 registry: 33 partial, 23 missing, 2 approved N/A after verified F15.1-F15.4 progress.
+- F59 Android parity remains IN PROGRESS. Current registry: 40 partial, 16 missing, 2 approved N/A. F31-F34 Android local acceptance is GREEN; F34 stays partial pending live authenticated OIDC/Core E2E.
 - F59.2 F08 history/repeat/void locally GREEN: API 27 instrumentation 53/53; APK installed and launched; parity-contract tests 3/3. APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`.
 - F59.2 F09 basic search/type filters observed RED then GREEN; API 27 full instrumentation 54/54. Updated debug APK SHA-256: `FB008F9E13114578347D653E602C158C3870886AF379263F8124931CBABCC937`; `MainActivity` is resumed on isolated API 27 emulator. Remaining: server-backed date/member filters, cursor paging, transaction editing, and live Core E2E.
 - F59.2 F03.1 first-time onboarding is locally GREEN and pushed in `1395decae6c50d337193fb6ec3810e6710484116`. F03 Android stays PARTIAL because repeat setup from profile is a later slice. Live OIDC/Core E2E, remaining parity, and F60/production gates remain.
@@ -104,7 +104,7 @@ Updated: 2026-10-11, Europe/Moscow.
 ## Current goal
 
 - ID and outcome: F59 — Android Kotlin/Compose RU/EN feature parity for F01–F58, shared Java API, installed APK, and E2E.
-- Status: IN PROGRESS — F59.1 maps all 58 rows: 33 partial, 23 missing, 2 justified N/A. Existing UI includes onboarding, transactions, budgets, debts, reports, shopping, inflation, recurring items, product decisions, and F15.1-F15.4 receipt item flows.
+- Status: IN PROGRESS — current registry maps all 58 rows: 40 partial, 16 missing, 2 justified N/A. Android local acceptance includes F31-F34 alongside onboarding, transactions, budgets, debts, reports, shopping, inflation, recurring items, product decisions, and receipt flows.
 - Acceptance: map every F01–F58 to Android behavior or justified platform-specific N/A; implement missing user flows; run installed APK on Android 6–8 emulator; prove authenticated live Java/Core/OIDC flow.
 - Evidence: `tests/test_f59_android_parity.py` and F59 `android` mappings in `contracts/parity/feature-parity.yaml`. Initial RED: 3 failed because Android mappings were absent/stale. GREEN: 4 parity/registry contract checks passed. Registry marks all unresolved flows explicitly; this inventory does not claim feature completion.
 - Evidence: F56 feature commit `ab4a38d` is pushed. GitHub run `37577879007` passed all workflow steps, including private-path guard, legacy suites, and empty JSON module smoke.
@@ -1898,7 +1898,7 @@ Updated: 2026-10-11, Europe/Moscow.
 - GREEN: five F32 Android tests pass individually; full direct API 27 instrumentation 237/237 on `emulator-5554` with SwiftShader; Android JVM 37/37; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` pass; contracts 78 passed, 2 skipped; `git diff --check` clean. Updated debug APK installed/launched, SHA-256 `D8295E0CBD5797F6AE1D475A6E7973F05E04F825774FF9B3A875B250A60528AD`. Dedicated test AVD only; Planerka AVD untouched.
 - Android F32 remains PARTIAL only for live authenticated Android-to-Core OIDC roundtrip. Backend scheduler/retry/no-data acceptance remains supported by existing Core/PostgreSQL/Python tests recorded under F32 above.
 - Commit/push: `7bc669576eecc8e5f5b2d9a24b83c9c4bbe7b3d3` (`test(F32): verify Android digest settings`); remote ref confirmed.
-- Next: identify the next incomplete approved Android/V1 goal.
+- F34 Android is the next slice: product catalog, `/price` search and actual purchase-history chart. Core/Go/Web/Telegram F34 are complete; Android remains missing.
 
 
 ## F59.3 F33 Android confirmed-receipt price comparison — GREEN; LOCAL ACCEPTANCE COMPLETE — 2026-10-11
@@ -1909,3 +1909,15 @@ Updated: 2026-10-11, Europe/Moscow.
 - GREEN: `:app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest` passed; direct full Android 8.1/API 27 instrumentation passed 246/246 on isolated `emulator-5554`; contracts passed 78, skipped 2; `git diff --check` clean. Debug APK installed/launched (PID 14157), SHA-256 `B67F3AA161ED9B8D95E5A3A3B7AB76BF8DED8AD02E0FAD9E10FB7530D090BD56`. Independent focused review found no blocker. User emulator `emulator-5558` was not touched.
 - F33 Android local acceptance is GREEN and remains PARTIAL for live authenticated Android-to-Core OIDC verification. Registry evidence now names the actual model/API/UI tests and the live gap.
 - Next: F34 Android product catalog, search and purchase-history chart; tests first. Core, Go, Web and Telegram F34 are already complete.
+
+
+## F59.3 F34 Android product catalog and price history — GREEN; LOCAL ACCEPTANCE COMPLETE — 2026-10-11
+
+- Scope: add the Android counterpart to the existing F34 Core catalog/search endpoint. Core resolves tenant member identity and owns thresholds, matching, ordering, median, baseline, cheapest merchant and history; Android displays only server values.
+- Tests first: new model/API/Compose tests preceded implementation. Initial RED exposed missing API/models/screen. Later RED reproduced the incorrect single-purchase explanation for multi-purchase history without a comparable baseline, and missing auth-generation evidence on stale 401s. API, model and UI tests now cover Core thresholds, exact money, supplementary Unicode, same-time history, and session replacement.
+- Implementation: strict catalog/card/history parsing; authenticated tenant catalog API with RFC3986 query encoding; RU/EN search, cards, actual-history charts and explicit loading/error/retry states. Query validation uses API-23-safe Unicode iteration. Baseline copy no longer claims one purchase when multiple purchases cannot be compared. Catalog publication and invalidation are serialized. Session token saves share the refresh lock; request token and generation snapshots are atomic; an old request cannot retry under replacement-session credentials.
+- Tests first: regression tests exposed both stale refresh overwriting a new login and delayed 401 replay under a replacement account. Initial combined Gradle/contracts run crashed on native JVM memory allocation (`malloc` failed, under 1 MB free virtual memory despite 6.7 GB free physical RAM); serialized Gradle reruns passed.
+- GREEN: focused API/model/screen instrumentation passed 21/21 on Android 6/API 23 and 21/21 on Android 7.1/API 25; full Android 8.1/API 27 instrumentation passed 267/267 on isolated `emulator-5554`; Android JVM tests 37/37; debug and AndroidTest APK builds passed; contracts 78 passed, 2 skipped; `git diff --check` clean. APK installed/launched (PID 26857), SHA-256 `2AC1DE602C43972DA9D22DABD3BB7F0A530B4074D45B447DD8E7C054C140BFBC`. User emulator `emulator-5558` was not touched.
+- F34 Android local acceptance is GREEN, but remains PARTIAL until a live authenticated Android-to-Core OIDC roundtrip is verified. Core financial rules are unchanged.
+- Commit state: COMMIT_PENDING after local GREEN and independent review; live authenticated Android-to-Core OIDC remains an external acceptance gate.
+- Next: commit and push this slice, then choose the next incomplete Android/V1 gap from the registry; F35 and F36 remain partial there.
