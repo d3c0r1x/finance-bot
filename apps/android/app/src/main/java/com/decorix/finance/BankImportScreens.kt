@@ -9,10 +9,16 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
@@ -28,6 +34,9 @@ internal fun BankImportPreviewSection(
     modifier: Modifier = Modifier,
     canUpload: Boolean = false,
     onPick: () -> Unit = {},
+    onSelectRow: (String, String?) -> Unit = { _, _ -> },
+    onConfirm: () -> Unit = {},
+    confirmationNeedsRefresh: Boolean = false,
 ) {
     val russian = language == "ru"
     LazyColumn(
@@ -57,17 +66,32 @@ internal fun BankImportPreviewSection(
         } }
         preview?.let { statement ->
             item(key = "summary") { BankImportStatementSummary(statement, language) }
-            itemsIndexed(statement.rows, key = { index, _ -> "operation-$index" }) { _, row ->
-                Card(Modifier.fillMaxWidth()) {
-                    androidx.compose.foundation.layout.Column(Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(row.merchant?.takeIf(String::isNotBlank) ?: row.description,
-                            style = MaterialTheme.typography.titleSmall)
-                        Text(listOfNotNull(row.operationDate, row.operationTime).joinToString(" · "))
-                        Text(formatMoney(row.signedAmount, language))
-                        row.cardLast4?.let { Text(if (russian) "Карта ••$it" else "Card ••$it") }
+            itemsIndexed(statement.rows, key = { index, row -> row.id.ifBlank { "operation-$index" } }) { _, row ->
+                BankImportRowCard(
+                    row = row,
+                    language = language,
+                    canEdit = canUpload && role != "viewer" && statement.state == "needs_review",
+                    busy = busy,
+                    onSelect = { type -> onSelectRow(row.id, type) },
+                )
+            }
+            if (statement.state == "needs_review" && canUpload && role != "viewer" && statement.includedCount > 0) {
+                item(key = "confirm") {
+                    androidx.compose.material3.Button(
+                        modifier = Modifier.testTag("bank-import-confirm"),
+                        onClick = onConfirm,
+                        enabled = !busy && !confirmationNeedsRefresh,
+                    ) {
+                        Text(if (russian) "Подтвердить импорт" else "Confirm import")
                     }
                 }
+            }
+            if (statement.state == "committed") item(key = "confirm-result") {
+                Text(
+                    if (russian) "Импорт выполнен: создано ${statement.createdCount}, дубликатов ${statement.duplicateCount}."
+                    else "Import complete: ${statement.createdCount} created, ${statement.duplicateCount} duplicates.",
+                    modifier = Modifier.testTag("bank-import-confirm-result"),
+                )
             }
             if (statement.id.isNotBlank()) item(key = "refresh") {
                 TextButton(onClick = onRefresh, enabled = !busy) {
@@ -93,6 +117,17 @@ private fun BankImportStatementSummary(preview: FinanceBankImportPreview, langua
     androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(quality, style = MaterialTheme.typography.titleMedium)
         Text("${if (russian) "Период" else "Period"}: ${preview.periodStart} — ${preview.periodEnd}")
+        Text(if (russian) "Выбранные операции и сверка" else "Selected operations and reconciliation",
+            style = MaterialTheme.typography.titleSmall)
+        Text(if (russian) "Включено: ${preview.includedCount}" else "Included: ${preview.includedCount}",
+            modifier = Modifier.testTag("bank-import-total-included-count"))
+        Text(if (russian) "Исключено: ${preview.excludedCount}" else "Excluded: ${preview.excludedCount}",
+            modifier = Modifier.testTag("bank-import-total-excluded-count"))
+        BankImportTotal("Расходы", "Expenses", preview.expenseTotal, language, "expense")
+        BankImportTotal("Доходы", "Income", preview.incomeTotal, language, "income")
+        BankImportTotal("Возвраты", "Refunds", preview.refundTotal, language, "refund")
+        BankImportTotal("Переводы", "Transfers", preview.transferTotal, language, "transfer")
+        BankImportTotal("Исключено по умолчанию", "Excluded by default", preview.excludedTotal, language, "excluded")
         Text(if (russian) "Итоги по распознанным операциям" else "Parsed operation totals",
             style = MaterialTheme.typography.titleSmall)
         Text("${if (russian) "Расходы" else "Expenses"}: ${formatMoney(preview.parsedExpenseTotal, language)}")
@@ -111,10 +146,92 @@ private fun BankImportStatementSummary(preview: FinanceBankImportPreview, langua
 }
 
 @Composable
-private fun BankImportTotal(ru: String, en: String, value: String?, language: String) {
+private fun BankImportTotal(ru: String, en: String, value: String?, language: String, tag: String? = null) {
     val label = if (language == "ru") ru else en
-    Text("$label: ${value?.let { formatMoney(it, language) }
-        ?: if (language == "ru") "не указано" else "not provided"}")
+    Text(
+        "$label: ${value?.let { runCatching { formatMoney(it, language) }.getOrDefault(it) }
+            ?: if (language == "ru") "не указано" else "not provided"}",
+        modifier = if (tag == null) Modifier else Modifier.testTag("bank-import-total-$tag"),
+    )
+}
+
+@Composable
+private fun BankImportRowCard(
+    row: FinanceBankImportRow,
+    language: String,
+    canEdit: Boolean,
+    busy: Boolean,
+    onSelect: (String?) -> Unit,
+) {
+    val russian = language == "ru"
+    var expanded by remember(row.id) { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth().testTag("bank-import-row-${row.id}")) {
+        androidx.compose.foundation.layout.Column(Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(row.merchant?.takeIf(String::isNotBlank) ?: row.description,
+                style = MaterialTheme.typography.titleSmall)
+            Text(listOfNotNull(row.operationDate, row.operationTime).joinToString(" · "))
+            Text(formatMoney(row.signedAmount, language),
+                modifier = Modifier.testTag("bank-import-row-amount-${row.id}"))
+            row.cardLast4?.let { Text(if (russian) "Карта ••$it" else "Card ••$it") }
+            val decision = if (row.included) {
+                if (russian) "Включено" else "Included"
+            } else {
+                val reason = when (row.exclusionReason) {
+                    "bank_fee" -> if (russian) "Комиссия банка" else "Bank fee"
+                    "external_transfer" -> if (russian) "Внешний перевод" else "External transfer"
+                    "cash_withdrawal" -> if (russian) "Снятие наличных" else "Cash withdrawal"
+                    "internal_transfer" -> if (russian) "Внутренний перевод" else "Internal transfer"
+                    "requires_review" -> if (russian) "Требует проверки" else "Needs review"
+                    else -> if (russian) "Не выбрано" else "Not selected"
+                }
+                if (russian) "Исключено · $reason" else "Excluded · $reason"
+            }
+            Text(decision, modifier = Modifier.testTag("bank-import-row-state-${row.id}"))
+            if (canEdit) {
+                androidx.compose.foundation.layout.Box {
+                    TextButton(
+                        modifier = Modifier.testTag("bank-import-row-type-${row.id}"),
+                        onClick = { expanded = true },
+                        enabled = !busy,
+                    ) {
+                        Text(if (russian) "Тип операции: ${row.transactionType.toRussianImportType()}"
+                            else "Operation type: ${row.transactionType.toEnglishImportType()}")
+                    }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        listOf("expense", "income", "refund", "transfer").forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(if (russian) type.toRussianImportType() else type.toEnglishImportType()) },
+                                onClick = { expanded = false; onSelect(type) },
+                                enabled = !busy,
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(if (russian) "Сбросить выбор" else "Use default") },
+                            onClick = { expanded = false; onSelect(null) },
+                            enabled = !busy,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun String?.toRussianImportType(): String = when (this) {
+    "expense" -> "Расход"
+    "income" -> "Доход"
+    "refund" -> "Возврат"
+    "transfer" -> "Перевод"
+    else -> "По умолчанию"
+}
+
+private fun String?.toEnglishImportType(): String = when (this) {
+    "expense" -> "Expense"
+    "income" -> "Income"
+    "refund" -> "Refund"
+    "transfer" -> "Transfer"
+    else -> "Default"
 }
 
 private fun bankImportErrorText(code: String, language: String): String {

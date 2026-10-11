@@ -53,4 +53,18 @@ class BankImportResponsePolicyTest {
             requestTenantId = "tenant-a", currentTenantId = "tenant-b",
         ))
     }
+
+    @Test fun olderRefreshCannotReplaceANewerCorePreviewRevision() {
+        val current = preview(revision = 4)
+        assertFalse(BankImportResponsePolicy.canReplacePreview(current, preview(revision = 3)))
+        assertTrue(BankImportResponsePolicy.canReplacePreview(current, preview(revision = 4)))
+        assertTrue(BankImportResponsePolicy.canReplacePreview(current, preview(revision = 5)))
+    }
+
+    private fun preview(revision: Long) = FinanceBankImportPreview(
+        quality = "valid", periodStart = "2026-10-01", periodEnd = "2026-10-01",
+        parsedExpenseTotal = "0.00", parsedIncomeTotal = "0.00",
+        expectedExpenseTotal = null, expectedIncomeTotal = null, rows = emptyList(),
+        id = "same-import", tenantId = "same-tenant", revision = revision,
+    )
 }

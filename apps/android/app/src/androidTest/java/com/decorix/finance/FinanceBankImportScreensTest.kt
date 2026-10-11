@@ -52,10 +52,10 @@ class FinanceBankImportScreensTest {
         ))
 
         assertVisible("Итоги выписки не удалось проверить")
+        assertVisible("Итоги банка в PDF не указаны")
         assertVisible("1 234,56 ₽", substring = true)
         assertVisible("45,67 ₽", substring = true)
-        compose.onAllNodesWithText("0,00 ₽", substring = true).assertCountEquals(0)
-        compose.onAllNodesWithText("0.00 RUB", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("Итоги из выписки банка", substring = true).assertCountEquals(0)
     }
 
     @Test fun mismatchShowsBothParsedAndAvailableStatementTotalsWithoutChangingQuality() {

@@ -62,7 +62,7 @@
         "operationTime": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
         "signedAmount": { "type": "string", "pattern": "^-?(?:0|[1-9][0-9]{0,17})\\.[0-9]{2}$" },
         "amount": { "$ref": "#/$defs/amount" },
-        "kind": { "type": "string", "enum": ["purchase", "income", "refund", "fee", "transfer_out", "withdrawal", "internal"] },
+        "kind": { "type": "string", "enum": ["purchase", "income", "refund", "fee", "transfer_out", "transfer_in", "withdrawal", "internal"] },
         "transactionType": { "type": ["string", "null"], "enum": ["expense", "income", "refund", "transfer", null] },
         "included": { "type": "boolean" },
         "selectionSource": { "type": "string", "enum": ["default", "user"] },

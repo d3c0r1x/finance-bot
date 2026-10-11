@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
     private val bankImportGeneration = AtomicLong(0L)
     @Volatile private var bankImportScreenActive = false
     @Volatile private var bankImportUploadInProgress = false
+    @Volatile private var bankImportMutationInProgress = false
     private var bankImportPickerGeneration: Long? = null
     private val receiptRecalculationGeneration = AtomicLong(0L)
     private val familyBudgetFoodRequestGeneration = AtomicLong(0L)
@@ -218,6 +219,8 @@ class MainActivity : ComponentActivity() {
                         onReceiptPriceComparison = ::loadReceiptPriceComparison,
                         onBankImportPick = ::launchBankImportPicker,
                         onBankImportRefresh = ::refreshBankImportPreview,
+                        onBankImportSelectRow = ::selectBankImportRow,
+                        onBankImportConfirm = ::confirmBankImport,
                         onBankImportScreenEnter = ::enterBankImportScreen,
                         onBankImportScreenExit = ::leaveBankImportScreen)
                 }
@@ -286,7 +289,7 @@ class MainActivity : ComponentActivity() {
         val requestGeneration = bankImportGeneration.incrementAndGet()
         bankImportUploadInProgress = true
         ui = ui.copy(bankImportTenantId = tenantId, bankImportPreview = null,
-            bankImportLoading = true, bankImportError = null)
+            bankImportLoading = true, bankImportError = null, bankImportConfirmationNeedsRefresh = false)
         executor.execute {
             val result = runCatching {
                 val mimeType = contentResolver.getType(uri)
@@ -351,12 +354,12 @@ class MainActivity : ComponentActivity() {
         bankImportScreenActive = false
         bankImportPickerGeneration = null
         bankImportGeneration.incrementAndGet()
-        if (!bankImportUploadInProgress) ui = ui.copy(bankImportLoading = false)
+        if (!bankImportUploadInProgress && !bankImportMutationInProgress) ui = ui.copy(bankImportLoading = false)
     }
 
     private fun refreshBankImportPreview(importId: String? = null) {
         val tenant = ui.tenants.firstOrNull() ?: return
-        if (!ui.authenticated || !bankImportScreenActive) return
+        if (!ui.authenticated || !bankImportScreenActive || bankImportUploadInProgress || bankImportMutationInProgress) return
         val preview = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenant.id } ?: return
         val id = importId ?: preview.id
         if (id.isBlank() || id != preview.id) return
@@ -367,10 +370,15 @@ class MainActivity : ComponentActivity() {
         executor.execute {
             runCatching { api.bankImportPreview(tenantId, id, authGeneration) }
                 .onSuccess { refreshed ->
-                    if (refreshed.tenantId == tenantId &&
+                    if (refreshed.tenantId == tenantId && refreshed.id == id &&
                         bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
-                        ui = ui.copy(bankImportPreview = refreshed, bankImportLoading = false,
-                            bankImportError = null)
+                        val current = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId }
+                        if (BankImportResponsePolicy.canReplacePreview(current, refreshed)) {
+                            ui = ui.copy(bankImportPreview = refreshed, bankImportLoading = false,
+                                bankImportError = null, bankImportConfirmationNeedsRefresh = false)
+                        } else {
+                            ui = ui.copy(bankImportLoading = false)
+                        }
                     }
                 }
                 .onFailure { failure ->
@@ -383,6 +391,116 @@ class MainActivity : ComponentActivity() {
                 }
         }
     }
+
+    private fun selectBankImportRow(rowId: String, transactionType: String?) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val preview = ui.bankImportPreview ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || tenant.id != ui.bankImportTenantId ||
+            preview.state != "needs_review" || !bankImportScreenActive || bankImportLoadingOrMutation()) return
+        val authGeneration = api.authSessionGeneration
+        val requestGeneration = bankImportGeneration.incrementAndGet()
+        val tenantId = tenant.id
+        val importId = preview.id
+        val expectedRevision = preview.revision
+        bankImportMutationInProgress = true
+        ui = ui.copy(bankImportLoading = true, bankImportError = null)
+        executor.execute {
+            runCatching {
+                api.selectBankImportRow(tenantId, importId, rowId, transactionType, expectedRevision, authGeneration)
+            }.onSuccess { updated ->
+                bankImportMutationInProgress = false
+                if (updated.id == importId && updated.tenantId == tenantId &&
+                    BankImportResponsePolicy.canCachePreview(authGeneration, api.authSessionGeneration,
+                        tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated) {
+                    val apply = bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)
+                    val current = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId }
+                    if (BankImportResponsePolicy.canReplacePreview(current, updated)) {
+                        ui = ui.copy(bankImportPreview = updated, bankImportTenantId = tenantId,
+                            bankImportLoading = false, bankImportError = null,
+                            bankImportConfirmationNeedsRefresh = false)
+                    } else {
+                        ui = ui.copy(bankImportLoading = false)
+                    }
+                    if (!apply && bankImportScreenActive && ui.bankImportError == null) refreshBankImportPreview(importId)
+                } else if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                    ui = ui.copy(bankImportLoading = false, bankImportError = "request_failed")
+                }
+            }.onFailure { failure ->
+                bankImportMutationInProgress = false
+                if (failure is ApiFailure && failure.status == 401 &&
+                    failure.authSessionGeneration == api.authSessionGeneration) expireAuthenticatedSession(failure)
+                val eligible = BankImportResponsePolicy.canCachePreview(authGeneration, api.authSessionGeneration,
+                    tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated
+                if (eligible) {
+                    ui = ui.copy(bankImportLoading = false,
+                        bankImportError = BankImportErrorPolicy.code((failure as? ApiFailure)?.status,
+                            (failure as? ApiFailure)?.message ?: failure.message))
+                    if (failure is ApiFailure && failure.status == 412 && bankImportScreenActive) refreshBankImportPreview(importId)
+                } else if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                    ui = ui.copy(bankImportLoading = false)
+                }
+            }
+        }
+    }
+
+    private fun confirmBankImport() {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val preview = ui.bankImportPreview ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || tenant.id != ui.bankImportTenantId ||
+            preview.tenantId != tenant.id || preview.state != "needs_review" || preview.includedCount <= 0 ||
+            ui.bankImportConfirmationNeedsRefresh || !bankImportScreenActive || bankImportLoadingOrMutation()) return
+        val authGeneration = api.authSessionGeneration
+        val requestGeneration = bankImportGeneration.incrementAndGet()
+        val tenantId = tenant.id
+        val importId = preview.id
+        val expectedRevision = preview.revision
+        val idempotencyKey = BankImportConfirmationKey.forImport(importId)
+        bankImportMutationInProgress = true
+        ui = ui.copy(bankImportLoading = true, bankImportError = null)
+        executor.execute {
+            runCatching {
+                api.confirmBankImport(tenantId, importId, expectedRevision, idempotencyKey, authGeneration)
+            }.onSuccess { committed ->
+                bankImportMutationInProgress = false
+                if (committed.id == importId && committed.tenantId == tenantId && committed.state == "committed" &&
+                    BankImportResponsePolicy.canCachePreview(authGeneration, api.authSessionGeneration,
+                        tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated) {
+                    val apply = bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)
+                    val current = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId }
+                    if (BankImportResponsePolicy.canReplacePreview(current, committed)) {
+                        ui = ui.copy(bankImportPreview = committed, bankImportTenantId = tenantId,
+                            bankImportLoading = false, bankImportError = null,
+                            bankImportConfirmationNeedsRefresh = false)
+                    } else {
+                        ui = ui.copy(bankImportLoading = false)
+                    }
+                    if (!apply && bankImportScreenActive) refreshBankImportPreview(importId)
+                } else if (BankImportResponsePolicy.canCachePreview(authGeneration, api.authSessionGeneration,
+                        tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated) {
+                    ui = ui.copy(bankImportLoading = false, bankImportConfirmationNeedsRefresh = true,
+                        bankImportError = "request_failed")
+                    if (bankImportScreenActive) refreshBankImportPreview(importId)
+                }
+            }.onFailure { failure ->
+                bankImportMutationInProgress = false
+                if (failure is ApiFailure && failure.status == 401 &&
+                    failure.authSessionGeneration == api.authSessionGeneration) expireAuthenticatedSession(failure)
+                val eligible = BankImportResponsePolicy.canCachePreview(authGeneration, api.authSessionGeneration,
+                    tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated
+                if (eligible) {
+                    ui = ui.copy(bankImportLoading = false,
+                        bankImportConfirmationNeedsRefresh = true,
+                        bankImportError = BankImportErrorPolicy.code((failure as? ApiFailure)?.status,
+                            (failure as? ApiFailure)?.message ?: failure.message))
+                    if (bankImportScreenActive) refreshBankImportPreview(importId)
+                } else if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                    ui = ui.copy(bankImportLoading = false)
+                }
+            }
+        }
+    }
+
+    private fun bankImportLoadingOrMutation(): Boolean = ui.bankImportLoading || bankImportMutationInProgress
 
     private fun bankImportRequestCanApply(authGeneration: Long, tenantId: String, requestGeneration: Long): Boolean =
         BankImportResponsePolicy.canApply(
@@ -2907,6 +3025,7 @@ data class FinanceUiState(
     val bankImportTenantId: String? = null,
     val bankImportLoading: Boolean = false,
     val bankImportError: String? = null,
+    val bankImportConfirmationNeedsRefresh: Boolean = false,
     val receiptDraft: FinanceReceipt? = null,
     val receiptReading: FinanceReceiptReading? = null,
     val receiptReadingReceiptId: String? = null,
@@ -3243,6 +3362,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onGoalCancel: (String) -> Unit = {},
                           onBankImportPick: () -> Unit = {},
                           onBankImportRefresh: () -> Unit = {},
+                          onBankImportSelectRow: (String, String?) -> Unit = { _, _ -> },
+                          onBankImportConfirm: () -> Unit = {},
                           onBankImportScreenEnter: () -> Unit = {},
                           onBankImportScreenExit: () -> Unit = {}) {
     val russian = language == "ru"
@@ -3553,6 +3674,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         busy = state.bankImportLoading,
                         error = state.bankImportError,
                         onRefresh = onBankImportRefresh,
+                        onSelectRow = onBankImportSelectRow,
+                        onConfirm = onBankImportConfirm,
+                        confirmationNeedsRefresh = state.bankImportConfirmationNeedsRefresh,
                         canUpload = state.authenticated && state.tenants.firstOrNull()?.role != "viewer",
                         onPick = onBankImportPick,
                     )

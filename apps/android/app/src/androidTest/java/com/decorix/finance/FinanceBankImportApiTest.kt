@@ -172,6 +172,7 @@ class FinanceBankImportApiTest {
             valid.replace("\"operationTime\":\"12:30\"", "\"operationTime\":null"),
             valid.replace("\"operationTime\":\"12:30\",", ""),
             valid.replace("\"expectedExpenseTotal\":\"1000.00\",", ""),
+            valid.replace("\"duplicateOfTransactionId\":null", "\"duplicateOfTransactionId\":\"bad-id\""),
         )
 
         invalidPayloads.forEachIndexed { index, payload ->
@@ -192,6 +193,41 @@ class FinanceBankImportApiTest {
         assertEquals(maximum, preview.parsedExpenseTotal)
         assertEquals(maximum, preview.expectedExpenseTotal)
         assertEquals("-$maximum", preview.rows.first().signedAmount)
+    }
+
+    @Test fun previewAcceptsCoreTransferInRowKindAndKeepsItsExclusionReason() {
+        val payload = previewJson(quality = "valid")
+            .replace("\"kind\":\"purchase\"", "\"kind\":\"transfer_in\"")
+            .replaceFirst("\"exclusionReason\":null", "\"exclusionReason\":\"external_transfer\"")
+            .replaceFirst("\"transactionType\":\"expense\"", "\"transactionType\":null")
+            .replaceFirst("\"included\":true", "\"included\":false")
+            .replaceFirst("\"signedAmount\":\"-120.50\"", "\"signedAmount\":\"120.50\"")
+
+        val preview = FinanceBankImportModels.preview(org.json.JSONObject(payload))
+        val incomingTransfer = preview.rows.first()
+
+        assertEquals("transfer_in", incomingTransfer.kind)
+        assertFalse(incomingTransfer.included)
+        assertEquals("external_transfer", incomingTransfer.exclusionReason)
+        assertEquals("120.50", incomingTransfer.signedAmount)
+    }
+
+    @Test fun previewPreservesCoreTransactionAndDuplicateReferences() {
+        val payload = previewJson(quality = "valid")
+            .replaceFirst("\"transactionId\":null", "\"transactionId\":\"$TRANSACTION_ID\"")
+            .replaceFirst("\"outcome\":\"pending\"", "\"outcome\":\"created\"")
+            .replaceLast("\"duplicateOfTransactionId\":null", "\"duplicateOfTransactionId\":\"$DUPLICATE_ID\"")
+            .replaceLast("\"outcome\":\"pending\"", "\"outcome\":\"duplicate\"")
+            .replaceLast("\"duplicate\":false", "\"duplicate\":true")
+
+        val rows = FinanceBankImportModels.preview(org.json.JSONObject(payload)).rows
+
+        assertEquals(TRANSACTION_ID, rows.first().transactionId)
+        assertNull(rows.first().duplicateOfTransactionId)
+        assertTrue(rows.last().duplicate)
+        assertEquals("duplicate", rows.last().outcome)
+        assertEquals(DUPLICATE_ID, rows.last().duplicateOfTransactionId)
+        assertNull(rows.last().transactionId)
     }
 
     private fun api(): FinanceApi {
@@ -233,11 +269,19 @@ class FinanceBankImportApiTest {
 
     private fun String?.jsonValue(): String = this?.let { "\"$it\"" } ?: "null"
 
+    private fun String.replaceLast(oldValue: String, newValue: String): String {
+        val index = lastIndexOf(oldValue)
+        check(index >= 0)
+        return replaceRange(index, index + oldValue.length, newValue)
+    }
+
     private companion object {
         const val TENANT_ID = "00000000-0000-4000-8000-000000000047"
         const val IMPORT_ID = "00000000-0000-4000-8000-000000000048"
         const val ROW_1_ID = "00000000-0000-4000-8000-000000000049"
         const val ROW_2_ID = "00000000-0000-4000-8000-000000000050"
+        const val TRANSACTION_ID = "00000000-0000-4000-8000-000000000051"
+        const val DUPLICATE_ID = "00000000-0000-4000-8000-000000000052"
         const val MAX_PDF_BYTES = 12 * 1024 * 1024
         val PDF_BYTES = "%PDF-1.7\nsynthetic statement".toByteArray(Charsets.UTF_8)
     }

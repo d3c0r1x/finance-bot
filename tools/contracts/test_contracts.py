@@ -998,12 +998,12 @@ def test_f47_android_contract_marks_preview_only_partial_parity():
 
     assert android["status"] == "partial"
     assert "upload" in android["scenario"].lower() and "preview" in android["scenario"].lower()
-    assert "F48/F49" in android["gap"]
-    assert "mutations are absent" in android["gap"].lower()
+    assert "F49" in android["gap"]
+    assert "deduplication and batch undo are not implemented" in android["gap"].lower()
     assert "upload/preview" in android["evidence"][0].lower()
     assert "live android core/oidc e2e pending" in android["evidence"][0].lower()
-    assert "mutation" in android["gap"].lower()
     assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt" in android["tests"]
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationApiTest.kt" in android["tests"]
     assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportScreensTest.kt" in android["tests"]
 
 
@@ -1283,6 +1283,17 @@ def test_bank_import_preview_contract_is_strict_and_exposes_web_and_api_routes()
     assert list(validator.iter_errors(preview)) == []
     assert list(validator.iter_errors({**preview, "unexpected": True}))
     assert list(validator.iter_errors({**preview, "quality": "valid", "parsedExpenseTotal": 13.0}))
+
+
+def test_bank_import_row_kind_contracts_include_transfer_in():
+    openapi = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
+    json_schema = json.loads((ROOT / "contracts/schemas/bank-import-preview.v1.schema.json").read_text("utf-8"))
+    enums = {
+        "OpenAPI BankImportRow": openapi["components"]["schemas"]["BankImportRow"]["properties"]["kind"]["enum"],
+        "bank-import-preview JSON Schema": json_schema["$defs"]["row"]["properties"]["kind"]["enum"],
+    }
+    missing = [name for name, values in enums.items() if "transfer_in" not in values]
+    assert not missing, f"transfer_in missing from: {', '.join(missing)}"
 
 
 def test_merchant_classification_and_mapping_contracts_are_scoped_and_strict():

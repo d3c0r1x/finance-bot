@@ -107,6 +107,54 @@ class FinanceApi internal constructor(
         return FinanceBankImportModels.preview(JSONObject(body))
     }
 
+    fun selectBankImportRow(
+        tenantId: String,
+        importId: String,
+        rowId: String,
+        transactionType: String?,
+        expectedRevision: Long,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceBankImportPreview {
+        require(isUuid(importId) && isUuid(rowId)) { "Invalid bank import row identifier" }
+        require(expectedRevision > 0L) { "Invalid bank import revision" }
+        require(transactionType == null || transactionType in setOf("expense", "income", "refund", "transfer")) {
+            "Unsupported bank import transaction type"
+        }
+        val requestBody = JSONObject().put("transactionType", transactionType ?: JSONObject.NULL)
+            .toString().toRequestBody("application/json".toMediaType())
+        val body = executeRequest(
+            "/api/v1/tenants/$tenantId/imports/$importId/rows/$rowId", "PATCH", requestBody,
+            ifMatchVersion = expectedRevision,
+            retryUnauthorized = false,
+            expectedSessionGeneration = expectedSessionGeneration,
+        )
+        return FinanceBankImportModels.preview(JSONObject(body))
+    }
+
+    fun confirmBankImport(
+        tenantId: String,
+        importId: String,
+        expectedRevision: Long,
+        idempotencyKey: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceBankImportPreview {
+        require(isUuid(importId)) { "Invalid bank import identifier" }
+        require(expectedRevision > 0L) { "Invalid bank import revision" }
+        require(idempotencyKey.length in 16..128 && idempotencyKey.none(Char::isISOControl)) {
+            "Invalid bank import confirmation key"
+        }
+        val requestBody = JSONObject().put("confirmed", true).toString()
+            .toRequestBody("application/json".toMediaType())
+        val body = executeRequest(
+            "/api/v1/tenants/$tenantId/imports/$importId/confirm", "POST", requestBody,
+            idempotencyKey = idempotencyKey,
+            ifMatchVersion = expectedRevision,
+            retryUnauthorized = false,
+            expectedSessionGeneration = expectedSessionGeneration,
+        )
+        return FinanceBankImportModels.preview(JSONObject(body))
+    }
+
     fun uploadReceiptPhoto(tenantId: String, bytes: ByteArray, fileName: String, contentType: String,
                            idempotencyKey: String): FinanceReceiptProcessingJob {
         require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Receipt image size is invalid" }

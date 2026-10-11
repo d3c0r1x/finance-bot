@@ -1063,12 +1063,14 @@ features:
     android:
       status: partial
       scenario: "Android F47: PDF Т-Банка upload and read-only preview with operations and reconciliation"
-      gap: "F48/F49 Android mutations are absent: row selection, confirmation, deduplication and undo. Live Android Core/OIDC E2E is pending."
+      gap: "F49 Android deduplication and batch undo are not implemented. Live Android Core/OIDC E2E is pending."
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationScreensTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportScreensTest.kt
       evidence:
-        - "Android upload/preview is covered by API and screen tests. F48/F49 mutations are not implemented in Android. Live Android Core/OIDC E2E pending."
+        - "Android F47 upload/preview and F48 row selection/explicit confirmation are covered by API and screen tests. F49 deduplication/undo remain out of scope. Live Android Core/OIDC E2E pending."
     intentional_differences: []
   - id: F48
     feature: "Preview импорта, подтверждение, покупки/доходы/refund, skipped"
@@ -1082,9 +1084,19 @@ features:
     evidence:
       - "Core stages tenant-scoped rows, keeps parser quality unchanged, exposes signed included/excluded rows, supports explicit type overrides, and confirms a versioned batch. RU/EN Web tests cover reconciliation, fees, user selection, confirmation, duplicates and undo; all 30 Web tests and production build pass."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F48: Preview импорта, подтверждение, покупки/доходы/refund, skipped"
-      gap: "No Android user screen or equivalent flow is verified for F48 yet."
+      gap: "Live Android Core/OIDC mutation and tenant-isolation E2E remain unverified. F49 deduplication/undo are separate."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationScreensTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportScreensTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/BankImportConfirmationKeyTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/BankImportResponsePolicyTest.kt
+        - tools/contracts/test_contracts.py
+      evidence:
+        - "F48 Android mutation API/UI instrumentation passes 29/29; combined Android API 27 regression passes 208/208; JVM tests and debug/AndroidTest APK builds pass; parity contracts pass 62/62. Installed debug APK SHA-256 62463BD6D4933A2AD08E448E971E9D5EB6B28A893AF02B71A9412596D7A948B3."
     intentional_differences: []
   - id: F49
     feature: "Дедупликация импорта, bulk insert, undo именно партии"

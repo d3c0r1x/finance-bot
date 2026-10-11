@@ -69,6 +69,17 @@ internal object BankImportResponsePolicy {
         screenActive: Boolean,
     ): Boolean = requestAuthGeneration == currentAuthGeneration &&
         requestTenantId == currentTenantId && requestGeneration == currentGeneration && screenActive
+
+    fun canReplacePreview(current: FinanceBankImportPreview?, incoming: FinanceBankImportPreview): Boolean =
+        current == null || current.id != incoming.id || incoming.revision >= current.revision
+}
+
+internal object BankImportConfirmationKey {
+    fun forImport(importId: String): String {
+        require(runCatching { java.util.UUID.fromString(importId).toString().equals(importId, ignoreCase = true) }
+            .getOrDefault(false)) { "Invalid bank import identifier" }
+        return "android-bank-import-confirm-$importId"
+    }
 }
 
 internal object BankImportErrorPolicy {
