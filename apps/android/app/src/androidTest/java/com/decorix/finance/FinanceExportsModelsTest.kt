@@ -1,5 +1,7 @@
 package com.decorix.finance
 
+import android.content.Intent
+import android.net.Uri
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -138,6 +140,55 @@ class FinanceExportsModelsTest {
         }
     }
 
+    @Test fun onlyCurrentUserRequestedReadyResponseCanOpenFreshSafeUrl() {
+        val attempt = FinanceExportDownloadAttempt(TENANT_ID, EXPORT_ID, sessionGeneration = 7, generation = 3)
+        val current = FinanceExportDownloadContext(TENANT_ID, EXPORT_ID, 7, 3,
+            authenticated = true, screenActive = true, screenResumed = true)
+        assertEquals(DOWNLOAD_URL,
+            FinanceExportDownloadPolicy.freshUrlIfCurrent(attempt, current, "ready", DOWNLOAD_URL))
+        for ((status, url) in listOf(
+            "processing" to DOWNLOAD_URL,
+            "expired" to DOWNLOAD_URL,
+            "ready" to null,
+            "ready" to "http://files.example.test/export.csv",
+            "ready" to "https://user:password@files.example.test/export.csv",
+        )) {
+            assertNull(FinanceExportDownloadPolicy.freshUrlIfCurrent(attempt, current, status, url))
+        }
+    }
+
+    @Test fun downloadAttemptIsDiscardedWhenSessionTenantScreenOrRequestChanges() {
+        val attempt = FinanceExportDownloadAttempt(TENANT_ID, EXPORT_ID, sessionGeneration = 7, generation = 3)
+        val current = FinanceExportDownloadContext(TENANT_ID, EXPORT_ID, 7, 3,
+            authenticated = true, screenActive = true, screenResumed = true)
+        val staleContexts = listOf(
+            current.copy(tenantId = "other-tenant"),
+            current.copy(exportId = "other-export"),
+            current.copy(sessionGeneration = 8),
+            current.copy(generation = 4),
+            current.copy(authenticated = false),
+            current.copy(screenActive = false),
+            current.copy(screenResumed = false),
+        )
+        staleContexts.forEach { stale ->
+            assertNull(FinanceExportDownloadPolicy.freshUrlIfCurrent(attempt, stale, "ready", DOWNLOAD_URL))
+        }
+    }
+
+    @Test fun externalDownloadIntentContainsOnlyTheValidatedHttpsUrl() {
+        val intent = FinanceExportDownloadIntents.externalView(DOWNLOAD_URL)
+        assertEquals(Intent.ACTION_VIEW, intent?.action)
+        assertEquals(Uri.parse(DOWNLOAD_URL), intent?.data)
+        assertNull(intent?.extras)
+        for (unsafe in listOf(
+            "http://files.example.test/export.csv",
+            "https://user:password@files.example.test/export.csv",
+            "javascript:alert(1)",
+        )) {
+            assertNull(FinanceExportDownloadIntents.externalView(unsafe))
+        }
+    }
+
     private fun assertJobRejected(mutate: (JSONObject) -> Unit) {
         val json = jobJson("ready").put("downloadUrl", DOWNLOAD_URL)
         mutate(json)
@@ -165,6 +216,7 @@ class FinanceExportsModelsTest {
 
     private companion object {
         const val EXPORT_ID = "00000000-0000-4000-8000-000000000052"
+        const val TENANT_ID = "00000000-0000-4000-8000-000000000051"
         const val MEMBER_ID = "00000000-0000-4000-8000-000000000053"
         const val DOWNLOAD_URL = "https://files.example.test/private/export.csv?signature=short-lived"
     }

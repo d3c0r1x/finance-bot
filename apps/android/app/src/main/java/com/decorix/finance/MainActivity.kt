@@ -83,12 +83,6 @@ import java.util.concurrent.atomic.AtomicLong
 private val ambiguousExportCreateErrors = setOf("network", "unavailable")
 
 class MainActivity : ComponentActivity() {
-    private data class PendingExportDownload(
-        val tenantId: String,
-        val exportId: String,
-        val sessionGeneration: Long,
-        val generation: Long,
-    )
     private data class PendingExportCompletion(
         val tenantId: String,
         val sessionGeneration: Long,
@@ -130,7 +124,7 @@ class MainActivity : ComponentActivity() {
     private val exportDownloadGeneration = AtomicLong(0L)
     private val healthRequestGeneration = AtomicLong(0L)
     @Volatile private var exportScreenActive = false
-    @Volatile private var pendingExportDownload: PendingExportDownload? = null
+    @Volatile private var pendingExportDownload: FinanceExportDownloadAttempt? = null
     @Volatile private var pendingExportCompletion: PendingExportCompletion? = null
     @Volatile private var exportBusyKind: String? = null
     @Volatile private var bankImportScreenActive = false
@@ -3333,13 +3327,13 @@ class MainActivity : ComponentActivity() {
         val tenant = ui.tenants.firstOrNull() ?: return
         val job = ui.exportJob?.takeIf { it.id == exportId && it.status == "ready" } ?: return
         if (!ui.authenticated || !exportScreenActive || ui.exportBusy) return
-        val attempt = PendingExportDownload(tenant.id, exportId, api.authSessionGeneration,
+        val attempt = FinanceExportDownloadAttempt(tenant.id, exportId, api.authSessionGeneration,
             exportDownloadGeneration.incrementAndGet())
         pendingExportDownload = attempt
         refreshExportStatus(exportId, attempt)
     }
 
-    private fun refreshExportStatus(exportId: String, downloadAttempt: PendingExportDownload?) {
+    private fun refreshExportStatus(exportId: String, downloadAttempt: FinanceExportDownloadAttempt?) {
         val tenant = ui.tenants.firstOrNull() ?: return
         if (!ui.authenticated || ui.exportJob?.id != exportId || ui.exportJobTenantId != tenant.id ||
             ui.exportBusy) return
@@ -3360,13 +3354,21 @@ class MainActivity : ComponentActivity() {
                         ui = ui.copy(exportBusy = false, exportJob = visibleJob, exportError = null)
                         if (downloadAttempt != null && pendingExportDownload == downloadAttempt) {
                             pendingExportDownload = null
-                            val mayOpen = exportScreenActive && downloadAttempt.tenantId == tenant.id &&
-                                downloadAttempt.sessionGeneration == api.authSessionGeneration &&
-                                downloadAttempt.generation == exportDownloadGeneration.get() &&
-                                lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
-                            if (mayOpen && job.status == "ready" && job.downloadUrl != null) {
-                                openExportDownload(job.downloadUrl)
-                            } else if (mayOpen) {
+                            val context = FinanceExportDownloadContext(
+                                tenantId = ui.tenants.firstOrNull()?.id,
+                                exportId = ui.exportJob?.id,
+                                sessionGeneration = api.authSessionGeneration,
+                                generation = exportDownloadGeneration.get(),
+                                authenticated = ui.authenticated,
+                                screenActive = exportScreenActive,
+                                screenResumed = lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED),
+                            )
+                            val freshUrl = FinanceExportDownloadPolicy.freshUrlIfCurrent(
+                                downloadAttempt, context, job.status, job.downloadUrl,
+                            )
+                            if (freshUrl != null) {
+                                openExportDownload(freshUrl)
+                            } else if (FinanceExportDownloadPolicy.isCurrent(downloadAttempt, context)) {
                                 Toast.makeText(this, if (language == "ru") "Ссылка больше недоступна. Обновите статус." else
                                     "The download link is no longer available. Refresh the status.", Toast.LENGTH_SHORT).show()
                             }
@@ -3389,19 +3391,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openExportDownload(url: String) {
-        runCatching { FinanceExportModels.requireSafeDownloadUrl(url) }
-            .onFailure {
-                Toast.makeText(this, if (language == "ru") "Ссылка экспорта недействительна." else
-                    "The export link is invalid.", Toast.LENGTH_SHORT).show()
-                return
-            }
-        runCatching {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            startActivity(Intent.createChooser(intent, if (language == "ru") "Скачать CSV" else "Download CSV"))
-        }.onFailure {
-            Toast.makeText(this, if (language == "ru") "Не удалось открыть ссылку. Обновите статус." else
-                "Could not open the link. Refresh the status.", Toast.LENGTH_SHORT).show()
+        val intent = FinanceExportDownloadIntents.externalView(url)
+        if (intent == null) {
+            Toast.makeText(this, if (language == "ru") "Ссылка экспорта недействительна." else
+                "The export link is invalid.", Toast.LENGTH_SHORT).show()
+            return
         }
+        runCatching { startActivity(Intent.createChooser(intent, if (language == "ru") "Скачать CSV" else "Download CSV")) }
+            .onFailure {
+                Toast.makeText(this, if (language == "ru") "Не удалось открыть ссылку. Обновите статус." else
+                    "Could not open the link. Refresh the status.", Toast.LENGTH_SHORT).show()
+            }
     }
 
     private fun applyRecurringDecision(seriesId: String, muted: Boolean) {

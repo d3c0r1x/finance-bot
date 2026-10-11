@@ -1186,7 +1186,7 @@ features:
     android:
       status: partial
       scenario: "Android counterpart for F52: CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
-      gap: "Android export request, bounded status presentation, validation, and explicit fresh-link handoff pass local tests. Live Android OIDC/Core role enforcement, export worker/S3 URL, actual browser transfer and downloaded-byte integrity remain unverified; lifecycle cancellation, explicit-intent safety, and full RU/EN behavior still need direct runtime coverage."
+      gap: "Live Android OIDC/Core role enforcement, export worker/S3 URL, actual browser transfer and downloaded-byte integrity remain unverified. App-background/session/tenant polling cancellation, Activity-level chooser handoff, and the complete RU/EN state matrix still need direct coverage."
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsModelsTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsApiTest.kt
@@ -1195,6 +1195,7 @@ features:
         - "F52 Android model/API/screen tests pass 27/27; combined F47-F52 Android regression passes 99/99 on isolated Android 8.1/API 27 emulator-5554. Android JVM suite passes 69/69; debug and AndroidTest APKs build; parity/contract tests pass 66/66. Fresh debug APK SHA-256 38FF5CB9DB43626C7E679056EFCA2A084915D3DB5A3438B43CA6805F18FDD063 installed and MainActivity launched on emulator-5554. Live OIDC/Core/worker/S3/browser transfer not run."
         - "Follow-up local Compose test passes 1/1 and the complete F52 model/API/screen set passes 28/28 on emulator-5554. An injected delay verifies exactly twelve automatic status calls each scheduled at 5000 ms and confirms manual refresh remains available after the bounded window. This does not prove wall-clock cadence or lifecycle cancellation."
         - "Follow-up cancellation Compose test passes; all F52 model/API/screen tests pass 29/29 on emulator-5554. Disposing the export screen cancels the suspended poll and sends no status request. Background/session/tenant-switch cancellation and elapsed wall-clock timing remain unverified."
+        - "Download safety follow-up: F52 model/policy/external-intent tests 16/16, API tests 6/6, and Compose tests 12/12 pass on isolated Android 8.1/API 27 emulator-5554; complete FinanceScreensTest 88/88, Android JVM 71/71, contracts 63/63, and debug/AndroidTest APK assembly pass. Tests reject a mismatched response export ID, accept the same UUID despite hex letter case, allow only a current-session/tenant/screen ready response with a safe HTTPS URL, and build an ACTION_VIEW intent containing only the validated URL (no extras). This does not exercise Activity chooser invocation, live Core/OIDC/S3, browser transfer, or downloaded bytes."
     intentional_differences: []
   - id: F53
     feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"

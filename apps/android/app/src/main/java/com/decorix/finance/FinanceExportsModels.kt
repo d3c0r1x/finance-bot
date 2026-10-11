@@ -45,9 +45,53 @@ data class FinanceExportJob(
     val downloadUrl: String?,
 )
 
+internal data class FinanceExportDownloadAttempt(
+    val tenantId: String,
+    val exportId: String,
+    val sessionGeneration: Long,
+    val generation: Long,
+)
+
+internal data class FinanceExportDownloadContext(
+    val tenantId: String?,
+    val exportId: String?,
+    val sessionGeneration: Long,
+    val generation: Long,
+    val authenticated: Boolean,
+    val screenActive: Boolean,
+    val screenResumed: Boolean,
+)
+
+internal object FinanceExportDownloadPolicy {
+    fun isCurrent(attempt: FinanceExportDownloadAttempt, context: FinanceExportDownloadContext): Boolean =
+        context.authenticated && context.screenActive && context.screenResumed &&
+            attempt.tenantId == context.tenantId && attempt.exportId == context.exportId &&
+            attempt.sessionGeneration == context.sessionGeneration && attempt.generation == context.generation
+
+    fun freshUrlIfCurrent(
+        attempt: FinanceExportDownloadAttempt,
+        context: FinanceExportDownloadContext,
+        status: String,
+        downloadUrl: String?,
+    ): String? {
+        if (!isCurrent(attempt, context) || status != "ready") return null
+        val url = downloadUrl ?: return null
+        return runCatching { FinanceExportModels.requireSafeDownloadUrl(url) }.fold(
+            onSuccess = { url },
+            onFailure = { null },
+        )
+    }
+}
+
 internal object FinanceExportModels {
     fun request(fromDate: String, toDate: String, memberId: String? = null): FinanceExportRequest =
         FinanceExportRequest("csv-v1", fromDate, toDate, memberId)
+
+    fun status(json: JSONObject, requestedExportId: String): FinanceExportJob = job(json).also {
+        require(it.id.equals(requestedExportId, ignoreCase = true)) {
+            "Export response identifier does not match request"
+        }
+    }
 
     fun job(json: JSONObject): FinanceExportJob {
         val id = json.getString("id")

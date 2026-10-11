@@ -2090,3 +2090,12 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - GREEN: focused Android money test 7/7; F53 owner/viewer navigation tests 1/1 each on isolated API-27 `emulator-5554`; parity contract suite 63/63; `git diff --check` clean. Do not claim live Core, remote CI, or production-service verification.
 - Commit: `251b30c` (`test(F57): cover Android money formatting edges`); progress record follow-up pending.
 - Next: continue V1 with the next F59 Android gap after checking plan and current progress; keep F52/F53/F54 live deployment gates explicit.
+
+## F59.21 F52 fresh export download safety — GREEN locally; PARTIAL — 2026-10-11
+
+- TDD RED: handoff policy and intent tests first failed to compile because no shared current-attempt guard or tested external-intent builder existed. A reviewer then found that `exportStatus` trusted any valid job ID; a MockWebServer test failed because an ID mismatch was accepted. A casing boundary test now also proves equivalent UUID hex casing is accepted.
+- Implementation: extracted current attempt/context checks for tenant, export ID, auth session, request generation, authentication, active/resumed screen, ready status, and safe HTTPS URL. `MainActivity` opens only the fresh returned URL after the explicit action. The external intent is ACTION_VIEW with the URL as data and no Core token/header extras. `FinanceApi.exportStatus` now rejects a response whose UUID differs from the requested export UUID (case-insensitive UUID comparison).
+- GREEN: F52 model/policy/intent 16/16, API 6/6, Compose 12/12 on isolated Android 8.1/API 27 `emulator-5554`; complete `FinanceScreensTest` 88/88; Android JVM 71/71; parity contracts 63/63; debug and AndroidTest APKs assemble. `git diff --check` passes.
+- Review: independent review found the mismatched export-ID bug; added a failing regression test and fixed it. Follow-up review found no remaining blocker. Reviewers did not run tests; the results above were run locally.
+- Limits: Android F52 stays PARTIAL. Activity chooser invocation, live Android OIDC/Core role enforcement, export worker/S3, actual browser transfer and byte integrity, background polling cancellation, elapsed-time polling and full RU/EN matrix remain unverified. No live delivery claim.
+- Commit/push pending after final diff verification. Keep this as a separate F52 commit; do not stage unrelated untracked user files.

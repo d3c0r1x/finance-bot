@@ -58,6 +58,30 @@ class FinanceExportsApiTest {
         assertNull(request.requestUrl?.query)
     }
 
+    @Test fun statusRejectsAValidJobReturnedForADifferentExportId() {
+        val otherExportId = "00000000-0000-4000-8000-000000000099"
+        server.enqueue(MockResponse().setBody(jobJson("ready").replace(EXPORT_ID, otherExportId)))
+
+        val failure = runCatching { api().exportStatus(TENANT_ID, EXPORT_ID) }.exceptionOrNull()
+
+        assertTrue("Core response must match the requested export ID", failure is IllegalArgumentException)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/$TENANT_ID/exports/$EXPORT_ID", request.path)
+    }
+
+    @Test fun statusAcceptsTheSameUuidWithDifferentHexLetterCase() {
+        val requestedExportId = "abcdefab-cdef-4abc-8def-abcdefabcdef"
+        val uppercaseExportId = requestedExportId.uppercase()
+        server.enqueue(MockResponse().setBody(jobJson("ready").replace(EXPORT_ID, uppercaseExportId)))
+
+        val job = api().exportStatus(TENANT_ID, requestedExportId)
+
+        assertEquals(uppercaseExportId, job.id)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("/api/v1/tenants/$TENANT_ID/exports/$requestedExportId", request.path)
+    }
+
     @Test fun createAndStatusSurface401WithoutRefreshingOrReplayingRequest() {
         val api = api()
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"expired"}"""))

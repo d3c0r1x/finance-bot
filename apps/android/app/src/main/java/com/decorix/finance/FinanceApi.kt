@@ -111,7 +111,7 @@ class FinanceApi internal constructor(
         require(isUuid(tenantId) && isUuid(exportId)) { "Invalid export identifier" }
         val response = executeRequest("/api/v1/tenants/$tenantId/exports/$exportId", "GET", null,
             retryUnauthorized = false, expectedSessionGeneration = expectedSessionGeneration)
-        return FinanceExportModels.job(JSONObject(response))
+        return FinanceExportModels.status(JSONObject(response), exportId)
     }
 
     fun uploadBankImport(
