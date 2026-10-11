@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 08:08 MSK, Europe/Moscow.
+Updated: 2026-10-11 10:10 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -2003,4 +2003,4 @@ Updated: 2026-10-11 08:08 MSK, Europe/Moscow.
 - GREEN: JVM unit tests and debug/debug-test APK builds pass. Focused F47/F48 API/UI instrumentation 29/29 and combined API 27 regression 208/208 pass on isolated `emulator-5554`. Contract tests 62/62 pass. Debug APK installed and launched on isolated API 27 emulator (PID 28666); SHA-256 `62463BD6D4933A2AD08E448E971E9D5EB6B28A893AF02B71A9412596D7A948B3`. `git diff --check` passes.
 - Review: independent Core/API review found no blocker in auth/session, revision, idempotency, lifecycle, or viewer guards. Review confirmed the row menu's null action resets Core defaults; label changed to “Сбросить выбор / Use default” to avoid implying a forced exclusion. Test review caught an impossible negative-purchase-to-income choice and stale fake totals/counts; fixtures now use Core-valid signs and returned totals, assert fee inclusion, and model created/duplicate references in separate coherent rows.
 - Status: F48 Android local acceptance GREEN; feature registry becomes 43 partial, 13 missing, 2 approved N/A. Still PARTIAL pending live authenticated Android-to-Core OIDC mutations and real tenant isolation. Synthetic/local tests do not verify production hosting. F49 deduplication/undo remain next Android parity gap.
-- Commit/push: pending final scoped commit and remote verification.
+- Commit/push: `e2b6852b16b1b59877b445ac7ce27446681a4e92` (`feat(F48): add Android bank import confirmation`) pushed to `origin/feat/saas-rewrite`; remote ref matches. `gh run list --commit e2b6852` returned no workflows; GitHub CI is not confirmed.

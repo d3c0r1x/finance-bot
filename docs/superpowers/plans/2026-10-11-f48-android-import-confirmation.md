@@ -19,4 +19,4 @@ DoD: F48 selection and confirmation are explicit, revision-guarded, idempotent, 
 - GREEN: `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest`; focused F47/F48 instrumentation 29/29; combined Android API 27 regression 208/208; contract suite 62/62; APK installed/launched on isolated `emulator-5554`; `git diff --check`.
 - Debug APK SHA-256: `62463BD6D4933A2AD08E448E971E9D5EB6B28A893AF02B71A9412596D7A948B3`.
 - Remaining delivery gates: live authenticated Android-to-Core OIDC mutation and tenant-isolation E2E. F49 deduplication/undo remains a separate goal.
-- Commit/push: pending.
+- Commit/push: `e2b6852b16b1b59877b445ac7ce27446681a4e92` (`feat(F48): add Android bank import confirmation`) pushed to `origin/feat/saas-rewrite`; remote ref matches. No GitHub workflow run was found for the feature commit.
