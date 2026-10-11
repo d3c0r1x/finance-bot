@@ -1770,17 +1770,28 @@ class FinanceScreensTest {
     }
 
     @Test fun managerCanOpenMemberTransactionsFromMembersScreen() {
-        val selectedScopes = mutableListOf<String>()
+        val selectedQueries = mutableListOf<List<String>>()
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
             transactionMembers = listOf(FinanceTenantMember("member-42", "Taylor Display", "member"))),
-            onTransactionFilter = { _, _, _, _, memberId -> selectedScopes += memberId })
+            onTransactionFilter = { search, type, from, to, memberId ->
+                selectedQueries += listOf(search, type, from, to, memberId)
+            })
+
+        compose.onNodeWithText("Операции").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-search").performTextInput("зарп")
+        compose.onNodeWithTag("transaction-filter-expense").performScrollTo().performClick()
+        compose.onNodeWithTag("transaction-filter-from").performScrollTo().performTextInput("2026-10-01")
+        compose.onNodeWithTag("transaction-filter-to").performScrollTo().performTextInput("2026-10-31")
 
         compose.onNodeWithText("Участники").performScrollTo().performClick()
         compose.onNodeWithTag("member-navigation-member-42").performScrollTo().performClick()
 
         compose.onNodeWithTag("transaction-history").assertIsDisplayed()
         compose.onNodeWithText("Участник: Taylor Display").assertIsDisplayed()
-        assertEquals(listOf("member-42"), selectedScopes)
+        val expected = listOf("зарп", "expense", "2026-10-01", "2026-10-31", "member-42")
+        assertEquals(listOf(expected), selectedQueries)
+        compose.onNodeWithTag("transaction-refresh").performScrollTo().performClick()
+        assertEquals(listOf(expected, expected), selectedQueries)
         compose.onNodeWithTag("navigation-tab-transactions")
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
         compose.onNodeWithTag("navigation-tab-members")
@@ -1821,6 +1832,8 @@ class FinanceScreensTest {
 
         assertEquals(null, applied)
         compose.onNodeWithText("Дата начала должна быть не позже даты окончания").assertIsDisplayed()
+        compose.onNodeWithTag("transaction-refresh").performScrollTo().performClick()
+        assertEquals(null, applied)
 
         compose.onNodeWithText("EN").performClick()
         compose.onNodeWithTag("transaction-filter-from").performScrollTo().performTextReplacement("2026-10-31")
@@ -1829,6 +1842,9 @@ class FinanceScreensTest {
 
         assertEquals(null, applied)
         compose.onNodeWithText("Start date must be on or before end date").assertIsDisplayed()
+        compose.onNodeWithTag("transaction-refresh").assertTextContains("Refresh")
+            .performScrollTo().performClick()
+        assertEquals(null, applied)
     }
 
     @Test fun viewerMemberPickerUsesCoreSuppliedSelfAndHidesAllMembers() {

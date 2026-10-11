@@ -4492,6 +4492,13 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                             label = { Text(if (russian) "По дату" else "To date") }, singleLine = true)
                                     }
                                     transactionDateError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                    val refreshTransactions = {
+                                        validateTransactionDates = true
+                                        if (transactionDateValidationError(transactionFrom, transactionTo, russian) == null) {
+                                            onTransactionFilter(transactionSearch, transactionTypeFilter,
+                                                transactionFrom, transactionTo, transactionMemberId)
+                                        }
+                                    }
                                     val role = state.tenants.firstOrNull()?.role
                                     val canSeeAllMembers = role == "owner" || role == "admin"
                                     val selectedMemberId = transactionMemberId
@@ -4533,14 +4540,14 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                             }
                                         }
                                     }
-                                    Button(enabled = !state.busy,
-                                        onClick = {
-                                            validateTransactionDates = true
-                                            if (transactionDateValidationError(transactionFrom, transactionTo, russian) == null)
-                                                onTransactionFilter(transactionSearch,
-                                                transactionTypeFilter, transactionFrom, transactionTo, selectedMemberId)
-                                        }) {
-                                        Text(if (russian) "Применить фильтры" else "Apply filters")
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(enabled = !state.busy, onClick = refreshTransactions) {
+                                            Text(if (russian) "Применить фильтры" else "Apply filters")
+                                        }
+                                        TextButton(modifier = Modifier.testTag("transaction-refresh"),
+                                            enabled = !state.busy, onClick = refreshTransactions) {
+                                            Text(if (russian) "Обновить" else "Refresh")
+                                        }
                                     }
                                 }
                             }

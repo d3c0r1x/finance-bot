@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 13:38 MSK, Europe/Moscow.
+Updated: 2026-10-11 13:52 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -2137,3 +2137,14 @@ Updated: 2026-10-11 13:38 MSK, Europe/Moscow.
 - Limits: Android F52 remains PARTIAL. The lifecycle registry and generation policy are tested locally, but no delayed live Core HTTP response was induced across Activity pause/resume. Live OIDC/Core roles, export worker/S3 readiness, chooser/browser transfer, and downloaded-byte integrity remain NOT_RUN.
 - Plan: `docs/superpowers/plans/2026-10-11-f52-android-csv-export.md`.
 - Next: continue the next missing F59 Android behavior; retain deployment and live Core gates as open.
+
+## F59.25 F53 Android refresh with preserved member filter — GREEN locally; COMMIT_PENDING — 2026-10-11
+
+- Plan: F53 requires refresh/F5 behavior; the existing Android participant flow is approved and already passes its route/filter acceptance. Extend it with a visible Transactions refresh action.
+- TDD RED: expanded `managerCanOpenMemberTransactionsFromMembersScreen` to set search, type and date filters, navigate through «Участники», then assert refresh resends the exact same query and selected member ID. API-27 run failed at the missing `transaction-refresh` control (1 failed test in 89).
+- Implementation: refresh reuses the existing Core-backed filter callback with current search, type, date range and member ID. It shares invalid-date validation with «Применить фильтры»; no endpoint or Core behavior changed.
+- Regression: the first full class run found an ambiguous English `Refresh` text selector because another screen control uses the same word. The test now uses the unique `transaction-refresh` tag and checks the localized label.
+- GREEN: focused member-navigation/refresh test 1/1; complete `FinanceScreensTest` 89/89 on isolated Android 8.1/API 27 `emulator-5554`, including RU/EN invalid-date rejection and exact query preservation. Android JVM 73/73; debug and AndroidTest APK assembly passed; parity/contract tests 67/67; `git diff --check` clean. Live Core/OIDC and real member authorization remain unverified.
+- Review: independent read-only review found no concrete defects in filter preservation, date validation or busy-state gating. Review confirms tests exercise Compose callback wiring only, not live Core/OIDC.
+- Commit state: COMMIT_PENDING. Files: `MainActivity.kt`, `FinanceScreensTest.kt`, F53 registry evidence, F53 plan follow-up, and this progress record. Preserve all user-owned untracked paths.
+- Next: commit and push F59.25; then continue an independently closable V1 slice. Keep live OIDC/Core and M2 public-runtime blockers explicit.

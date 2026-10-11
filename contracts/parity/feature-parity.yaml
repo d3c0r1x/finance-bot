@@ -1218,10 +1218,11 @@ features:
       scenario: "Android counterpart for F53: Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Android local Compose proof now includes selected-route semantics/styling and member-filter presentation. Refresh semantics and live Android OIDC/Core authorization remain unverified."
+      gap: "Local Compose tests prove refresh repeats the active search/type/date/member query, including the selected member after member navigation; live authenticated Android OIDC/Core authorization remains unverified."
       evidence:
         - "FinanceScreensTest passes 87/87 on isolated Android 8.1/API 27 emulator-5554, including owner/admin member-navigation, viewer visibility, existing member-filter and own-profile checks. The existing Core-supplied transactionMembers list and filter callback are reused. No live Core/OIDC authorization is claimed."
-        - "Follow-up FinanceScreensTest passes 89/89 on emulator-5554: Overview is initially selected, selection follows the visible route, and member navigation marks Transactions selected while retaining the member filter label and exact callback ID. Active state is exposed with selected semantics and a distinct Material color treatment. Refresh semantics and live Core/OIDC remain unverified."
+        - "Follow-up FinanceScreensTest passes 89/89 on emulator-5554: Overview is initially selected, selection follows the visible route, and member navigation marks Transactions selected while retaining the member filter label and exact callback ID. Active state is exposed with selected semantics and a distinct Material color treatment."
+        - "Android refresh reuses the existing Core filter callback with the current search, type, date range and member ID. F53 instrumentation verifies member navigation followed by refresh sends the same exact query; invalid date ranges remain blocked in RU/EN. This uses synthetic screen state and does not prove live Core/OIDC authorization."
     intentional_differences: []
   - id: F54
     feature: "Статус Ollama/Vision/Tesseract; `services/health.py`"

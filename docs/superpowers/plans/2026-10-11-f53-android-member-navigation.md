@@ -24,3 +24,9 @@
 - Keep the existing route `TextButton` and its full hit target. Add a stable tag and selected semantics, plus a distinct Material selected color treatment, derived from the same `activeScreen` state that chooses the visible content.
 - Verify overview selection on entry, selected-state movement after tab navigation, and member-to-transactions navigation preserving the exact member filter while moving the selected state to Transactions. Viewer still has no member route.
 - Run the full `FinanceScreensTest` instrumentation class on the isolated API-27 emulator and record F53 as Android-partial while refresh semantics and live Core/OIDC remain open.
+
+## Filter refresh follow-up
+
+- Add an explicit Transactions refresh action that resubmits the current search, type, inclusive date range, and member ID through the existing Core-backed filter callback.
+- Apply the same date validation to refresh as filter submission. A selected member reached from «Участники» must remain selected after refresh.
+- Verify the exact filter request before and after refresh, and verify invalid date ranges cannot trigger either action in RU or EN. This synthetic Compose test does not prove live Core/OIDC authorization.
