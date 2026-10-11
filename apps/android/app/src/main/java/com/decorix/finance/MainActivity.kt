@@ -4030,6 +4030,73 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                                 else "Vision model fallback: ${localizedReceiptFallbackReason(it, "vision_model", language)}")
                                         }
                                     }
+                                    val reconciliation = currentReading.reconciliation
+                                    val reconciliationDecision = when (reconciliation.decision.lowercase()) {
+                                        "auto_selected" -> if (russian) "чтения согласованы" else "readings agree"
+                                        "review_required" -> if (russian) "нужно проверить расхождения" else "review differences"
+                                        "insufficient_data" -> if (russian) "недостаточно данных" else "not enough data"
+                                        else -> if (russian) "неизвестный результат" else "unknown result"
+                                    }
+                                    val selectedReader = when (reconciliation.selectedReader?.lowercase()) {
+                                        "ocr" -> "OCR"
+                                        "vision" -> "Vision"
+                                        else -> if (russian) "не выбран" else "none selected"
+                                    }
+                                    val mismatchLabels = reconciliation.mismatchFields.map { field ->
+                                        when (field.lowercase()) {
+                                            "total" -> if (russian) "итог" else "total"
+                                            "merchant" -> if (russian) "магазин" else "merchant"
+                                            "date" -> if (russian) "дата" else "date"
+                                            "items" -> if (russian) "позиции" else "items"
+                                            else -> if (russian) "другое расхождение" else "other difference"
+                                        }
+                                    }
+                                    Column(Modifier.fillMaxWidth().testTag("receipt-reading-reconciliation"),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(if (russian) "Сверка: $reconciliationDecision"
+                                            else "Reconciliation: $reconciliationDecision",
+                                            style = MaterialTheme.typography.titleSmall)
+                                        Text(if (russian) "Источник расчёта: $selectedReader"
+                                            else "Selected reading: $selectedReader")
+                                        Text(if (russian) "Версия сверки: ${reconciliation.algorithmVersion}"
+                                            else "Reconciliation version: ${reconciliation.algorithmVersion}")
+                                        if (mismatchLabels.isNotEmpty()) {
+                                            Text(if (russian) "Расхождения: ${mismatchLabels.joinToString(", ")}"
+                                                else "Differences: ${mismatchLabels.joinToString(", ")}")
+                                        }
+                                        Text(if (russian) "Позиции OCR: ${formatMoney(reconciliation.ocrItemsTotal, language, draft.currency)}"
+                                            else "OCR items total: ${formatMoney(reconciliation.ocrItemsTotal, language, draft.currency)}")
+                                        Text(if (russian) "Позиции Vision: ${formatMoney(reconciliation.visionItemsTotal, language, draft.currency)}"
+                                            else "Vision items total: ${formatMoney(reconciliation.visionItemsTotal, language, draft.currency)}")
+                                        Text(if (russian) "Допустимая разница: ${formatMoney(reconciliation.allowedDifference, language, draft.currency)}"
+                                            else "Allowed difference: ${formatMoney(reconciliation.allowedDifference, language, draft.currency)}")
+                                        if (reconciliation.itemEvidence.isNotEmpty()) {
+                                            Text(if (russian) "Сопоставление позиций" else "Item matching",
+                                                style = MaterialTheme.typography.titleSmall)
+                                            reconciliation.itemEvidence.forEach { evidence ->
+                                                val status = when (evidence.status.lowercase()) {
+                                                    "corroborated" -> if (russian) "суммы совпали" else "amounts agree"
+                                                    "amount_disagrees" -> if (russian) "суммы расходятся" else "amounts differ"
+                                                    "amount_unknown" -> if (russian) "сумма неизвестна" else "amount unknown"
+                                                    "reader_only" -> if (russian) "есть только у одного читателя"
+                                                        else "found by one reader only"
+                                                    else -> if (russian) "неизвестно" else "unknown"
+                                                }
+                                                Text("Vision #${evidence.visionOrdinal} ↔ OCR #${evidence.ocrOrdinal ?: "—"}: $status",
+                                                    modifier = Modifier.testTag("receipt-reading-item-evidence-${evidence.visionOrdinal}"))
+                                            }
+                                        }
+                                        if (reconciliation.suggestedTopUps.isNotEmpty()) {
+                                            Text(if (russian) "Подсказки добора из OCR" else "OCR items to review",
+                                                style = MaterialTheme.typography.titleSmall)
+                                            reconciliation.suggestedTopUps.forEach { suggestion ->
+                                                Text("OCR #${suggestion.ocrOrdinal}: ${suggestion.name} · ${formatMoney(suggestion.lineSum, language, draft.currency)}",
+                                                    modifier = Modifier.testTag("receipt-reading-top-up-${suggestion.ocrOrdinal}"))
+                                            }
+                                            Text(if (russian) "Предложение только для проверки; чек не изменён."
+                                                else "Suggestion for review only; receipt unchanged.")
+                                        }
+                                    }
                                 }
                             }
                         }

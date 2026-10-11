@@ -18,7 +18,7 @@ Updated: 2026-10-11, Europe/Moscow.
 
 ## Current goal
 
-- F59 Android parity remains IN PROGRESS. Current registry: 40 partial, 16 missing, 2 approved N/A. F31-F34 Android local acceptance is GREEN; F34 stays partial pending live authenticated OIDC/Core E2E.
+- F59 Android parity remains IN PROGRESS. Current registry: 41 partial, 15 missing, 2 approved N/A. F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
 - F59.2 F08 history/repeat/void locally GREEN: API 27 instrumentation 53/53; APK installed and launched; parity-contract tests 3/3. APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`.
 - F59.2 F09 basic search/type filters observed RED then GREEN; API 27 full instrumentation 54/54. Updated debug APK SHA-256: `FB008F9E13114578347D653E602C158C3870886AF379263F8124931CBABCC937`; `MainActivity` is resumed on isolated API 27 emulator. Remaining: server-backed date/member filters, cursor paging, transaction editing, and live Core E2E.
 - F59.2 F03.1 first-time onboarding is locally GREEN and pushed in `1395decae6c50d337193fb6ec3810e6710484116`. F03 Android stays PARTIAL because repeat setup from profile is a later slice. Live OIDC/Core E2E, remaining parity, and F60/production gates remain.
@@ -104,7 +104,7 @@ Updated: 2026-10-11, Europe/Moscow.
 ## Current goal
 
 - ID and outcome: F59 — Android Kotlin/Compose RU/EN feature parity for F01–F58, shared Java API, installed APK, and E2E.
-- Status: IN PROGRESS — current registry maps all 58 rows: 40 partial, 16 missing, 2 justified N/A. Android local acceptance includes F31-F34 alongside onboarding, transactions, budgets, debts, reports, shopping, inflation, recurring items, product decisions, and receipt flows.
+- Status: IN PROGRESS — current registry maps all 58 rows: 41 partial, 15 missing, 2 justified N/A. Android local acceptance includes F13 and F31-F34 alongside onboarding, transactions, budgets, debts, reports, shopping, inflation, recurring items, product decisions, and receipt flows.
 - Acceptance: map every F01–F58 to Android behavior or justified platform-specific N/A; implement missing user flows; run installed APK on Android 6–8 emulator; prove authenticated live Java/Core/OIDC flow.
 - Evidence: `tests/test_f59_android_parity.py` and F59 `android` mappings in `contracts/parity/feature-parity.yaml`. Initial RED: 3 failed because Android mappings were absent/stale. GREEN: 4 parity/registry contract checks passed. Registry marks all unresolved flows explicitly; this inventory does not claim feature completion.
 - Evidence: F56 feature commit `ab4a38d` is pushed. GitHub run `37577879007` passed all workflow steps, including private-path guard, legacy suites, and empty JSON module smoke.
@@ -1920,4 +1920,11 @@ Updated: 2026-10-11, Europe/Moscow.
 - GREEN: focused API/model/screen instrumentation passed 21/21 on Android 6/API 23 and 21/21 on Android 7.1/API 25; full Android 8.1/API 27 instrumentation passed 267/267 on isolated `emulator-5554`; Android JVM tests 37/37; debug and AndroidTest APK builds passed; contracts 78 passed, 2 skipped; `git diff --check` clean. APK installed/launched (PID 26857), SHA-256 `2AC1DE602C43972DA9D22DABD3BB7F0A530B4074D45B447DD8E7C054C140BFBC`. User emulator `emulator-5558` was not touched.
 - F34 Android local acceptance is GREEN, but remains PARTIAL until a live authenticated Android-to-Core OIDC roundtrip is verified. Core financial rules are unchanged.
 - Commit: `97a35b2` (`feat(F34): add Android product catalog`); local slice committed. Live authenticated Android-to-Core OIDC remains an external acceptance gate.
-- Next: commit and push this slice, then choose the next incomplete Android/V1 gap from the registry; F35 and F36 remain partial there.
+
+## F59.4 F13 Android receipt reconciliation display — GREEN; LOCAL ACCEPTANCE COMPLETE — 2026-10-11
+
+- Scope: render Core-owned F13 reconciliation decision, selected reader, mismatch fields, item ordinals/statuses, exact OCR/Vision item totals, allowed difference, and unique OCR top-up suggestions in the existing receipt reading card. Android does no reconciliation arithmetic and exposes no apply/confirm mutation; suggestions are explicitly review-only.
+- TDD: existing missing Android screen was observed RED (`Сверка: нужно проверить расхождения` absent). Independent review found hardcoded RUB labels; a synthetic USD receipt test was observed RED. The implementation now uses the shared locale/currency formatter with `draft.currency` for totals, tolerance and top-ups.
+- GREEN/regression: API 27 `FinanceReceiptScreensTest` 77/77; covers RU/EN, RUB/USD, item source ordinals/statuses, review-only suggestions, and no receipt mutation callbacks. API 23 USD currency test 1/1; JVM tests 37/37 through the existing `C:\fbtest` ASCII junction; debug and AndroidTest APK builds; feature-registry contract test 1/1; `git diff --check` clean. APK installed/launched on isolated `emulator-5554`, PID 30561, SHA-256 `EC62DB789F54F30F0FD929A0293BB86A5A46B1A7DCE814F260F8C1759DB989C5`. User emulator was not touched. Independent UI review found no remaining blocker.
+- Status: Android F13 is PARTIAL pending live authenticated Android-to-Core OIDC E2E. The app presents server evidence only. F13 registry count changed from 40/16/2 to 41 partial, 15 missing, 2 approved N/A. F35 remains the next Android candidate.
+- Next: commit and push this GREEN slice, then continue with F35 acceptance-gap verification.

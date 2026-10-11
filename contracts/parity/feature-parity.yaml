@@ -252,9 +252,14 @@ features:
     evidence:
       - "Tesseract extracts only coordinate-backed OCR item rows and labeled totals; Java compares OCR and Vision with exact decimal arithmetic and one-to-one row use. A unique top-up of at most three unused OCR rows is exposed only for an unambiguous Vision gap, with ordinals and values retained; ambiguity stays review-required and creates no transaction. PostgreSQL worker/API acceptance proves both readings and suggestions remain owner-scoped and unposted. RU/EN Web shows mismatch, provenance, evidence and top-ups. Full Core check passes 188 tests (0 failures, 2 container-gated skips), Python/contracts 221 passed/3 skipped, Web 34/34 plus production build; diff whitespace check passes."
     android:
-      status: missing
-      scenario: "Android counterpart for F13: Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
-      gap: "No Android user screen or equivalent flow is verified for F13 yet."
+      status: partial
+      scenario: "Android показывает Core-вердикт сверки Vision/OCR, one-to-one evidence, точные суммы и подсказки добора только для проверки"
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+      gap: "Нет live authenticated Android-to-Core OIDC E2E; Android только показывает расчёт Core и не подтверждает чек."
+      evidence:
+        - "Compose UI локализует decision/mismatch и показывает выбранный источник, версии, one-to-one ordinal/status, Core totals/tolerance и review-only top-ups; все суммы форматируются валютой черновика. Тесты подтверждают отсутствие receipt mutations, RU/EN и USD/RUB."
+        - "API 27 полный FinanceReceiptScreensTest 77/77; API 23 F13 focused; Android JVM suite 37/37; APK/test APK build; synthetic fixtures only. Live authenticated Android-to-Core OIDC E2E remains open."
     intentional_differences: []
   - id: F14
     feature: "Защита магазина/даты от выдумывания, fallback категории"

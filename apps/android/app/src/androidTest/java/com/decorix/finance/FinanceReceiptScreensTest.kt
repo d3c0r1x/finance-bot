@@ -78,6 +78,64 @@ class FinanceReceiptScreensTest {
         assertEquals(emptyList<String>(), confirmed)
     }
 
+    @Test fun reconciliationShowsOneToOneEvidenceTotalsAndReviewOnlyTopUpInRussian() {
+        val mutations = mutableListOf<String>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptReading = reconciliationReading()),
+            onCreate = { type, amount, _ -> mutations += "$type:$amount" },
+            onReceiptTotalSync = { _, _ -> mutations += "sync-total" },
+            onReceiptItemAdd = { _, _, _, _, _, _ -> mutations += "add-item" },
+            onReceiptItemUpdate = { _, _, _, _, _, _, _ -> mutations += "update-item" },
+            onReceiptConfirm = { _, _, _ -> mutations += "confirm" })
+
+        compose.onNodeWithText("Сверка: нужно проверить расхождения").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Расхождения: итог").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Источник расчёта: OCR").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Позиции OCR", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Позиции OCR: 34,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Позиции Vision: 32,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Допустимая разница: 2,00 ₽").performScrollTo().assertIsDisplayed()
+
+        compose.onNodeWithText("Vision #1 ↔ OCR #1: суммы совпали").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision #2 ↔ OCR #2: суммы расходятся").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision #3 ↔ OCR #—: есть только у одного читателя").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision #4 ↔ OCR #3: сумма неизвестна").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("OCR #4: Груши · 5,00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Предложение только для проверки; чек не изменён.").performScrollTo().assertIsDisplayed()
+
+        compose.onNodeWithTag("receipt-top-up-apply-4").assertDoesNotExist()
+        assertTrue("Displaying server evidence must not mutate or confirm a receipt", mutations.isEmpty())
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Reconciliation: review differences").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Differences: total").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Selected reading: OCR").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("OCR items total: 34.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision items total: 32.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Allowed difference: 2.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision #1 ↔ OCR #1: amounts agree").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision #2 ↔ OCR #2: amounts differ").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision #3 ↔ OCR #—: found by one reader only").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision #4 ↔ OCR #3: amount unknown").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("OCR #4: Груши · 5.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Suggestion for review only; receipt unchanged.").performScrollTo().assertIsDisplayed()
+        assertTrue("Changing language must not mutate or confirm a receipt", mutations.isEmpty())
+    }
+
+    @Test fun reconciliationAmountsUseReceiptCurrency() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft().copy(currency = "USD"), receiptReading = reconciliationReading()))
+
+        compose.onNodeWithText("Позиции OCR: 34,00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Позиции Vision: 32,00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Допустимая разница: 2,00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("OCR #4: Груши · 5,00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("OCR items total: 34.00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vision items total: 32.00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Allowed difference: 2.00 USD").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("OCR #4: Груши · 5.00 USD").performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun confirmedReceiptPriceComparisonLoadsCoreValuesOnlyAfterExplicitClick() {
         val receipt = confirmedReceipt()
         val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
@@ -2169,6 +2227,28 @@ class FinanceReceiptScreensTest {
            "provider":"synthetic-vision","modelVersion":"synthetic-vision-v1",
            "promptVersion":"vision-prompt-v1","fallbackReason":null}}
     """))
+
+    private fun reconciliationReading() = receiptReading().copy(
+        reconciliation = FinanceReceiptReconciliation(
+            algorithmVersion = "receipt-reconciliation.v1",
+            decision = "review_required",
+            selectedReader = "ocr",
+            mismatchFields = listOf("total"),
+            ocrItemsTotal = "34.00",
+            visionItemsTotal = "32.00",
+            allowedDifference = "2.00",
+            ocrItemsReconciled = true,
+            visionItemsReconciled = false,
+            itemEvidence = listOf(
+                FinanceReceiptItemEvidence(visionOrdinal = 1, ocrOrdinal = 1, status = "corroborated"),
+                FinanceReceiptItemEvidence(visionOrdinal = 2, ocrOrdinal = 2, status = "amount_disagrees"),
+                FinanceReceiptItemEvidence(visionOrdinal = 3, ocrOrdinal = null, status = "reader_only"),
+                FinanceReceiptItemEvidence(visionOrdinal = 4, ocrOrdinal = 3, status = "amount_unknown"),
+            ),
+            suggestedTopUps = listOf(FinanceReceiptTopUpSuggestion(
+                ocrOrdinal = 4, name = "Груши", lineSum = "5.00")),
+        ),
+    )
 
     private fun show(state: FinanceUiState, onReceiptPick: () -> Unit = {},
                      onCreate: (String, String, String?) -> Unit = { _, _, _ -> },
