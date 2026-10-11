@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 08:07 MSK, Europe/Moscow.
+Updated: 2026-10-11 08:08 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -1961,3 +1961,4 @@ Updated: 2026-10-11 08:07 MSK, Europe/Moscow.
 - Observed RED/GREEN: F43 API 7/7 and UI 10/10 direct instrumentation pass on isolated Android 8.1/API 27; combined F43 + F42 + reports + model regression 151/151; contracts 60/60; debug and AndroidTest APK builds pass. The initial combined regression observed 9 report UI failures because the new section displaced existing report rows; moving it after prior report and recalculation content made all 151 pass. A reviewer found missing profile currency propagation; a USD screen test observed RED before implementation, then passed with the currency fix.
 - Parity remains PARTIAL pending live authenticated Android-to-Core OIDC request and durable worker completion. Next: F44 Android candidates and active-goal flows; F44 Core/Go/Web work is already locally complete. F44–F46 feature-registry statuses/evidence were reconciled against the execution log; SQLite legacy-import rehearsal remains a separate E8 gate.
 - Fresh debug APK SHA-256: `86DF20F8CA18D2310110447ABA963BAA2FD149DAA0E230427926A1BC3CAAB600`. Installed and launched on isolated API 27 `emulator-5554`; `MainActivity` resumed. This verifies a local debug install, not live Core/OIDC or public-phone distribution.
+- Commit/push: `6b846badfedce1c2b472e336e1f569a5a17dde72` (`feat(F43): add Android advice analytics`) pushed to `origin/feat/saas-rewrite` and confirmed by `git ls-remote`. `gh run list --commit 6b846ba` returned `[]`; GitHub CI did not start.
