@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 13:36 MSK, Europe/Moscow.
+Updated: 2026-10-11 13:38 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -2110,15 +2110,15 @@ Updated: 2026-10-11 13:36 MSK, Europe/Moscow.
 - Plan: `docs/specs/PERSONAL_MVP_PLAN.md` refreshed with this audit, the current Cloudflare limitation, and the user's public-HTTPS choice.
 - Blocker: no persistent supported runtime is currently available on this host. Next: continue independent V1 goals while evaluating a safe runtime path; before exposing finance services, prove database durability, Keycloak/OIDC, and tenant authorization locally.
 
-## F59.24 F11/F12/F55 Android parity correction — GREEN locally; COMMIT_PENDING — 2026-10-11
+## F59.24 F11/F12/F55 Android parity correction — GREEN locally; COMMITTED/PUSHED — 2026-10-11
 
 - TDD RED: added a registry regression test for F11's Android screen/API evidence and live-auth gap, plus approved server/operator N/A for F12 and F55. `tests/test_f59_android_parity.py` initially failed because F11 was still marked `missing` (1 failed, 3 passed).
 - F11 evidence: Android API instrumentation already checks OCR/Vision provider, model and prompt parsing. Added Compose assertions that actual Vision provenance is rendered in RU/EN, is labelled unverified, and causes no transaction create/confirm action. Fallback localization already has RU/EN coverage.
 - F12/F55 mapping: F12 is server-side Python OCR processing consumed through F11/F13; F55 is operator/deployment provider configuration. Both now have explicit plan authority and reasons; Android does not duplicate OCR or expose provider credentials/settings.
 - GREEN: `.venv\\Scripts\\python.exe -m pytest tests/test_f59_android_parity.py tools/contracts/test_contracts.py -q -p no:cacheprovider` — 67 passed. Focused `FinanceReceiptScreensTest` on isolated Android 8.1/API 27 `emulator-5554` — 78/78, including new F11 provenance test. `git diff --check` passed.
 - Recount: F01-F58 Android mappings now 52 partial, 0 missing, 5 justified N/A, 1 implemented. F11 remains partial pending live authenticated Android-to-Core OIDC, membership roles and configured provider execution. No product implementation or user data changed.
-- Commit state: COMMIT_PENDING; only `.agent/PROGRESS.md`, `contracts/parity/feature-parity.yaml`, `tests/test_f59_android_parity.py`, and `FinanceReceiptScreensTest.kt` belong to this slice. User-owned untracked paths remain excluded.
-- Next: commit/push this parity correction; then select next genuine F59 Android gap while keeping live Core/OIDC and M2 runtime gates open.
+- Commit/push: `64ece4d5da3094daf8fc85943d3fdf73e6ce697e` (`test(F59): correct receipt Android parity mappings`) pushed to `origin/feat/saas-rewrite`; `git ls-remote` confirmed exact remote SHA. Only `.agent/PROGRESS.md`, `contracts/parity/feature-parity.yaml`, `tests/test_f59_android_parity.py`, and `FinanceReceiptScreensTest.kt` were committed. User-owned untracked paths remain excluded.
+- Next: select next genuine F59 Android gap while keeping live Core/OIDC and M2 runtime gates open.
 
 ## F59.21 F52 fresh export download safety — GREEN locally; PARTIAL — 2026-10-11
 
