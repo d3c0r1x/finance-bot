@@ -28,4 +28,11 @@ class FinancePresentationTest {
         assertEquals("Основание прогноза недоступно", formatDebtForecastBasis("future server copy", "ru"))
         assertEquals("Forecast basis unavailable", formatDebtForecastBasis("future server copy", "en"))
     }
+
+    @Test fun priceChangeBarUsesAbsoluteCorePercentAndCapsOnlyTheVisualScale() {
+        assertEquals(0.1f, priceChangeMagnitudeFraction("10.00"), 0.001f)
+        assertEquals(0.1f, priceChangeMagnitudeFraction("-10.00"), 0.001f)
+        assertEquals(1f, priceChangeMagnitudeFraction("250.00"), 0f)
+        assertEquals(0f, priceChangeMagnitudeFraction("not-a-number"), 0f)
+    }
 }

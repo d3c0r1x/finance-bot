@@ -1876,3 +1876,13 @@ Updated: 2026-10-11, Europe/Moscow.
 - GREEN: Android 8.1/API 27 full instrumentation 231/231 on isolated `emulator-5554`; Android JVM 36/36; Android debug and AndroidTest APK builds pass; contracts 78 passed/2 skipped; `git diff --check` clean. The updated tests also passed independently: Compose 78/78 and report API 45/45.
 - F30 Android remains PARTIAL: tests use synthetic UI state and MockWebServer fixtures; live authenticated Android-to-Core period/scope E2E and parity against real database boundary fixtures remain unverified.
 - Test-only change: no production behavior changed. Next: continue F59 with F31 Android chart/export parity.
+
+## F59.3 F31 Android price-change chart — GREEN; COMMIT_PENDING — 2026-10-11
+
+- Scope: visualize only Core-owned 90-day personal inflation `changePercent`; retain exact signed percentages and before/after prices. No local financial calculation or fabricated history. The product-level purchase-history chart remains a separate F34 gap.
+- Tests first: Compose RED confirmed no price-change chart. Added checks for rising/falling magnitudes, exact RU/EN TalkBack descriptions, unchanged labels, and hidden chart when Core says history is insufficient. JVM tests cover absolute scale, 100% visual cap, and malformed-value fallback.
+- Implementation: labeled RU/EN bars use absolute Core percentages; only visual magnitude is capped at 100%. Screen keeps original exact prices and signed percentages.
+- GREEN: full direct Android 8.1/API 27 instrumentation 232/232 on isolated `emulator-5554` using `-gpu swiftshader`; Android JVM 37/37; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` successful; fresh debug APK installed/launched; parity contracts 78 passed, 2 skipped; `git diff --check` clean. APK SHA-256 `111E265150758995F2AD94107ECBB9AAC65B95EBEB446C9E1ECBE38D8F46EDA8`.
+- Diagnosed environment failures: an initial full run aborted in Android `RenderThread` with `GL errors! ... OpenGLPipeline.cpp:105`; the unrelated test passed alone, and full suite passed after restarting only the dedicated AVD with SwiftShader. Gradle from Cyrillic path produced `ClassNotFoundException`; same build/tests passed through ASCII junction `C:\fbtest`. User AVD `emulator-5558` was not restarted or modified.
+- F31 Android remains PARTIAL pending live authenticated Android-to-Core OIDC verification. F34 purchase-history chart remains open.
+- Next: commit/push F31, then start F32 Android schedule/digest acceptance tests.

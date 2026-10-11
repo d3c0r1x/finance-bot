@@ -51,6 +51,13 @@ internal fun formatDebtForecastBasis(basis: String, language: String): String {
     }
 }
 
+internal fun priceChangeMagnitudeFraction(changePercent: String): Float {
+    val percent = changePercent.toBigDecimalOrNull()?.abs() ?: return 0f
+    return percent.divide(BigDecimal("100"), 8, RoundingMode.HALF_UP)
+        .min(BigDecimal.ONE)
+        .toFloat()
+}
+
 internal fun formatRollingFoodStatus(status: RollingFoodStatus, language: String, currency: String = "RUB"): String {
     val russian = language == "ru"
     val label = if (russian) "Еда за 7 дней" else "Food over 7 days"

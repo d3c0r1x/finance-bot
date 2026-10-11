@@ -43,6 +43,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationService
@@ -4534,6 +4536,32 @@ private fun PersonalInflationScreen(modifier: Modifier, state: FinanceUiState, l
                             Text("${if (russian) "Та же корзина по новым ценам" else "Same basket at recent prices"}: $basketNow ${if (russian) "₽" else "RUB"}")
                             Text("${if (russian) "Личный индекс" else "Personal index"}: $indexPercent% · " +
                                 if (russian) "${inflation.productCount} товара" else "${inflation.productCount} products")
+                        }
+                    }
+                }
+                val priceChanges = inflation.rising.map { it to true } + inflation.falling.map { it to false }
+                if (priceChanges.isNotEmpty()) item {
+                    Card(Modifier.fillMaxWidth().testTag("personal-price-change-chart")) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (russian) "Изменение цен" else "Price changes",
+                                style = MaterialTheme.typography.titleMedium)
+                            Text(if (russian) "Полосы показывают модуль изменения; максимум шкалы — 100%."
+                                else "Bars show change magnitude; the scale tops out at 100%.")
+                            priceChanges.forEachIndexed { index, (product, isRising) ->
+                                val direction = if (isRising) {
+                                    if (russian) "рост" else "increase"
+                                } else if (russian) "снижение" else "decrease"
+                                val accessibleLabel = "${product.productName} · $direction · ${product.changePercent}%"
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(accessibleLabel)
+                                    LinearProgressIndicator(
+                                        progress = { priceChangeMagnitudeFraction(product.changePercent) },
+                                        modifier = Modifier.fillMaxWidth().testTag(
+                                            if (isRising) "personal-price-increase-$index" else "personal-price-decrease-${index - inflation.rising.size}",
+                                        ).semantics { contentDescription = accessibleLabel },
+                                    )
+                                }
+                            }
                         }
                     }
                 }

@@ -547,13 +547,50 @@ class FinanceScreensTest {
         compose.onNodeWithText("Корзина по старым ценам: 1250.00 ₽").assertIsDisplayed()
         compose.onNodeWithText("Та же корзина по новым ценам: 1275.00 ₽").assertIsDisplayed()
         compose.onNodeWithText("Личный индекс: 2.00% · 3 товара").assertIsDisplayed()
-        compose.onNodeWithText("Кофе · 100.00 → 110.00 ₽ · 10.00% · вес 500.00 ₽").assertIsDisplayed()
         compose.onNodeWithText("Цены только из ваших чеков, не официальная статистика.").assertIsDisplayed()
+        compose.onNodeWithTag("personal-inflation").performScrollToIndex(4)
+        compose.onNodeWithText("Кофе · 100.00 → 110.00 ₽ · 10.00% · вес 500.00 ₽").assertIsDisplayed()
         assertEquals(0, loads)
 
         compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("personal-inflation").performScrollToIndex(0)
         compose.onNodeWithText("Personal price trend · 90 days").assertIsDisplayed()
         compose.onNodeWithText("Receipt prices only; not official inflation statistics.").assertIsDisplayed()
+    }
+
+    @Test fun personalInflationVisualizesCorePriceChangeDirectionAndMagnitude() {
+        val inflation = FinancePersonalInflation(
+            available = true, reasonCode = "available", asOf = "2026-10-06T12:00:00Z", windowDays = 90,
+            productCount = 3, basketBefore = "1250.00", basketNow = "1275.00", indexPercent = "2.00",
+            rising = listOf(FinancePersonalInflationItem("Кофе", "100.00", "110.00", "500.00", "10.00", 2, 1)),
+            falling = listOf(FinancePersonalInflationItem("Молоко", "200.00", "180.00", "700.00", "-10.00", 3, 2)),
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), personalInflation = inflation))
+
+        compose.onNodeWithText("Динамика цен").performScrollTo().performClick()
+        compose.onNodeWithTag("personal-price-change-chart").performScrollTo().assertIsDisplayed()
+        val increase = compose.onNodeWithTag("personal-price-increase-0").fetchSemanticsNode()
+            .config[SemanticsProperties.ProgressBarRangeInfo].current
+        val decrease = compose.onNodeWithTag("personal-price-decrease-0").fetchSemanticsNode()
+            .config[SemanticsProperties.ProgressBarRangeInfo].current
+        assertEquals(0.1f, increase, 0.001f)
+        assertEquals(0.1f, decrease, 0.001f)
+        assertEquals("Кофе · рост · 10.00%", compose.onNodeWithTag("personal-price-increase-0").fetchSemanticsNode()
+            .config[SemanticsProperties.ContentDescription].single())
+        assertEquals("Молоко · снижение · -10.00%", compose.onNodeWithTag("personal-price-decrease-0").fetchSemanticsNode()
+            .config[SemanticsProperties.ContentDescription].single())
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("personal-inflation").performScrollToIndex(0)
+        compose.onNodeWithText("Receipt prices only; not official inflation statistics.").assertIsDisplayed()
+        compose.onNodeWithTag("personal-inflation").performScrollToIndex(2)
+        assertEquals("Кофе · increase · 10.00%", compose.onNodeWithTag("personal-price-increase-0").fetchSemanticsNode()
+            .config[SemanticsProperties.ContentDescription].single())
+        assertEquals("Молоко · decrease · -10.00%", compose.onNodeWithTag("personal-price-decrease-0").fetchSemanticsNode()
+            .config[SemanticsProperties.ContentDescription].single())
+        compose.onNodeWithTag("personal-inflation").performScrollToIndex(4)
+        compose.onNodeWithText("Кофе · 100.00 → 110.00 RUB · 10.00% · weight 500.00 RUB").assertIsDisplayed()
+        compose.onNodeWithTag("personal-inflation").performScrollToIndex(6)
+        compose.onNodeWithText("Молоко · 200.00 → 180.00 RUB · -10.00% · weight 700.00 RUB").assertIsDisplayed()
     }
 
     @Test fun personalInflationLoadsWhenScreenOpensAndExplainsMissingHistory() {
@@ -578,6 +615,7 @@ class FinanceScreensTest {
         compose.onNodeWithText("Недостаточно истории для расчёта.").assertIsDisplayed()
         compose.onNodeWithText("Нужно минимум 3 товара: для каждого — 2 покупки до окна и 1 внутри 90-дневного окна.")
             .assertIsDisplayed()
+        compose.onNodeWithTag("personal-price-change-chart").assertDoesNotExist()
         compose.onNodeWithText("0.00 ₽").assertDoesNotExist()
     }
 

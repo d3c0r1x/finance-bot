@@ -656,7 +656,8 @@ features:
       scenario: "Android counterpart for F31: Графики категорий, лимитов, дней, цен, необязательного"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F31 acceptance condition or live Core integration."
+      evidence: "Android report screens render Core category/day/optional-spend values as bars; personal price trend now visualizes Core changePercent for rising and falling products in RU/EN. Tests check exact signed percentages and prices remain visible, positive/negative bar magnitude, and no chart for insufficient history."
+      gap: "Chart acceptance uses synthetic DTOs; live authenticated Android-to-Core OIDC remains unverified. Product-by-product confirmed purchase history charts/catalog remain tracked as missing Android F34 parity."
     intentional_differences: []
   - id: F32
     feature: "Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
