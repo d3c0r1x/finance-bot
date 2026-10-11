@@ -108,6 +108,38 @@ class FinanceApi internal constructor(
         return FinanceBankImportModels.preview(JSONObject(body))
     }
 
+    fun previewMerchantReclassification(
+        tenantId: String,
+        merchant: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceMerchantReclassificationPreview {
+        require(isUuid(tenantId)) { "Invalid tenant identifier" }
+        require(merchant.isNotBlank() && merchant == merchant.trim() && merchant.length <= 120) {
+            "Invalid merchant"
+        }
+        val path = "/api/v1/tenants/$tenantId/merchant-reclassifications/preview"
+        val body = executeRequest(path, "POST",
+            JSONObject().put("merchant", merchant).toString().toRequestBody("application/json".toMediaType()),
+            retryUnauthorized = false, expectedSessionGeneration = expectedSessionGeneration)
+        return FinanceMerchantReclassificationModels.preview(JSONObject(body))
+    }
+
+    fun applyMerchantReclassification(
+        tenantId: String,
+        preview: FinanceMerchantReclassificationPreview,
+        idempotencyKey: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceMerchantReclassificationResult {
+        require(isUuid(tenantId)) { "Invalid tenant identifier" }
+        require(Regex("[A-Za-z0-9._:-]{16,80}").matches(idempotencyKey)) { "Invalid idempotency key" }
+        val body = FinanceMerchantReclassificationModels.applyRequest(preview).toString()
+            .toRequestBody("application/json".toMediaType())
+        val path = "/api/v1/tenants/$tenantId/merchant-reclassifications/apply"
+        val response = executeRequest(path, "POST", body, idempotencyKey = idempotencyKey,
+            retryUnauthorized = false, expectedSessionGeneration = expectedSessionGeneration)
+        return FinanceMerchantReclassificationModels.applyResult(JSONObject(response))
+    }
+
     fun selectBankImportRow(
         tenantId: String,
         importId: String,

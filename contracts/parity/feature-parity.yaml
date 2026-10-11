@@ -440,6 +440,10 @@ features:
       status: partial
       scenario: "Android counterpart for F21: Повторные предупреждения о необязательном товаре; `services/advice.py`"
       gap: "Live authenticated Android-to-Core OIDC E2E remains unverified."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/ReceiptDisputedDecisionRefreshTest.kt
       evidence: "RU/EN repeat-warning screen uses the authenticated Core endpoint, shows Core evidence and exact last amount in receipt currency, and hides outside draft review. API-27 instrumentation 196/196 and JVM 29/29 pass; debug APK installed/launched on isolated Android 8.1/API 27 emulator."
     intentional_differences: []
   - id: F22
@@ -1161,9 +1165,16 @@ features:
     evidence:
       - "F51 Core preview/apply scopes candidates to the importing tenant member and only committed, created bank-import expenses without explicit row category corrections or transaction edits. Apply checks the exact reviewed IDs, versions, categories and current mapping under transaction-scoped merchant locks shared with mapping saves and imports; stale changes reject atomically. Successful changes use the normal transaction update path, versions, audit and outbox, with safe retries. RU/EN Web requires a separate preview and Apply; BFF preview/apply enforce CSRF. PostgreSQL tests cover exact reviewed lists, stale manual edits, explicit import category, other-member isolation, idempotency, outbox and import-lock serialization. PASS Core 159/159, Python/contracts 209 passed with 3 optional skips, Web 32/32 and production build."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F51: Уточнение магазина меняет ранее импортированные подходящие записи"
-      gap: "No Android user screen or equivalent flow is verified for F51 yet."
+      gap: "Android Core-driven preview and explicit Apply pass local API 27 tests; authenticated live OIDC/Core behavior and real tenant-isolation E2E remain unverified."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceMerchantReclassificationModelsTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceMerchantReclassificationApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceMerchantReclassificationScreensTest.kt
+      evidence:
+        - "F51 Android strict preview/apply DTO, API, explicit UI apply, stale 412, manual-row exclusion, localized errors, and viewer/busy gates: 15 focused instrumentation tests pass; combined F47-F51 bank-import instrumentation 72/72 passes on isolated Android 8.1/API 27; Android JVM unit suite 69/69 and parity contracts 66/66 pass."
+        - "Debug and AndroidTest APKs build; fresh debug APK installed and launched on isolated emulator-5554. Synthetic/mock Core only; no live OIDC, deployment, or tenant-isolation claim."
     intentional_differences: []
   - id: F52
     feature: "CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"

@@ -45,6 +45,11 @@ internal fun BankImportPreviewSection(
     confirmationNeedsRefresh: Boolean = false,
     undoResult: FinanceBankImportUndoResult? = null,
     onUndo: () -> Unit = {},
+    reclassificationPreview: FinanceMerchantReclassificationPreview? = null,
+    reclassificationError: String? = null,
+    reclassificationResult: FinanceMerchantReclassificationResult? = null,
+    onReviewMerchantReclassification: (String) -> Unit = {},
+    onApplyMerchantReclassification: (FinanceMerchantReclassificationPreview) -> Unit = {},
 ) {
     val russian = language == "ru"
     var showUndoConfirmation by remember(preview?.id) { mutableStateOf(false) }
@@ -117,14 +122,84 @@ internal fun BankImportPreviewSection(
                 }
             }
             itemsIndexed(statement.rows, key = { index, row -> row.id.ifBlank { "operation-$index" } }) { _, row ->
-                BankImportRowCard(
-                    row = row,
-                    language = language,
-                    canEdit = canUpload && role != "viewer" && statement.state == "needs_review",
-                    busy = busy,
-                    onSelect = { type -> onSelectRow(row.id, type) },
-                    onSelectCategory = { code -> onSelectCategory(row.id, code) },
-                )
+                androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    BankImportRowCard(
+                        row = row,
+                        language = language,
+                        canEdit = canUpload && role != "viewer" && statement.state == "needs_review",
+                        busy = busy,
+                        onSelect = { type -> onSelectRow(row.id, type) },
+                        onSelectCategory = { code -> onSelectCategory(row.id, code) },
+                    )
+                    val eligibleForPastReview = statement.state == "committed" && row.outcome == "created" &&
+                        row.transactionId != null && row.included && row.transactionType == "expense" &&
+                        !row.merchant.isNullOrBlank() && row.categoryCode != null && row.categorySource == "mapping"
+                    if (eligibleForPastReview && role != "viewer" && canUpload) {
+                        TextButton(
+                            modifier = Modifier.testTag("bank-import-review-past-${row.id}"),
+                            onClick = { onReviewMerchantReclassification(row.merchant!!) },
+                            enabled = !busy,
+                        ) { Text(if (russian) "Проверить прошлые расходы" else "Review past transactions") }
+                    }
+                }
+            }
+            val reviewed = reclassificationPreview?.takeIf {
+                statement.state == "committed" && role != "viewer" && canUpload &&
+                statement.rows.any { row -> !row.merchant.isNullOrBlank() &&
+                    FinanceMerchantReclassificationModels.normalizeMerchant(row.merchant) == it.normalizedMerchant &&
+                    row.categorySource == "mapping" }
+            }
+            if (reviewed != null) {
+                item(key = "reclassification") {
+                    androidx.compose.foundation.layout.Column(
+                        Modifier.fillMaxWidth().testTag("bank-import-reclassification"),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(if (russian) "Старые расходы: ${reviewed.merchant} → ${merchantCategoryLabel(reviewed.categoryCode, language)}"
+                            else "Past transactions: ${reviewed.merchant} → ${merchantCategoryLabel(reviewed.categoryCode, language)}",
+                            style = MaterialTheme.typography.titleSmall)
+                        if (reviewed.candidates.isEmpty()) {
+                            Text(if (russian) "Подходящих неизменённых операций нет."
+                                else "No eligible unchanged transactions.",
+                                modifier = Modifier.testTag("bank-import-reclassification-no-candidates"))
+                        }
+                        reviewed.candidates.forEach { candidate ->
+                            androidx.compose.foundation.layout.Column(
+                                Modifier.fillMaxWidth().testTag("bank-import-reclassification-candidate-${candidate.transactionId}"),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(candidate.description)
+                                val oldCategory = merchantCategoryLabel(candidate.currentCategoryCode, language)
+                                val newCategory = merchantCategoryLabel(reviewed.categoryCode, language)
+                                Text("${candidate.occurredAt} · ${candidate.amount} ₽ · $oldCategory → $newCategory")
+                                Text("$oldCategory → $newCategory",
+                                    modifier = Modifier.testTag("bank-import-reclassification-category-${candidate.transactionId}"))
+                            }
+                        }
+                        if (reclassificationError == "stale_preview") {
+                            Text(if (russian) "Данные или правило магазина изменились. Проверьте список заново."
+                                else "Transactions or mapping changed. Review the list again.",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag("bank-import-reclassification-error"))
+                        } else reclassificationError?.let { code ->
+                            Text(bankImportErrorText(code, language), color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag("bank-import-reclassification-error"))
+                        }
+                        Button(
+                            modifier = Modifier.testTag("bank-import-reclassification-apply"),
+                            onClick = { onApplyMerchantReclassification(reviewed) },
+                            enabled = !busy && reviewed.candidates.isNotEmpty() &&
+                                reclassificationError != "stale_preview",
+                        ) { Text(if (russian) "Применить к этим операциям" else "Apply to these transactions") }
+                    }
+                }
+            }
+            reclassificationResult?.let { result ->
+                item(key = "reclassification-result") {
+                    Text(if (russian) "Категория обновлена: ${result.changedCount} операций."
+                        else "Category updated: ${result.changedCount} transactions.",
+                        modifier = Modifier.testTag("bank-import-reclassification-result"))
+                }
             }
             if (statement.state == "committed" && role != "viewer" && canUpload) {
                 item(key = "undo") {
@@ -188,6 +263,13 @@ internal fun BankImportPreviewSection(
                 TextButton(onClick = onRefresh, enabled = !busy) {
                     Text(if (russian) "Обновить предпросмотр" else "Refresh preview")
                 }
+            }
+        }
+        if (reclassificationPreview == null && reclassificationError != null) {
+            item(key = "reclassification-error") {
+                Text(bankImportErrorText(reclassificationError, language),
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("bank-import-reclassification-error"))
             }
         }
         if (preview == null && error == null && !busy) item(key = "empty") {

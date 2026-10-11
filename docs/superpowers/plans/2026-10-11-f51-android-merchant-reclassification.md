@@ -1,0 +1,14 @@
+# F51 Android merchant reclassification plan
+
+Goal: add Android's explicit, Core-authoritative preview/apply flow for previously imported merchant transactions.
+
+1. **Contract audit.** Follow `.agent/specs/F51-android-merchant-reclassification.md`, `docs/specs/merchant-classification-v1.md`, OpenAPI, Core controllers/services, PostgreSQL acceptance tests, and Web `ImportsPanel`. Keep F51 separate from F50 mapping save and from F48/F49 import mutations.
+2. **DTO tests — RED first.** Add preview/candidate/result parsing tests for exact IDs, versions, categories, amounts, timestamps, order, required fields, and malformed data. Run these tests before adding the models; record failures tied to missing Android DTOs.
+3. **API tests — RED first.** Verify authenticated preview POST and exact merchant body. Verify Apply POST uses only the reviewed merchant/category/candidate ID-version-currentCategory set plus Idempotency-Key. Verify `412`, `401`, permission denial, and session replacement do not trigger automatic Apply replay. Run before implementing API methods.
+4. **Compose tests — RED first.** Verify writer review tap only requests preview; only Core candidates render; empty list disables Apply; candidate details show exact old-to-new category and amount; one explicit Apply tap submits the reviewed preview; viewer and busy gates; stale `412` blocks Apply until fresh explicit review; no omitted/manual transaction is synthesized. Run before production UI/state edits.
+5. **Models and API.** Add strict locale-neutral DTOs and API calls. Capture tenant/session identity. Apply submits the full reviewed version/category set, with a stable idempotency key for the same logical attempt; never retry the mutation under a replacement login.
+6. **UI and lifecycle.** Add a separate past-transaction review panel. Show loading, empty, error, stale, and success states in RU/EN. Apply only the exact preview returned by Core. Reconcile ambiguous results safely; never auto-apply a refreshed candidate set. Discard stale session/tenant/screen responses.
+7. **GREEN and regression.** Run focused DTO, API, Compose and JVM tests; relevant F50/F47-F49 Android regressions on the isolated API 27 emulator; build debug and AndroidTest APKs; install/launch the debug APK; verify APK hash and `git diff --check`. Run parity contracts and the existing Core merchant-reclassification PostgreSQL tests when environment permits. Report skipped or unavailable gates as NOT_RUN.
+8. **Parity and delivery.** Update F51 Android parity evidence and `.agent/PROGRESS.md`, obtain independent review, then commit and push only F51-scoped files after GREEN. Preserve unrelated user files.
+
+Definition of done: user can inspect exactly the Core-reviewed candidates and explicitly apply that same set; stale or manually edited records remain protected; all local gates pass; remaining live OIDC/Core delivery gaps stay clearly marked.

@@ -226,6 +226,8 @@ class MainActivity : ComponentActivity() {
                         onBankImportSelectCategory = ::selectBankImportCategory,
                         onBankImportConfirm = ::confirmBankImport,
                         onBankImportUndo = ::undoBankImport,
+                        onBankImportReclassificationReview = ::reviewMerchantReclassification,
+                        onBankImportReclassificationApply = ::applyMerchantReclassification,
                         onBankImportScreenEnter = ::enterBankImportScreen,
                         onBankImportScreenExit = ::leaveBankImportScreen)
                 }
@@ -305,7 +307,9 @@ class MainActivity : ComponentActivity() {
         val requestGeneration = bankImportGeneration.incrementAndGet()
         bankImportUploadInProgress = true
         ui = ui.copy(bankImportTenantId = tenantId, bankImportPreview = null,
-            bankImportLoading = true, bankImportError = null, bankImportConfirmationNeedsRefresh = false)
+            bankImportLoading = true, bankImportError = null, bankImportConfirmationNeedsRefresh = false,
+            bankImportReclassificationPreview = null, bankImportReclassificationError = null,
+            bankImportReclassificationResult = null, bankImportReclassificationIdempotencyKey = null)
         executor.execute {
             val result = runCatching {
                 val mimeType = contentResolver.getType(uri)
@@ -471,6 +475,154 @@ class MainActivity : ComponentActivity() {
             }) return
         mutateBankImportPreview(preview) { tenantId, importId, revision, session ->
             api.classifyBankImport(tenantId, importId, revision, session)
+        }
+    }
+
+    private fun reviewMerchantReclassification(merchant: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val statement = ui.bankImportPreview ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || tenant.id != ui.bankImportTenantId ||
+            statement.tenantId != tenant.id || statement.state != "committed" || !bankImportScreenActive ||
+            bankImportLoadingOrMutation()) return
+        val eligible = statement.rows.any { row ->
+            row.outcome == "created" && row.transactionId != null && row.included &&
+                row.transactionType == "expense" && row.merchant == merchant &&
+                row.categoryCode != null && row.categorySource == "mapping"
+        }
+        if (!eligible) return
+        val tenantId = tenant.id
+        val authGeneration = api.authSessionGeneration
+        val requestGeneration = bankImportGeneration.incrementAndGet()
+        ui = ui.copy(bankImportLoading = true, bankImportError = null,
+            bankImportReclassificationPreview = null, bankImportReclassificationError = null,
+            bankImportReclassificationResult = null, bankImportReclassificationIdempotencyKey = null)
+        executor.execute {
+            runCatching { api.previewMerchantReclassification(tenantId, merchant, authGeneration) }
+                .onSuccess { reviewed ->
+                    if (!bankImportRequestCanApply(authGeneration, tenantId, requestGeneration) ||
+                        !bankImportScreenActive) return@onSuccess
+                    val currentStatement = ui.bankImportPreview
+                    if (currentStatement?.state != "committed" || currentStatement.tenantId != tenantId ||
+                        !currentStatement.rows.any { row -> !row.merchant.isNullOrBlank() &&
+                            FinanceMerchantReclassificationModels.normalizeMerchant(row.merchant) ==
+                                FinanceMerchantReclassificationModels.normalizeMerchant(merchant) &&
+                            row.categorySource == "mapping" }) {
+                        ui = ui.copy(bankImportLoading = false)
+                        return@onSuccess
+                    }
+                    ui = ui.copy(bankImportLoading = false, bankImportReclassificationPreview = reviewed,
+                        bankImportReclassificationError = null,
+                        bankImportReclassificationIdempotencyKey = java.util.UUID.randomUUID().toString())
+                }
+                .onFailure { failure ->
+                    if (failure is ApiFailure && failure.status == 401 &&
+                        failure.authSessionGeneration == api.authSessionGeneration) expireAuthenticatedSession(failure)
+                    if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                        ui = ui.copy(bankImportLoading = false,
+                            bankImportReclassificationError = BankImportErrorPolicy.code(
+                                (failure as? ApiFailure)?.status, failure.message))
+                    }
+                }
+        }
+    }
+
+    private fun applyMerchantReclassification(reviewed: FinanceMerchantReclassificationPreview) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val statement = ui.bankImportPreview ?: return
+        val currentReview = ui.bankImportReclassificationPreview ?: return
+        val key = ui.bankImportReclassificationIdempotencyKey ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || tenant.id != ui.bankImportTenantId ||
+            statement.tenantId != tenant.id || statement.state != "committed" || !bankImportScreenActive ||
+            currentReview != reviewed || reviewed.candidates.isEmpty() ||
+            ui.bankImportReclassificationError == "stale_preview" || bankImportLoadingOrMutation()) return
+        val tenantId = tenant.id
+        val authGeneration = api.authSessionGeneration
+        val requestGeneration = bankImportGeneration.incrementAndGet()
+        bankImportMutationInProgress = true
+        ui = ui.copy(bankImportLoading = true, bankImportError = null,
+            bankImportReclassificationError = null)
+        executor.execute {
+            runCatching { api.applyMerchantReclassification(tenantId, reviewed, key, authGeneration) }
+                .onSuccess { result ->
+                    bankImportMutationInProgress = false
+                    val eligible = BankImportResponsePolicy.canCachePreview(authGeneration,
+                        api.authSessionGeneration, tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated
+                    if (!eligible) {
+                        if (BankImportReclassificationPolicy.ownsAttempt(
+                                ui.bankImportReclassificationIdempotencyKey, key)) {
+                            ui = ui.copy(bankImportLoading = false, bankImportReclassificationPreview = null,
+                                bankImportReclassificationError = null, bankImportReclassificationIdempotencyKey = null)
+                        }
+                        return@onSuccess
+                    }
+                    val reviewedIds = reviewed.candidates.map { it.transactionId }
+                    val validResult = result.merchant == reviewed.merchant && result.categoryCode == reviewed.categoryCode &&
+                        result.changedCount == reviewedIds.size && result.transactionIds == reviewedIds
+                    if (!bankImportRequestCanApply(authGeneration, tenantId, requestGeneration) ||
+                        !bankImportScreenActive) {
+                        if (!BankImportReclassificationPolicy.ownsAttempt(
+                                ui.bankImportReclassificationIdempotencyKey, key)) return@onSuccess
+                        ui = ui.copy(bankImportLoading = false, bankImportReclassificationPreview = null,
+                            bankImportReclassificationIdempotencyKey = null,
+                            bankImportReclassificationError = if (validResult) null else "request_failed",
+                            bankImportReclassificationResult = if (validResult) result else null)
+                        if (bankImportScreenActive && ui.tenants.firstOrNull()?.id == tenantId) {
+                            refreshBankImportPreview(statement.id)
+                        }
+                        return@onSuccess
+                    }
+                    if (!validResult) {
+                        ui = ui.copy(bankImportLoading = false, bankImportReclassificationPreview = null,
+                            bankImportReclassificationIdempotencyKey = null,
+                            bankImportReclassificationError = "request_failed")
+                    } else {
+                        ui = ui.copy(bankImportLoading = false, bankImportReclassificationPreview = null,
+                            bankImportReclassificationIdempotencyKey = null,
+                            bankImportReclassificationError = null, bankImportReclassificationResult = result)
+                        refreshBankImportPreview(statement.id)
+                    }
+                }
+                .onFailure { failure ->
+                    bankImportMutationInProgress = false
+                    if (failure is ApiFailure && failure.status == 401 &&
+                        failure.authSessionGeneration == api.authSessionGeneration) expireAuthenticatedSession(failure)
+                    val eligible = BankImportResponsePolicy.canCachePreview(authGeneration,
+                        api.authSessionGeneration, tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated
+                    if (!eligible) {
+                        if (BankImportReclassificationPolicy.ownsAttempt(
+                                ui.bankImportReclassificationIdempotencyKey, key)) {
+                            ui = ui.copy(bankImportLoading = false, bankImportReclassificationPreview = null,
+                                bankImportReclassificationError = null, bankImportReclassificationIdempotencyKey = null)
+                        }
+                        return@onFailure
+                    }
+                    val isCurrent = bankImportRequestCanApply(authGeneration, tenantId, requestGeneration) &&
+                        bankImportScreenActive
+                    if (!isCurrent) {
+                        if (!BankImportReclassificationPolicy.ownsAttempt(
+                                ui.bankImportReclassificationIdempotencyKey, key)) return@onFailure
+                        ui = ui.copy(bankImportLoading = false, bankImportReclassificationPreview = null,
+                            bankImportReclassificationIdempotencyKey = null,
+                            bankImportReclassificationError = if (failure is ApiFailure && failure.status == 412)
+                                "stale_preview" else BankImportErrorPolicy.code(
+                                (failure as? ApiFailure)?.status, failure.message))
+                        if (bankImportScreenActive && ui.tenants.firstOrNull()?.id == tenantId) {
+                            refreshBankImportPreview(statement.id)
+                        }
+                        return@onFailure
+                    }
+                    if (failure is ApiFailure && failure.status == 412) {
+                        ui = ui.copy(bankImportLoading = false,
+                            bankImportReclassificationIdempotencyKey = null,
+                            bankImportReclassificationError = "stale_preview")
+                    } else {
+                        // Keep the same key and reviewed snapshot after an ambiguous failure;
+                        // only another explicit Apply tap can retry this exact request.
+                        ui = ui.copy(bankImportLoading = false,
+                            bankImportReclassificationError = BankImportErrorPolicy.code(
+                                (failure as? ApiFailure)?.status, failure.message))
+                    }
+                }
         }
     }
 
@@ -3217,6 +3369,10 @@ data class FinanceUiState(
     val bankImportError: String? = null,
     val bankImportConfirmationNeedsRefresh: Boolean = false,
     val bankImportUndoResult: FinanceBankImportUndoResult? = null,
+    val bankImportReclassificationPreview: FinanceMerchantReclassificationPreview? = null,
+    val bankImportReclassificationError: String? = null,
+    val bankImportReclassificationResult: FinanceMerchantReclassificationResult? = null,
+    val bankImportReclassificationIdempotencyKey: String? = null,
     val receiptDraft: FinanceReceipt? = null,
     val receiptReading: FinanceReceiptReading? = null,
     val receiptReadingReceiptId: String? = null,
@@ -3558,6 +3714,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onBankImportSelectCategory: (String, String) -> Unit = { _, _ -> },
                           onBankImportConfirm: () -> Unit = {},
                           onBankImportUndo: () -> Unit = {},
+                          onBankImportReclassificationReview: (String) -> Unit = {},
+                          onBankImportReclassificationApply: (FinanceMerchantReclassificationPreview) -> Unit = {},
                           onBankImportScreenEnter: () -> Unit = {},
                           onBankImportScreenExit: () -> Unit = {}) {
     val russian = language == "ru"
@@ -3875,6 +4033,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         confirmationNeedsRefresh = state.bankImportConfirmationNeedsRefresh,
                         undoResult = state.bankImportUndoResult,
                         onUndo = onBankImportUndo,
+                        reclassificationPreview = state.bankImportReclassificationPreview,
+                        reclassificationError = state.bankImportReclassificationError,
+                        reclassificationResult = state.bankImportReclassificationResult,
+                        onReviewMerchantReclassification = onBankImportReclassificationReview,
+                        onApplyMerchantReclassification = onBankImportReclassificationApply,
                         canUpload = state.authenticated && state.tenants.firstOrNull()?.role != "viewer",
                         onPick = onBankImportPick,
                     )

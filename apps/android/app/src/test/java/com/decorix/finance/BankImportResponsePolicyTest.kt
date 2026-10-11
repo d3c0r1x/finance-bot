@@ -79,6 +79,12 @@ class BankImportResponsePolicyTest {
         ))
     }
 
+    @Test fun lateReclassificationCompletionCannotClearANewerReviewedAttempt() {
+        assertTrue(BankImportReclassificationPolicy.ownsAttempt("apply-key-00000001", "apply-key-00000001"))
+        assertFalse(BankImportReclassificationPolicy.ownsAttempt("apply-key-00000002", "apply-key-00000001"))
+        assertFalse(BankImportReclassificationPolicy.ownsAttempt(null, "apply-key-00000001"))
+    }
+
     private fun preview(revision: Long) = FinanceBankImportPreview(
         quality = "valid", periodStart = "2026-10-01", periodEnd = "2026-10-01",
         parsedExpenseTotal = "0.00", parsedIncomeTotal = "0.00",

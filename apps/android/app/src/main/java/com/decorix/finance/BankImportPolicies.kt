@@ -83,6 +83,12 @@ internal object BankImportUndoPolicy {
     ): Boolean = screenActive && !requestStillCurrent && sessionMatches && tenantMatches
 }
 
+internal object BankImportReclassificationPolicy {
+    /** A late completion may clear busy/review state only while it still owns that exact attempt. */
+    fun ownsAttempt(currentIdempotencyKey: String?, requestIdempotencyKey: String): Boolean =
+        currentIdempotencyKey != null && currentIdempotencyKey == requestIdempotencyKey
+}
+
 /** Serializes a session-bound side effect with logout/account replacement. */
 internal object FinanceSessionRequestPolicy {
     fun <T> performIfCurrent(
