@@ -1889,7 +1889,7 @@ Updated: 2026-10-11, Europe/Moscow.
 - Next: start F32 Android schedule/digest acceptance tests.
 
 
-## F59.3 F32 Android digest settings — GREEN; COMMIT_PENDING — 2026-10-11
+## F59.3 F32 Android digest settings — GREEN; COMMITTED — 2026-10-11
 
 - Scope: strengthen Android proof for existing member-local daily/weekly digest settings; do not duplicate Core scheduling or Python delivery rules. Core owns timezone, durable intent, retries, deduplication, quiet-hours scheduling, and no-data suppression.
 - Tests first: four Compose cases and one MockWebServer wire test cover independent daily/weekly switches, valid disable/enable state, clearing both quiet-hours to null, rejecting `25:99`, rejecting one-sided quiet-hours in RU/EN, authenticated tenant GET/PATCH, exact fields, server-owned timezone omission, explicit JSON nulls, and `If-Match` versions.
@@ -1897,4 +1897,15 @@ Updated: 2026-10-11, Europe/Moscow.
 - Implementation: added only stable test tags to the two existing digest checkboxes; no user-visible or server behavior changed.
 - GREEN: five F32 Android tests pass individually; full direct API 27 instrumentation 237/237 on `emulator-5554` with SwiftShader; Android JVM 37/37; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` pass; contracts 78 passed, 2 skipped; `git diff --check` clean. Updated debug APK installed/launched, SHA-256 `D8295E0CBD5797F6AE1D475A6E7973F05E04F825774FF9B3A875B250A60528AD`. Dedicated test AVD only; Planerka AVD untouched.
 - Android F32 remains PARTIAL only for live authenticated Android-to-Core OIDC roundtrip. Backend scheduler/retry/no-data acceptance remains supported by existing Core/PostgreSQL/Python tests recorded under F32 above.
-- Next: commit/push this Android evidence slice, then continue to the next incomplete approved V1 goal.
+- Commit/push: `7bc669576eecc8e5f5b2d9a24b83c9c4bbe7b3d3` (`test(F32): verify Android digest settings`); remote ref confirmed.
+- Next: identify the next incomplete approved Android/V1 goal.
+
+
+## F59.3 F33 Android confirmed-receipt price comparison — GREEN; LOCAL ACCEPTANCE COMPLETE — 2026-10-11
+
+- Scope: show Core's authoritative F33 price projection for an explicitly selected item on a confirmed receipt. Android does not select comparison history or recalculate the baseline, median, price delta, relative change, or signal.
+- Tests first: parser/API/Compose acceptance tests were added before production behavior. Initial RED runs exposed absent parser/API/UI seams. The API verifies the authenticated tenant/receipt/item query; parser covers exact decimal preservation, chronology, malformed data, unsupported algorithm, and raw unusable history with no baseline; Compose covers confirmed-only explicit request, result, no history, invalid quantity/line sum, generic failure and retry.
+- Implementation: added strict `price-projection.v1` DTO parsing and authenticated Core request; localized result/loading/error/retry UI; positive quantity and line-sum gating; stale tenant/receipt/item response guards. Loaded paged receipt items are accepted only when the page belongs to the selected receipt. Core/Go price calculations are unchanged.
+- GREEN: `:app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest` passed; direct full Android 8.1/API 27 instrumentation passed 246/246 on isolated `emulator-5554`; contracts passed 78, skipped 2; `git diff --check` clean. Debug APK installed/launched (PID 14157), SHA-256 `B67F3AA161ED9B8D95E5A3A3B7AB76BF8DED8AD02E0FAD9E10FB7530D090BD56`. Independent focused review found no blocker. User emulator `emulator-5558` was not touched.
+- F33 Android local acceptance is GREEN and remains PARTIAL for live authenticated Android-to-Core OIDC verification. Registry evidence now names the actual model/API/UI tests and the live gap.
+- Next: F34 Android product catalog, search and purchase-history chart; tests first. Core, Go, Web and Telegram F34 are already complete.

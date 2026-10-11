@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
     private val receiptTotalSyncGeneration = AtomicLong(0L)
     private val receiptDuplicateGeneration = AtomicLong(0L)
     private val receiptConfirmGeneration = AtomicLong(0L)
+    private val receiptPriceComparisonGeneration = AtomicLong(0L)
     private val receiptCategoryGeneration = AtomicLong(0L)
     private val receiptBasketReviewGeneration = AtomicLong(0L)
     private val receiptDisputedItemsGeneration = AtomicLong(0L)
@@ -167,7 +168,8 @@ class MainActivity : ComponentActivity() {
                         onReceiptBasketReview = ::reviewReceiptBasket,
                         onReceiptDisputedItemsPage = ::loadReceiptDisputedItems,
                         onReceiptRepeatWarningsRefresh = ::loadReceiptRepeatWarnings,
-                        onReceiptDisputedProductDecision = ::decideReceiptDisputedProduct)
+                        onReceiptDisputedProductDecision = ::decideReceiptDisputedProduct,
+                        onReceiptPriceComparison = ::loadReceiptPriceComparison)
                 }
             }
         }
@@ -667,6 +669,49 @@ class MainActivity : ComponentActivity() {
                         ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId &&
                         ui.receiptItemsRequestedPage == page) {
                         ui = ui.copy(receiptItemsLoading = false, receiptItemsError = "unavailable")
+                    }
+                }
+        }
+    }
+
+    private fun loadReceiptPriceComparison(requestedTenantId: String, receiptId: String, itemId: String) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (requestedTenantId != tenantId) return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId && it.state == "confirmed" } ?: return
+        val itemLoaded = receipt.items.any { it.id == itemId } ||
+            (ui.receiptItemsReceiptId == receiptId && ui.receiptItemsPage?.items?.any { it.id == itemId } == true)
+        if (!ui.authenticated || !itemLoaded) return
+        if (ui.productPriceComparisonReceiptId == receiptId && ui.productPriceComparisonItemId == itemId &&
+            ui.productPriceComparison != null) return
+        if (ui.productPriceComparisonReceiptId == receiptId && ui.productPriceComparisonItemId == itemId &&
+            ui.productPriceComparisonLoading) return
+        val generation = receiptPriceComparisonGeneration.incrementAndGet()
+        ui = ui.copy(productPriceComparison = null, productPriceComparisonReceiptId = receiptId,
+            productPriceComparisonItemId = itemId, productPriceComparisonLoading = true,
+            productPriceComparisonError = null)
+        executor.execute {
+            runCatching { api.receiptPriceHistory(tenantId, receiptId, itemId) }
+                .onSuccess { comparison ->
+                    if (receiptPriceComparisonGeneration.get() == generation && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.let {
+                            it.id == receiptId && it.state == "confirmed"
+                        } == true && ui.productPriceComparisonReceiptId == receiptId &&
+                        ui.productPriceComparisonItemId == itemId) {
+                        ui = ui.copy(productPriceComparison = comparison,
+                            productPriceComparisonLoading = false, productPriceComparisonError = null)
+                    }
+                }
+                .onFailure { failure ->
+                    if (receiptPriceComparisonGeneration.get() != generation || !ui.authenticated ||
+                        ui.tenants.firstOrNull()?.id != tenantId || ui.receiptDraft?.let {
+                            it.id == receiptId && it.state == "confirmed"
+                        } != true || ui.productPriceComparisonReceiptId != receiptId ||
+                        ui.productPriceComparisonItemId != itemId) return@onFailure
+                    if (failure is ApiFailure && failure.status == 401) {
+                        ui = FinanceUiState(error = "Sign in again")
+                    } else {
+                        ui = ui.copy(productPriceComparisonLoading = false,
+                            productPriceComparisonError = "unavailable")
                     }
                 }
         }
@@ -2077,6 +2122,11 @@ data class FinanceUiState(
     val personalInflation: FinancePersonalInflation? = null,
     val personalInflationLoading: Boolean = false,
     val personalInflationError: String? = null,
+    val productPriceComparison: FinanceProductPriceComparison? = null,
+    val productPriceComparisonReceiptId: String? = null,
+    val productPriceComparisonItemId: String? = null,
+    val productPriceComparisonLoading: Boolean = false,
+    val productPriceComparisonError: String? = null,
     val recurringProjection: FinanceRecurringProjection? = null,
     val recurringLoading: Boolean = false,
     val recurringError: String? = null,
@@ -2399,7 +2449,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptBasketReview: (String, Long) -> Unit = { _, _ -> },
                           onReceiptDisputedItemsPage: (String, Int) -> Unit = { _, _ -> },
                           onReceiptRepeatWarningsRefresh: (String) -> Unit = {},
-                          onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> }) {
+                          onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> },
+                          onReceiptPriceComparison: (String, String, String) -> Unit = { _, _, _ -> }) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -2713,7 +2764,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh,
                         onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm,
                         onReceiptCategorySelect, onReceiptBasketReview,
-                        onReceiptDisputedItemsPage, onReceiptRepeatWarningsRefresh, onReceiptDisputedProductDecision)
+                        onReceiptDisputedItemsPage, onReceiptRepeatWarningsRefresh, onReceiptDisputedProductDecision,
+                        state.productPriceComparison, state.productPriceComparisonReceiptId,
+                        state.productPriceComparisonItemId, state.productPriceComparisonLoading,
+                        state.productPriceComparisonError, onReceiptPriceComparison)
                     "shopping" -> ShoppingScreen(Modifier.weight(1f), state, language, onShoppingLoad,
                         onShoppingDecision, onShoppingCopy)
                     "nobuy" -> DoNotBuyScreen(Modifier.weight(1f), state, language, onDoNotBuyLoad,
@@ -2966,7 +3020,11 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onReviewBasket: (String, Long) -> Unit,
                                 onDisputedItemsPage: (String, Int) -> Unit,
                                 onRepeatWarningsRefresh: (String) -> Unit,
-                                onDisputedProductDecision: (String, String) -> Unit) {
+                                onDisputedProductDecision: (String, String) -> Unit,
+                                productPriceComparison: FinanceProductPriceComparison?,
+                                productPriceComparisonReceiptId: String?, productPriceComparisonItemId: String?,
+                                productPriceComparisonLoading: Boolean, productPriceComparisonError: String?,
+                                onPriceComparison: (String, String, String) -> Unit) {
     val confirmationIdempotencyKey = androidx.compose.runtime.remember(receipt?.tenantId, receipt?.id) {
         receipt?.let { receiptConfirmationIdempotencyKey(it.tenantId, it.id) }.orEmpty()
     }
@@ -3483,6 +3541,79 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                             editLineSum = item.lineSum.orEmpty()
                                         }) {
                                         Text(if (russian) "Изменить" else "Edit")
+                                    }
+                                }
+                                if (draft.state == "confirmed") {
+                                    val numericPattern = Regex("^\\d+(?:\\.\\d+)?$")
+                                    val usableQuantity = item.quantity?.takeIf(numericPattern::matches)
+                                        ?.toBigDecimalOrNull()?.signum()?.let { it > 0 } == true
+                                    val usableLineSum = item.lineSum?.takeIf(numericPattern::matches)
+                                        ?.toBigDecimalOrNull()?.signum()?.let { it > 0 } == true
+                                    if (!usableQuantity || !usableLineSum) {
+                                        Text(if (russian) "Для сравнения нужны корректные количество и сумма позиции."
+                                            else "A valid item quantity and total are required for comparison.",
+                                            modifier = Modifier.testTag("receipt-price-inputs-${item.id}"))
+                                    } else {
+                                        TextButton(modifier = Modifier.testTag("receipt-price-compare-${item.id}"),
+                                            enabled = !productPriceComparisonLoading,
+                                            onClick = { onPriceComparison(draft.tenantId, draft.id, item.id) }) {
+                                            Text(if (russian) "Сравнить цену" else "Compare price")
+                                        }
+                                        val comparisonMatches = productPriceComparisonReceiptId == draft.id &&
+                                            productPriceComparisonItemId == item.id
+                                        if (comparisonMatches && productPriceComparisonLoading) {
+                                            Text(if (russian) "Загрузка сравнения…" else "Loading comparison…",
+                                                modifier = Modifier.testTag("receipt-price-loading-${item.id}"))
+                                        }
+                                        if (comparisonMatches && productPriceComparisonError != null) {
+                                            Column {
+                                                Text(if (russian) "Не удалось загрузить сравнение цены."
+                                                    else "Could not load the price comparison.",
+                                                    modifier = Modifier.testTag("receipt-price-error-${item.id}"))
+                                                TextButton(modifier = Modifier.testTag("receipt-price-retry-${item.id}"),
+                                                    onClick = {
+                                                    onPriceComparison(draft.tenantId, draft.id, item.id)
+                                                }) { Text(if (russian) "Повторить" else "Retry") }
+                                            }
+                                        }
+                                        val comparison = productPriceComparison?.takeIf {
+                                            comparisonMatches && !productPriceComparisonLoading
+                                        }
+                                        if (comparison != null) {
+                                            Column(Modifier.testTag("receipt-price-result-${item.id}"),
+                                                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Text("${if (russian) "Сейчас" else "Current"}: " +
+                                                    "${formatMoney(comparison.currentUnitPrice, language, draft.currency)}/" +
+                                                    (if (russian) "ед." else "unit"))
+                                                if (comparison.hasBaseline) {
+                                                    val baseline = requireNotNull(comparison.baselineUnitPrice)
+                                                    Text("${if (russian) "Обычно" else "Typical"}: " +
+                                                        "${formatMoney(baseline, language, draft.currency)}/" +
+                                                        (if (russian) "ед." else "unit") + " · " +
+                                                        "${comparison.priorPurchases} " +
+                                                        (if (russian) "покупок раньше" else "prior purchases"))
+                                                    val change = requireNotNull(comparison.change)
+                                                    val relative = requireNotNull(comparison.relative).toBigDecimal()
+                                                        .movePointRight(2).stripTrailingZeros().toPlainString()
+                                                        .let { if (russian) it.replace('.', ',') else it }
+                                                    val movement = when {
+                                                        !comparison.signal -> null
+                                                        comparison.direction == "up" -> if (russian) "Подорожание" else "Price increased"
+                                                        comparison.direction == "down" -> if (russian) "Снижение цены" else "Price decreased"
+                                                        else -> null
+                                                    }
+                                                    Text("${if (russian) "Изменение" else "Change"}: " +
+                                                        "${if (change.startsWith("-") || change == "0.000000") "" else "+"}" +
+                                                        "${formatMoney(change, language, draft.currency)}/" +
+                                                        (if (russian) "ед." else "unit") + " · $relative%" +
+                                                        movement?.let { " · $it" }.orEmpty())
+                                                } else {
+                                                    Text(if (russian) "Пока нет сопоставимых покупок."
+                                                        else "No comparable purchases yet.",
+                                                        modifier = Modifier.testTag("receipt-price-no-baseline-${item.id}"))
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 val hasReview = item.verdict != null || item.reviewReason != null ||

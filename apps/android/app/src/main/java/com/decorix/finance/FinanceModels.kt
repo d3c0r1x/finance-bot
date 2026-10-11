@@ -339,6 +339,30 @@ data class FinanceReceiptRepeatWarning(
 
 data class FinanceReceiptRepeatWarnings(val warnings: List<FinanceReceiptRepeatWarning>)
 
+data class FinanceProductPricePoint(
+    val receiptId: String,
+    val itemId: String,
+    val purchasedAt: String,
+    val merchant: String?,
+    val name: String,
+    val unitPrice: String,
+    val current: Boolean,
+)
+
+data class FinanceProductPriceComparison(
+    val algorithmVersion: String,
+    val productName: String,
+    val hasBaseline: Boolean,
+    val currentUnitPrice: String,
+    val baselineUnitPrice: String?,
+    val change: String?,
+    val relative: String?,
+    val signal: Boolean,
+    val direction: String?,
+    val priorPurchases: Int,
+    val history: List<FinanceProductPricePoint>,
+)
+
 data class FinanceReceiptDuplicateCandidate(
     val id: String,
     val cashTotal: String,
@@ -470,6 +494,106 @@ data class TransactionDraftEdit(
 )
 
 internal object FinanceModels {
+    fun productPriceComparison(
+        json: JSONObject,
+        requestedReceiptId: String,
+        requestedItemId: String,
+    ): FinanceProductPriceComparison {
+        val comparisonFields = setOf(
+            "algorithmVersion", "productName", "hasBaseline", "currentUnitPrice", "baselineUnitPrice",
+            "change", "relative", "signal", "direction", "priorPurchases", "history",
+        )
+        require(json.keys().asSequence().all { it in comparisonFields }) { "Unexpected price comparison field" }
+        require(json.keys().asSequence().toSet() == comparisonFields) { "Incomplete price comparison" }
+        require(isCanonicalUuid(requestedReceiptId) && isCanonicalUuid(requestedItemId)) {
+            "Invalid requested price-history item"
+        }
+
+        val algorithmVersion = json.getString("algorithmVersion")
+        val productName = json.getString("productName")
+        val hasBaseline = requiredBoolean(json, "hasBaseline")
+        val currentUnitPrice = json.getString("currentUnitPrice")
+        val baseline = requiredNullableString(json, "baselineUnitPrice")
+        val change = requiredNullableString(json, "change")
+        val relative = requiredNullableString(json, "relative")
+        val signal = requiredBoolean(json, "signal")
+        val direction = requiredNullableString(json, "direction")
+        val priorPurchases = exactInt(json, "priorPurchases")
+        val historyJson = json.getJSONArray("history")
+        val unitPricePattern = Regex("^\\d{1,24}\\.\\d{6}$")
+        val changePattern = Regex("^-?\\d{1,24}\\.\\d{6}$")
+        val relativePattern = Regex("^-?\\d{1,40}\\.\\d{6}$")
+
+        require(algorithmVersion == "price-projection.v1"
+            && productName.isNotBlank() && productName.length <= 200
+            && unitPricePattern.matches(currentUnitPrice)
+            && (baseline == null || unitPricePattern.matches(baseline))
+            && (change == null || changePattern.matches(change))
+            && (relative == null || relativePattern.matches(relative))
+            && direction in setOf(null, "up", "down")
+            && priorPurchases in 0..5000
+            && historyJson.length() in 1..5001) { "Invalid price comparison values" }
+
+        val pointFields = setOf("receiptId", "itemId", "purchasedAt", "merchant", "name", "unitPrice", "current")
+        val history = (0 until historyJson.length()).map { index ->
+            val row = historyJson.getJSONObject(index)
+            require(row.keys().asSequence().all { it in pointFields }
+                && row.keys().asSequence().toSet() == pointFields) { "Invalid price history point fields" }
+            val receiptId = row.getString("receiptId")
+            val itemId = row.getString("itemId")
+            val purchasedAt = row.getString("purchasedAt")
+            val merchant = requiredNullableString(row, "merchant")
+            val name = row.getString("name")
+            val unitPrice = row.getString("unitPrice")
+            val current = requiredBoolean(row, "current")
+            require(isCanonicalUuid(receiptId) && isCanonicalUuid(itemId)
+                && runCatching { Instant.parse(purchasedAt) }.isSuccess
+                && (merchant == null || merchant.length <= 200)
+                && name.isNotBlank() && name.length <= 200
+                && unitPricePattern.matches(unitPrice)) { "Invalid price history point" }
+            FinanceProductPricePoint(receiptId, itemId, purchasedAt, merchant, name, unitPrice, current)
+        }
+        val orderedInstants = history.map { Instant.parse(it.purchasedAt) }
+        require(orderedInstants.zipWithNext().all { (earlier, later) -> !later.isBefore(earlier) }) {
+            "Price history must be chronological"
+        }
+        val currentPoint = history.last()
+        require(history.dropLast(1).none { it.current } && currentPoint.current
+            && currentPoint.receiptId.equals(requestedReceiptId, ignoreCase = true)
+            && currentPoint.itemId.equals(requestedItemId, ignoreCase = true)
+            && currentPoint.name == productName && currentPoint.unitPrice == currentUnitPrice) {
+            "Price history current item does not match the requested receipt item"
+        }
+
+        if (hasBaseline) {
+            require(baseline != null && change != null && relative != null
+                && priorPurchases > 0 && history.size >= 2
+                && (!signal && direction == null || signal && direction in setOf("up", "down"))) {
+                "Baseline comparison is inconsistent"
+            }
+        } else {
+            require(baseline == null && change == null && relative == null
+                && !signal && direction == null && priorPurchases == 0) {
+                "No-baseline comparison must not contain derived values"
+            }
+        }
+
+        return FinanceProductPriceComparison(algorithmVersion, productName, hasBaseline, currentUnitPrice,
+            baseline, change, relative, signal, direction, priorPurchases, history)
+    }
+
+    private fun isCanonicalUuid(value: String): Boolean =
+        runCatching { java.util.UUID.fromString(value).toString().equals(value, ignoreCase = true) }.getOrDefault(false)
+
+    private fun requiredNullableString(json: JSONObject, key: String): String? {
+        require(json.has(key)) { "Missing nullable field: $key" }
+        return if (json.isNull(key)) null else json.get(key) as? String
+            ?: throw IllegalArgumentException("Invalid string field: $key")
+    }
+
+    private fun requiredBoolean(json: JSONObject, key: String): Boolean =
+        json.get(key) as? Boolean ?: throw IllegalArgumentException("Invalid boolean field: $key")
+
     fun tenantMembers(json: JSONArray): List<FinanceTenantMember> =
         (0 until json.length()).map { index ->
             val member = json.getJSONObject(index)

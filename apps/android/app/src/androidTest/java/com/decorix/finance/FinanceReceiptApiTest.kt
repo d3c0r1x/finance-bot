@@ -34,6 +34,90 @@ class FinanceReceiptApiTest {
         override fun after() = server.shutdown()
     }
 
+    @Test fun receiptPriceHistoryPreservesCoreComparisonAndNullableNoBaseline() {
+        server.enqueue(MockResponse().setBody("""
+            {
+              "algorithmVersion":"price-projection.v1","productName":"Tea 500g","hasBaseline":true,
+              "currentUnitPrice":"25.000000","baselineUnitPrice":"10.000000","change":"15.000000",
+              "relative":"1.500000","signal":true,"direction":"up","priorPurchases":2,
+              "history":[
+                {"receiptId":"00000000-0000-4000-8000-000000000010",
+                 "itemId":"00000000-0000-4000-8000-000000000011","purchasedAt":"2026-09-01T10:00:00Z",
+                 "merchant":"Old Market","name":"Tea 500g","unitPrice":"10.000000","current":false},
+                {"receiptId":"00000000-0000-4000-8000-000000000042",
+                 "itemId":"00000000-0000-4000-8000-000000000091","purchasedAt":"2026-10-01T10:00:00Z",
+                 "merchant":"Market","name":"Tea 500g","unitPrice":"25.000000","current":true}
+              ]
+            }
+        """.trimIndent()))
+        server.enqueue(MockResponse().setBody("""
+            {
+              "algorithmVersion":"price-projection.v1","productName":"New item","hasBaseline":false,
+              "currentUnitPrice":"8.500000","baselineUnitPrice":null,"change":null,"relative":null,
+              "signal":false,"direction":null,"priorPurchases":0,
+              "history":[{"receiptId":"00000000-0000-4000-8000-000000000043",
+                "itemId":"00000000-0000-4000-8000-000000000092","purchasedAt":"2026-10-02T10:00:00Z",
+                "merchant":null,"name":"New item","unitPrice":"8.500000","current":true}]
+            }
+        """.trimIndent()))
+        val api = api().also {
+            it.saveTokens("receipt-price-token", "refresh-token", System.currentTimeMillis() + 60_000)
+        }
+
+        val comparison = api.receiptPriceHistory(
+            "tenant-17", "00000000-0000-4000-8000-000000000042", "00000000-0000-4000-8000-000000000091",
+        )
+
+        assertEquals("price-projection.v1", comparison.algorithmVersion)
+        assertEquals("Tea 500g", comparison.productName)
+        assertTrue(comparison.hasBaseline)
+        assertEquals("25.000000", comparison.currentUnitPrice)
+        assertEquals("10.000000", comparison.baselineUnitPrice)
+        assertEquals("15.000000", comparison.change)
+        assertEquals("1.500000", comparison.relative)
+        assertTrue(comparison.signal)
+        assertEquals("up", comparison.direction)
+        assertEquals(2, comparison.priorPurchases)
+        assertEquals(2, comparison.history.size)
+        assertEquals("00000000-0000-4000-8000-000000000010", comparison.history.first().receiptId)
+        assertEquals("00000000-0000-4000-8000-000000000011", comparison.history.first().itemId)
+        assertEquals("2026-09-01T10:00:00Z", comparison.history.first().purchasedAt)
+        assertEquals("Old Market", comparison.history.first().merchant)
+        assertEquals("10.000000", comparison.history.first().unitPrice)
+        assertFalse(comparison.history.first().current)
+        assertEquals("00000000-0000-4000-8000-000000000042", comparison.history.last().receiptId)
+        assertEquals("00000000-0000-4000-8000-000000000091", comparison.history.last().itemId)
+        assertEquals("25.000000", comparison.history.last().unitPrice)
+        assertTrue(comparison.history.last().current)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/products/price-history?receiptId=" +
+            "00000000-0000-4000-8000-000000000042&itemId=00000000-0000-4000-8000-000000000091", request.path)
+        assertEquals("Bearer receipt-price-token", request.getHeader("Authorization"))
+
+        val noBaseline = api.receiptPriceHistory(
+            "tenant-17", "00000000-0000-4000-8000-000000000043", "00000000-0000-4000-8000-000000000092",
+        )
+        assertFalse(noBaseline.hasBaseline)
+        assertEquals("8.500000", noBaseline.currentUnitPrice)
+        assertNull(noBaseline.baselineUnitPrice)
+        assertNull(noBaseline.change)
+        assertNull(noBaseline.relative)
+        assertFalse(noBaseline.signal)
+        assertNull(noBaseline.direction)
+        assertEquals(0, noBaseline.priorPurchases)
+        assertEquals(1, noBaseline.history.size)
+        assertNull(noBaseline.history.single().merchant)
+        assertTrue(noBaseline.history.single().current)
+
+        val noBaselineRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("GET", noBaselineRequest.method)
+        assertEquals("/api/v1/tenants/tenant-17/products/price-history?receiptId=" +
+            "00000000-0000-4000-8000-000000000043&itemId=00000000-0000-4000-8000-000000000092", noBaselineRequest.path)
+        assertEquals("Bearer receipt-price-token", noBaselineRequest.getHeader("Authorization"))
+    }
+
     @Test fun notificationPreferencesUseTenantScopedLocaleAndVersionedPatchWithoutClientTimezone() {
         server.enqueue(MockResponse().setBody(notificationPreferencesJson(
             timezone = "Europe/Moscow", language = "ru", dailyEnabled = true,

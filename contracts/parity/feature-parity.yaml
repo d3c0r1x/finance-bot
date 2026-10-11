@@ -704,8 +704,11 @@ features:
       status: partial
       scenario: "Android counterpart for F33: Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
       tests:
-        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F33 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinancePriceComparisonModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt"
+      evidence: "Confirmed receipt items expose an explicit Core-backed price comparison; Android preserves Core's exact decimal strings, median, signal and history, and renders a localized no-baseline state without inventing values. Drafts and items without valid positive quantity/line sum cannot request comparison. API tests verify tenant/receipt/item scope and Bearer auth; parser tests reject malformed contracts; UI tests cover result, no-history, invalid inputs, errors and retry. Full Android 8.1/API 27 instrumentation passed 246/246 on isolated emulator-5554; JVM tests, debug/test APK builds and 78 parity contracts passed. APK was installed/launched (PID 14157), SHA-256 B67F3AA161ED9B8D95E5A3A3B7AB76BF8DED8AD02E0FAD9E10FB7530D090BD56. Independent review found no blocker."
+      gap: "Synthetic DTO/MockWebServer coverage is local only; live authenticated Android-to-Core OIDC roundtrip remains unverified."
     intentional_differences: []
   - id: F34
     feature: "Каталог после 3 покупок, поиск `/price`, история, лучший магазин"

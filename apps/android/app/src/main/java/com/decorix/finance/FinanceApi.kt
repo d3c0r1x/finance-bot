@@ -164,6 +164,16 @@ class FinanceApi internal constructor(
             "/api/v1/tenants/$tenantId/receipts/$receiptId/repeat-warnings", "GET",
         )))
 
+    fun receiptPriceHistory(tenantId: String, receiptId: String,
+                            itemId: String): FinanceProductPriceComparison {
+        require(isUuid(receiptId) && isUuid(itemId)) { "Receipt price-history IDs must be UUIDs" }
+        val query = "receiptId=${encodeRfc3986(receiptId)}&itemId=${encodeRfc3986(itemId)}"
+        val path = "/api/v1/tenants/$tenantId/products/price-history?$query"
+        return FinanceModels.productPriceComparison(
+            JSONObject(execute(path, "GET")), receiptId, itemId,
+        )
+    }
+
     fun updateReceiptItem(tenantId: String, receiptId: String, itemId: String, version: Long,
                           name: String, quantity: String?, unitPrice: String?, lineSum: String?): FinanceReceipt {
         require(version > 0) { "Invalid receipt version" }
@@ -495,6 +505,25 @@ class FinanceApi internal constructor(
                         ifMatchVersion: Long? = null): String {
         val requestBody = body?.toRequestBody("application/json".toMediaType())
         return executeRequest(path, method, requestBody, idempotencyKey, ifMatchVersion)
+    }
+
+    private fun isUuid(value: String): Boolean =
+        runCatching { UUID.fromString(value).toString().equals(value, ignoreCase = true) }.getOrDefault(false)
+
+    private fun encodeRfc3986(value: String): String {
+        val hex = "0123456789ABCDEF"
+        return buildString {
+            value.toByteArray(Charsets.UTF_8).forEach { byte ->
+                val code = byte.toInt() and 0xff
+                if (code in 'A'.code..'Z'.code || code in 'a'.code..'z'.code
+                    || code in '0'.code..'9'.code || code == '-'.code || code == '.'.code
+                    || code == '_'.code || code == '~'.code) {
+                    append(code.toChar())
+                } else {
+                    append('%').append(hex[code ushr 4]).append(hex[code and 0x0f])
+                }
+            }
+        }
     }
 
     private fun executeRequest(path: String, method: String, requestBody: RequestBody?,

@@ -78,6 +78,110 @@ class FinanceReceiptScreensTest {
         assertEquals(emptyList<String>(), confirmed)
     }
 
+    @Test fun confirmedReceiptPriceComparisonLoadsCoreValuesOnlyAfterExplicitClick() {
+        val receipt = confirmedReceipt()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt))
+        val requests = mutableListOf<Triple<String, String, String>>()
+        show(state.value, stateHolder = state, onReceiptPriceComparison = { tenantId, receiptId, itemId ->
+            requests += Triple(tenantId, receiptId, itemId)
+            state.value = state.value.copy(
+                productPriceComparison = priceComparison(hasBaseline = true),
+                productPriceComparisonReceiptId = receiptId,
+                productPriceComparisonItemId = itemId,
+                productPriceComparisonLoading = false,
+                productPriceComparisonError = null,
+            )
+        })
+
+        compose.onNodeWithText("Сравнить цену").performScrollTo().assertIsDisplayed()
+        assertEquals("Opening the receipt must not fetch price history", emptyList<Triple<String, String, String>>(), requests)
+        compose.onNodeWithText("Сравнить цену").performClick()
+
+        assertEquals(listOf(Triple("tenant-17", "receipt-42", "item-3")), requests)
+        compose.onNodeWithText("Сейчас:", substring = true).assertTextContains("2,50 ₽/ед.", substring = true)
+        compose.onNodeWithText("Обычно:", substring = true).assertTextContains("2,00 ₽/ед.", substring = true)
+        compose.onNodeWithText("Изменение:", substring = true).assertTextContains("25%", substring = true)
+        compose.onNodeWithText("Подорожание", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Current:", substring = true).assertTextContains("2.50 RUB/unit", substring = true)
+        compose.onNodeWithText("Typical:", substring = true).assertTextContains("2.00 RUB/unit", substring = true)
+        compose.onNodeWithText("Price increased", substring = true).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun confirmedReceiptPriceComparisonWithoutBaselineShowsOnlyCurrentPriceAndExplicitEmptyState() {
+        val receipt = confirmedReceipt()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt))
+        val requests = mutableListOf<Triple<String, String, String>>()
+        show(state.value, stateHolder = state, onReceiptPriceComparison = { tenantId, receiptId, itemId ->
+            requests += Triple(tenantId, receiptId, itemId)
+            state.value = state.value.copy(
+                productPriceComparison = priceComparison(hasBaseline = false),
+                productPriceComparisonReceiptId = receiptId,
+                productPriceComparisonItemId = itemId,
+                productPriceComparisonLoading = false,
+                productPriceComparisonError = null,
+            )
+        })
+
+        compose.onNodeWithText("Сравнить цену").performScrollTo().performClick()
+
+        assertEquals(listOf(Triple("tenant-17", "receipt-42", "item-3")), requests)
+        compose.onNodeWithText("Сейчас:", substring = true).assertTextContains("2,50 ₽/ед.", substring = true)
+        compose.onNodeWithText("Пока нет сопоставимых покупок.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Обычно:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Изменение:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("No comparable purchases yet.").assertIsDisplayed()
+    }
+
+    @Test fun unconfirmedReceiptNeverOffersPriceComparisonOrCallsCore() {
+        val requests = mutableListOf<Triple<String, String, String>>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")), receiptDraft = receiptDraft()),
+            onReceiptPriceComparison = { tenantId, receiptId, itemId ->
+                requests += Triple(tenantId, receiptId, itemId)
+            })
+
+        compose.onNodeWithText("Сравнить цену").assertDoesNotExist()
+        assertEquals(emptyList<Triple<String, String, String>>(), requests)
+    }
+
+    @Test fun confirmedReceiptWithInvalidPriceInputsCannotRequestComparison() {
+        val invalidItem = confirmedReceipt().items.single().copy(quantity = "0", lineSum = "not-a-price")
+        val requests = mutableListOf<Triple<String, String, String>>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = confirmedReceipt().copy(items = listOf(invalidItem))),
+            onReceiptPriceComparison = { tenantId, receiptId, itemId ->
+                requests += Triple(tenantId, receiptId, itemId)
+            })
+
+        compose.onNodeWithText("Сравнить цену").assertDoesNotExist()
+        compose.onNodeWithText("Для сравнения нужны корректные количество и сумма позиции.")
+            .performScrollTo().assertIsDisplayed()
+        assertEquals(emptyList<Triple<String, String, String>>(), requests)
+    }
+
+    @Test fun priceComparisonHidesMachineErrorsAndRetriesTheSameReceiptItem() {
+        val receipt = confirmedReceipt()
+        val state = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, productPriceComparisonReceiptId = receipt.id,
+            productPriceComparisonItemId = receipt.items.single().id, productPriceComparisonError = "unavailable"))
+        val requests = mutableListOf<Triple<String, String, String>>()
+        show(state.value, stateHolder = state, onReceiptPriceComparison = { tenantId, receiptId, itemId ->
+            requests += Triple(tenantId, receiptId, itemId)
+            state.value = state.value.copy(productPriceComparisonLoading = true, productPriceComparisonError = null)
+        })
+
+        compose.onNodeWithTag("receipt-price-error-${receipt.items.single().id}").performScrollTo().assertIsDisplayed()
+            .assertTextEquals("Не удалось загрузить сравнение цены.")
+        compose.onNodeWithTag("receipt-price-retry-${receipt.items.single().id}").performScrollTo().performClick()
+
+        assertEquals(listOf(Triple("tenant-17", "receipt-42", "item-3")), requests)
+        compose.onNodeWithTag("receipt-price-loading-${receipt.items.single().id}").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("unavailable").assertDoesNotExist()
+    }
+
     @Test fun receiptDuplicateMustBeResolvedAndIndependentReceiptRequiresExplicitConfirm() {
         val receipt = receiptDraft().copy(version = 4, cashTotal = "245.70", itemsTotal = "245.70")
         val prior = FinanceReceiptDuplicateCandidate("receipt-prior", "245.70", "Магазин Тест",
@@ -2015,6 +2119,39 @@ class FinanceReceiptScreensTest {
         itemCount = 1, createdAt = "2026-10-08T09:01:00Z",
     )
 
+    private fun confirmedReceipt() = receiptDraft().copy(
+        state = "confirmed",
+        transactionId = "transaction-42",
+        items = listOf(receiptDraft().items.single().copy(
+            quantity = "2.000000", unitPrice = "2.500000", lineSum = "5.000000", productKey = "bread",
+        )),
+    )
+
+    private fun priceComparison(hasBaseline: Boolean) = FinanceModels.productPriceComparison(org.json.JSONObject("""
+        {
+          "algorithmVersion":"price-projection.v1",
+          "productName":"Хлеб",
+          "hasBaseline":$hasBaseline,
+          "currentUnitPrice":"2.500000",
+          "baselineUnitPrice":${if (hasBaseline) "\"2.000000\"" else "null"},
+          "change":${if (hasBaseline) "\"0.500000\"" else "null"},
+          "relative":${if (hasBaseline) "\"0.250000\"" else "null"},
+          "signal":$hasBaseline,
+          "direction":${if (hasBaseline) "\"up\"" else "null"},
+          "priorPurchases":${if (hasBaseline) 2 else 0},
+          "history":${if (hasBaseline) """
+            [{"receiptId":"00000000-0000-4000-8000-000000000010","itemId":"00000000-0000-4000-8000-000000000011",
+              "purchasedAt":"2026-09-01T10:00:00Z","merchant":"Магазин Тест",
+              "name":"Хлеб","unitPrice":"2.000000","current":false},
+             {"receiptId":"00000000-0000-4000-8000-000000000042","itemId":"00000000-0000-4000-8000-000000000043","purchasedAt":"2026-10-08T09:01:00Z",
+              "merchant":"Магазин Тест","name":"Хлеб","unitPrice":"2.500000","current":true}]
+          """.trimIndent() else """
+            [{"receiptId":"00000000-0000-4000-8000-000000000042","itemId":"00000000-0000-4000-8000-000000000043","purchasedAt":"2026-10-08T09:01:00Z",
+              "merchant":"Магазин Тест","name":"Хлеб","unitPrice":"2.500000","current":true}]
+          """.trimIndent()}
+        }
+    """.trimIndent()), "00000000-0000-4000-8000-000000000042", "00000000-0000-4000-8000-000000000043")
+
     private fun receiptReading() = FinanceModels.receiptReading(org.json.JSONObject("""
         {"text":"OCR ORIGINAL: TOTAL 120.00",
          "words":[{"text":"TOTAL","confidence":96.0,"box":{"x":31,"y":17,"width":52,"height":10}}],
@@ -2055,6 +2192,7 @@ class FinanceReceiptScreensTest {
                      onReceiptDisputedItemsPage: (String, Int) -> Unit = { _, _ -> },
                      onReceiptDisputedProductDecision: (String, String) -> Unit = { _, _ -> },
                      onReceiptRepeatWarningsRefresh: (String) -> Unit = {},
+                     onReceiptPriceComparison: (String, String, String) -> Unit = { _, _, _ -> },
                      stateHolder: androidx.compose.runtime.MutableState<FinanceUiState>? = null) {
         val language = mutableStateOf("ru")
         compose.setContent {
@@ -2079,7 +2217,8 @@ class FinanceReceiptScreensTest {
                     onReceiptBasketReview = onReceiptBasketReview,
                     onReceiptDisputedItemsPage = onReceiptDisputedItemsPage,
                     onReceiptDisputedProductDecision = onReceiptDisputedProductDecision,
-                    onReceiptRepeatWarningsRefresh = onReceiptRepeatWarningsRefresh)
+                    onReceiptRepeatWarningsRefresh = onReceiptRepeatWarningsRefresh,
+                    onReceiptPriceComparison = onReceiptPriceComparison)
             }
         }
         compose.waitForIdle()
