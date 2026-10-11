@@ -1063,7 +1063,7 @@ features:
     android:
       status: partial
       scenario: "Android F47: PDF Т-Банка upload and read-only preview with operations and reconciliation"
-      gap: "F49 Android deduplication and batch undo are not implemented. Live Android Core/OIDC E2E is pending."
+      gap: "Live Android Core/OIDC E2E and real tenant isolation remain pending."
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationApiTest.kt
@@ -1086,7 +1086,7 @@ features:
     android:
       status: partial
       scenario: "Android counterpart for F48: Preview импорта, подтверждение, покупки/доходы/refund, skipped"
-      gap: "Live Android Core/OIDC mutation and tenant-isolation E2E remain unverified. F49 deduplication/undo are separate."
+      gap: "Live Android Core/OIDC mutation and real tenant-isolation E2E remain unverified."
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationScreensTest.kt
@@ -1110,9 +1110,17 @@ features:
     evidence:
       - "JDBC batch insertion writes imported transactions, audit records and transaction.created outbox events atomically. Tenant-scoped SHA-256 fingerprints use the full normalized description and occurrence number, preserving identical purchases and refunds. PostgreSQL tests cover replay, overlap, refund dedupe, CSRF, undo of only batch rows, and all-or-nothing conflict reporting. Core check passes."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F49: Дедупликация импорта, bulk insert, undo именно партии"
-      gap: "No Android user screen or equivalent flow is verified for F49 yet."
+      gap: "Live Android Core/OIDC undo, process-kill recovery, and real tenant-isolation E2E remain unverified."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoScreensTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/BankImportCheckpointStoreTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/BankImportUndoKeyTest.kt
+        - apps/android/app/src/test/java/com/decorix/finance/FinanceSessionRequestPolicyTest.kt
+      evidence:
+        - "Android F47/F48/F49 import API/UI regression passes 45/45 on isolated API 27; JVM checkpoint/key/response/session-request policies pass 15/15; parity contracts pass 63/63; debug and AndroidTest APK builds pass. Installed and launched APK SHA-256: F7B58D2930D36254F783641AD00354944383A6F30A53E09D669BDD26128D6E9E. Live Android Core/OIDC E2E pending."
     intentional_differences: []
   - id: F50
     feature: "Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"

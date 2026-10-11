@@ -45,6 +45,10 @@ tasks.configureEach {
 }
 
 tasks.withType<Test>().configureEach {
+    // Compose/unit tests run serially with a bounded heap; multi-fork JVMs can
+    // exhaust Windows commit space while Android Studio/emulators are active.
+    maxParallelForks = 1
+    maxHeapSize = "384m"
     systemProperty("expectedFinanceApiBaseUrl",
         providers.gradleProperty("financeApiBaseUrl").orElse("http://10.0.2.2:8080").get())
     systemProperty("expectedFinanceOidcIssuer",

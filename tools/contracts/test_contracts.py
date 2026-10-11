@@ -998,13 +998,26 @@ def test_f47_android_contract_marks_preview_only_partial_parity():
 
     assert android["status"] == "partial"
     assert "upload" in android["scenario"].lower() and "preview" in android["scenario"].lower()
-    assert "F49" in android["gap"]
-    assert "deduplication and batch undo are not implemented" in android["gap"].lower()
+    assert "live android core/oidc" in android["gap"].lower()
     assert "upload/preview" in android["evidence"][0].lower()
     assert "live android core/oidc e2e pending" in android["evidence"][0].lower()
     assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt" in android["tests"]
     assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportMutationApiTest.kt" in android["tests"]
     assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportScreensTest.kt" in android["tests"]
+
+
+def test_f49_android_contract_tracks_local_undo_and_live_identity_gap():
+    registry = yaml.safe_load((ROOT / "contracts/parity/feature-parity.yaml").read_text("utf-8"))
+    feature = next(item for item in registry["features"] if item["id"] == "F49")
+    android = feature["android"]
+
+    assert android["status"] == "partial"
+    assert "f49" in android["scenario"].lower() and "undo" in android["scenario"].lower()
+    assert "live android core/oidc" in android["gap"].lower()
+    assert "45/45" in android["evidence"][0]
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoApiTest.kt" in android["tests"]
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoScreensTest.kt" in android["tests"]
+    assert "apps/android/app/src/test/java/com/decorix/finance/BankImportCheckpointStoreTest.kt" in android["tests"]
 
 
 def test_advice_waste_internal_contract_is_strict_and_fixture_matches_schema():

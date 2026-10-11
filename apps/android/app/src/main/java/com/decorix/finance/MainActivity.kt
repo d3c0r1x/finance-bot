@@ -84,8 +84,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var authService: AuthorizationService
     private val api by lazy { FinanceApi(this) }
     private val receiptCheckpointStore by lazy { ReceiptUploadCheckpointStore(this) }
+    private val bankImportCheckpointStore by lazy { BankImportCheckpointStore(this) }
     private val budgetIdempotencyKeyStore by lazy { BudgetIdempotencyKeyStore(this) }
     private val executor = Executors.newSingleThreadExecutor()
+    private val authTokenExecutor = Executors.newSingleThreadExecutor()
     private val receiptPollExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val receiptPollGeneration = AtomicLong(0L)
     private val receiptReadingGeneration = AtomicLong(0L)
@@ -221,6 +223,7 @@ class MainActivity : ComponentActivity() {
                         onBankImportRefresh = ::refreshBankImportPreview,
                         onBankImportSelectRow = ::selectBankImportRow,
                         onBankImportConfirm = ::confirmBankImport,
+                        onBankImportUndo = ::undoBankImport,
                         onBankImportScreenEnter = ::enterBankImportScreen,
                         onBankImportScreenExit = ::leaveBankImportScreen)
                 }
@@ -258,10 +261,21 @@ class MainActivity : ComponentActivity() {
                 ui = ui.copy(error = exception?.errorDescription ?: "Sign in failed")
             } else {
                 invalidateProductCatalogRequests()
-                api.saveTokens(tokenResponse.accessToken.orEmpty(), tokenResponse.refreshToken.orEmpty(),
-                    tokenResponse.accessTokenExpirationTime ?: 0L, tokenResponse.idToken.orEmpty())
-                ui = ui.copy(authenticated = true)
-                loadTenants()
+                authTokenExecutor.execute {
+                    val saveFailure = runCatching {
+                        api.saveTokens(tokenResponse.accessToken.orEmpty(), tokenResponse.refreshToken.orEmpty(),
+                            tokenResponse.accessTokenExpirationTime ?: 0L, tokenResponse.idToken.orEmpty())
+                    }.exceptionOrNull()
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        if (saveFailure != null) {
+                            ui = ui.copy(error = saveFailure.message ?: "Sign in failed")
+                        } else {
+                            ui = ui.copy(authenticated = true)
+                            loadTenants()
+                        }
+                    }
+                }
             }
         }
     }
@@ -314,9 +328,12 @@ class MainActivity : ComponentActivity() {
                 if (BankImportResponsePolicy.canCachePreview(
                         authGeneration, api.authSessionGeneration, tenantId, ui.tenants.firstOrNull()?.id) &&
                     ui.authenticated) {
+                    val checkpointSaved = bankImportCheckpointStore.save(tenantId, preview.id)
                     val applyToCurrentScreen = bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)
                     ui = ui.copy(bankImportPreview = preview, bankImportTenantId = tenantId,
-                        bankImportLoading = false, bankImportError = null)
+                        bankImportLoading = false,
+                        bankImportError = if (checkpointSaved) null else "request_failed",
+                        bankImportUndoResult = null)
                     if (bankImportScreenActive && !applyToCurrentScreen && !ui.bankImportLoading) {
                         refreshBankImportPreview(preview.id)
                     }
@@ -346,8 +363,9 @@ class MainActivity : ComponentActivity() {
     private fun enterBankImportScreen() {
         bankImportScreenActive = true
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
-        val preview = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId } ?: return
-        refreshBankImportPreview(preview.id)
+        val preview = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId }
+        val importId = preview?.id ?: runCatching { bankImportCheckpointStore.load(tenantId) }.getOrNull()
+        if (importId != null) refreshBankImportPreview(importId)
     }
 
     private fun leaveBankImportScreen() {
@@ -360,9 +378,9 @@ class MainActivity : ComponentActivity() {
     private fun refreshBankImportPreview(importId: String? = null) {
         val tenant = ui.tenants.firstOrNull() ?: return
         if (!ui.authenticated || !bankImportScreenActive || bankImportUploadInProgress || bankImportMutationInProgress) return
-        val preview = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenant.id } ?: return
-        val id = importId ?: preview.id
-        if (id.isBlank() || id != preview.id) return
+        val preview = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenant.id }
+        val id = importId ?: preview?.id ?: return
+        if (id.isBlank() || (preview != null && id != preview.id)) return
         val tenantId = tenant.id
         val authGeneration = api.authSessionGeneration
         val requestGeneration = bankImportGeneration.incrementAndGet()
@@ -372,10 +390,11 @@ class MainActivity : ComponentActivity() {
                 .onSuccess { refreshed ->
                     if (refreshed.tenantId == tenantId && refreshed.id == id &&
                         bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
-                        val current = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId }
+                        val current = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId && it.id == id }
                         if (BankImportResponsePolicy.canReplacePreview(current, refreshed)) {
                             ui = ui.copy(bankImportPreview = refreshed, bankImportLoading = false,
-                                bankImportError = null, bankImportConfirmationNeedsRefresh = false)
+                                bankImportTenantId = tenantId, bankImportError = null,
+                                bankImportConfirmationNeedsRefresh = false)
                         } else {
                             ui = ui.copy(bankImportLoading = false)
                         }
@@ -496,6 +515,96 @@ class MainActivity : ComponentActivity() {
                 } else if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
                     ui = ui.copy(bankImportLoading = false)
                 }
+            }
+        }
+    }
+
+    private fun undoBankImport() {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val preview = ui.bankImportPreview ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || tenant.id != ui.bankImportTenantId ||
+            preview.tenantId != tenant.id || preview.state != "committed" || !bankImportScreenActive ||
+            bankImportLoadingOrMutation()) return
+        val authGeneration = api.authSessionGeneration
+        val requestGeneration = bankImportGeneration.incrementAndGet()
+        val tenantId = tenant.id
+        val importId = preview.id
+        val expectedRevision = preview.revision
+        val idempotencyKey = BankImportUndoKey.forImport(importId)
+        bankImportMutationInProgress = true
+        ui = ui.copy(bankImportLoading = true, bankImportError = null)
+        executor.execute {
+            val outcome = runCatching {
+                val result = api.undoBankImport(tenantId, importId, expectedRevision, idempotencyKey, authGeneration)
+                if (result.state == "committed") result to null
+                else {
+                    val refreshed = api.bankImportPreview(tenantId, importId, authGeneration)
+                    require(refreshed.id == importId && refreshed.tenantId == tenantId && refreshed.state == "reverted") {
+                        "Core did not confirm the reverted import"
+                    }
+                    result to refreshed
+                }
+            }
+            bankImportMutationInProgress = false
+            val eligible = BankImportResponsePolicy.canCachePreview(authGeneration, api.authSessionGeneration,
+                tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated
+            if (!eligible) {
+                val failure = outcome.exceptionOrNull()
+                if (failure is ApiFailure && failure.status == 401 &&
+                    failure.authSessionGeneration == api.authSessionGeneration) expireAuthenticatedSession(failure)
+                if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                    ui = ui.copy(bankImportLoading = false)
+                }
+                return@execute
+            }
+            outcome.onSuccess { (result, refreshed) ->
+                if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                    if (refreshed == null) {
+                        ui = ui.copy(bankImportLoading = false, bankImportError = null,
+                            bankImportUndoResult = result)
+                    } else {
+                        val current = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId }
+                        if (BankImportResponsePolicy.canReplacePreview(current, refreshed)) {
+                            ui = ui.copy(bankImportPreview = refreshed, bankImportTenantId = tenantId,
+                                bankImportLoading = false, bankImportError = null,
+                                bankImportConfirmationNeedsRefresh = false, bankImportUndoResult = result)
+                        } else {
+                            ui = ui.copy(bankImportLoading = false, bankImportError = "request_failed")
+                        }
+                    }
+                }
+            }.onFailure { failure ->
+                if (failure is ApiFailure && failure.status == 401 &&
+                    failure.authSessionGeneration == api.authSessionGeneration) expireAuthenticatedSession(failure)
+                // A timeout may have happened after Core committed the undo. Re-read Core once;
+                // never repeat the POST automatically.
+                val reconciled = if (failure is ApiFailure && failure.status == 401) null else
+                    runCatching { api.bankImportPreview(tenantId, importId, authGeneration) }.getOrNull()
+                val apply = bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)
+                if (apply && reconciled != null && reconciled.id == importId && reconciled.tenantId == tenantId &&
+                    BankImportResponsePolicy.canCachePreview(authGeneration, api.authSessionGeneration,
+                        tenantId, ui.tenants.firstOrNull()?.id) && ui.authenticated) {
+                    val current = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId }
+                    if (BankImportResponsePolicy.canReplacePreview(current, reconciled)) {
+                        ui = ui.copy(bankImportPreview = reconciled, bankImportTenantId = tenantId,
+                            bankImportLoading = false, bankImportError = "request_failed",
+                            bankImportUndoResult = null)
+                    }
+                } else if (apply) {
+                    ui = ui.copy(bankImportLoading = false,
+                        bankImportError = BankImportErrorPolicy.code((failure as? ApiFailure)?.status,
+                            (failure as? ApiFailure)?.message ?: failure.message))
+                }
+            }
+            if (BankImportUndoPolicy.shouldRefreshAfterCompletion(
+                    screenActive = bankImportScreenActive,
+                    requestStillCurrent = bankImportGeneration.get() == requestGeneration,
+                    sessionMatches = api.authSessionGeneration == authGeneration,
+                    tenantMatches = ui.tenants.firstOrNull()?.id == tenantId,
+                )) {
+                // Leaving the screen invalidates the undo response. If the user returned
+                // while POST was in flight, reload Core's current state after the mutation ends.
+                refreshBankImportPreview(importId)
             }
         }
     }
@@ -2946,6 +3055,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         authService.dispose()
         invalidateReceiptPoll()
+        authTokenExecutor.shutdown()
         executor.shutdownNow()
         receiptPollExecutor.shutdownNow()
         super.onDestroy()
@@ -3026,6 +3136,7 @@ data class FinanceUiState(
     val bankImportLoading: Boolean = false,
     val bankImportError: String? = null,
     val bankImportConfirmationNeedsRefresh: Boolean = false,
+    val bankImportUndoResult: FinanceBankImportUndoResult? = null,
     val receiptDraft: FinanceReceipt? = null,
     val receiptReading: FinanceReceiptReading? = null,
     val receiptReadingReceiptId: String? = null,
@@ -3364,6 +3475,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onBankImportRefresh: () -> Unit = {},
                           onBankImportSelectRow: (String, String?) -> Unit = { _, _ -> },
                           onBankImportConfirm: () -> Unit = {},
+                          onBankImportUndo: () -> Unit = {},
                           onBankImportScreenEnter: () -> Unit = {},
                           onBankImportScreenExit: () -> Unit = {}) {
     val russian = language == "ru"
@@ -3677,6 +3789,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onSelectRow = onBankImportSelectRow,
                         onConfirm = onBankImportConfirm,
                         confirmationNeedsRefresh = state.bankImportConfirmationNeedsRefresh,
+                        undoResult = state.bankImportUndoResult,
+                        onUndo = onBankImportUndo,
                         canUpload = state.authenticated && state.tenants.firstOrNull()?.role != "viewer",
                         onPick = onBankImportPick,
                     )

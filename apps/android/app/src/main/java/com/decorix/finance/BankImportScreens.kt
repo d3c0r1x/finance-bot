@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -15,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,8 +39,16 @@ internal fun BankImportPreviewSection(
     onSelectRow: (String, String?) -> Unit = { _, _ -> },
     onConfirm: () -> Unit = {},
     confirmationNeedsRefresh: Boolean = false,
+    undoResult: FinanceBankImportUndoResult? = null,
+    onUndo: () -> Unit = {},
 ) {
     val russian = language == "ru"
+    var showUndoConfirmation by remember(preview?.id) { mutableStateOf(false) }
+    LaunchedEffect(preview?.id, preview?.state, role, canUpload, busy) {
+        if (busy || role == "viewer" || !canUpload || preview?.state != "committed") {
+            showUndoConfirmation = false
+        }
+    }
     LazyColumn(
         modifier.fillMaxWidth().heightIn(max = 520.dp).testTag("bank-import-preview"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -75,6 +85,46 @@ internal fun BankImportPreviewSection(
                     onSelect = { type -> onSelectRow(row.id, type) },
                 )
             }
+            if (statement.state == "committed" && role != "viewer" && canUpload) {
+                item(key = "undo") {
+                    TextButton(
+                        modifier = Modifier.testTag("bank-import-undo"),
+                        onClick = { showUndoConfirmation = true },
+                        enabled = !busy,
+                    ) {
+                        Text(if (russian) "Отменить импорт" else "Undo import")
+                    }
+                }
+            }
+            val currentUndoResult = undoResult?.takeIf { it.id == statement.id }
+            currentUndoResult?.let { result ->
+                when {
+                    result.state == "reverted" && statement.state == "reverted" -> item(key = "undo-result") {
+                        Text(
+                            if (russian) "Импорт отменён: операций ${result.revertedCount}."
+                            else "Import undone: ${result.revertedCount} operations.",
+                            modifier = Modifier.testTag("bank-import-undo-result"),
+                        )
+                    }
+                    result.state == "committed" && statement.state == "committed" && result.conflicts.isNotEmpty() -> {
+                        val conflictDescriptions = statement.rows
+                            .filter { it.transactionId != null && it.transactionId in result.conflicts }
+                            .map { it.merchant?.takeIf(String::isNotBlank) ?: it.description }
+                            .distinct()
+                        item(key = "undo-result") {
+                            val details = conflictDescriptions.takeIf { it.isNotEmpty() }
+                                ?.joinToString(", ")
+                                ?: if (russian) "некоторые операции" else "some transactions"
+                            Text(
+                                if (russian) "Отмена остановлена: $details. Импорт остался выполненным."
+                                else "Undo stopped: $details. Import remains committed.",
+                                modifier = Modifier.testTag("bank-import-undo-result"),
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            }
             if (statement.state == "needs_review" && canUpload && role != "viewer" && statement.includedCount > 0) {
                 item(key = "confirm") {
                     androidx.compose.material3.Button(
@@ -102,6 +152,32 @@ internal fun BankImportPreviewSection(
         if (preview == null && error == null && !busy) item(key = "empty") {
             Text(if (russian) "Выберите PDF-выписку Т-Банка для предпросмотра." else "Choose a T-Bank PDF statement to preview.")
         }
+    }
+    if (showUndoConfirmation && preview?.state == "committed" && role != "viewer" && canUpload) {
+        AlertDialog(
+            modifier = Modifier.testTag("bank-import-undo-dialog"),
+            onDismissRequest = { showUndoConfirmation = false },
+            title = { Text(if (russian) "Отменить импорт?" else "Undo import?") },
+            text = {
+                Text(if (russian) "Будут удалены только операции, созданные этим импортом и ещё не изменённые." else "Only transactions created by this import and not changed since will be removed.")
+            },
+            confirmButton = {
+                TextButton(
+                    modifier = Modifier.testTag("bank-import-undo-confirm"),
+                    onClick = {
+                        showUndoConfirmation = false
+                        onUndo()
+                    },
+                    enabled = !busy,
+                ) { Text(if (russian) "Отменить импорт" else "Undo import") }
+            },
+            dismissButton = {
+                TextButton(
+                    modifier = Modifier.testTag("bank-import-undo-cancel"),
+                    onClick = { showUndoConfirmation = false },
+                ) { Text(if (russian) "Оставить" else "Keep import") }
+            },
+        )
     }
 }
 
@@ -173,6 +249,9 @@ private fun BankImportRowCard(
             Text(listOfNotNull(row.operationDate, row.operationTime).joinToString(" · "))
             Text(formatMoney(row.signedAmount, language),
                 modifier = Modifier.testTag("bank-import-row-amount-${row.id}"))
+            bankImportOutcomeText(row.outcome, language)?.let { outcome ->
+                Text(outcome, modifier = Modifier.testTag("bank-import-row-outcome-${row.id}"))
+            }
             row.cardLast4?.let { Text(if (russian) "Карта ••$it" else "Card ••$it") }
             val decision = if (row.included) {
                 if (russian) "Включено" else "Included"
@@ -215,6 +294,16 @@ private fun BankImportRowCard(
                 }
             }
         }
+    }
+}
+
+private fun bankImportOutcomeText(outcome: String, language: String): String? {
+    val russian = language == "ru"
+    return when (outcome) {
+        "duplicate" -> if (russian) "Уже импортировано · пропущено" else "Already imported · skipped"
+        "created" -> if (russian) "Добавлено" else "Added"
+        "reverted" -> if (russian) "Отменено" else "Reverted"
+        else -> null
     }
 }
 

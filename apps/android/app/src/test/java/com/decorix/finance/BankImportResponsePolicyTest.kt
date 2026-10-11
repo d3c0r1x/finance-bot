@@ -61,6 +61,24 @@ class BankImportResponsePolicyTest {
         assertTrue(BankImportResponsePolicy.canReplacePreview(current, preview(revision = 5)))
     }
 
+    @Test fun anUndoFinishingAfterReturnToItsScreenRequiresFreshCorePreview() {
+        assertTrue(BankImportUndoPolicy.shouldRefreshAfterCompletion(
+            screenActive = true, requestStillCurrent = false, sessionMatches = true, tenantMatches = true,
+        ))
+        assertFalse(BankImportUndoPolicy.shouldRefreshAfterCompletion(
+            screenActive = false, requestStillCurrent = false, sessionMatches = true, tenantMatches = true,
+        ))
+        assertFalse(BankImportUndoPolicy.shouldRefreshAfterCompletion(
+            screenActive = true, requestStillCurrent = false, sessionMatches = false, tenantMatches = true,
+        ))
+        assertFalse(BankImportUndoPolicy.shouldRefreshAfterCompletion(
+            screenActive = true, requestStillCurrent = false, sessionMatches = true, tenantMatches = false,
+        ))
+        assertFalse(BankImportUndoPolicy.shouldRefreshAfterCompletion(
+            screenActive = true, requestStillCurrent = true, sessionMatches = true, tenantMatches = true,
+        ))
+    }
+
     private fun preview(revision: Long) = FinanceBankImportPreview(
         quality = "valid", periodStart = "2026-10-01", periodEnd = "2026-10-01",
         parsedExpenseTotal = "0.00", parsedIncomeTotal = "0.00",

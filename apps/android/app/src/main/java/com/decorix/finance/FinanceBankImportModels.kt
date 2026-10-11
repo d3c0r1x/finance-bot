@@ -1,6 +1,7 @@
 package com.decorix.finance
 
 import org.json.JSONObject
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeParseException
@@ -50,6 +51,14 @@ data class FinanceBankImportRow(
     val transactionId: String? = null,
 )
 
+data class FinanceBankImportUndoResult(
+    val id: String,
+    val state: String,
+    val revision: Long,
+    val revertedCount: Int,
+    val conflicts: List<String>,
+)
+
 internal object FinanceBankImportModels {
     private val amountPattern = Regex("(?:0|[1-9]\\d{0,17})\\.\\d{2}")
     private val signedAmountPattern = Regex("-?(?:0|[1-9]\\d{0,17})\\.\\d{2}")
@@ -61,6 +70,30 @@ internal object FinanceBankImportModels {
     private val exclusionReasons = setOf("bank_fee", "external_transfer", "cash_withdrawal", "internal_transfer", "requires_review")
     private val outcomes = setOf("pending", "created", "duplicate", "excluded", "reverted")
     private val uuidPattern = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
+
+    fun undoResult(json: JSONObject): FinanceBankImportUndoResult {
+        val id = json.getString("id")
+        require(uuidPattern.matches(id)) { "Invalid bank import undo id" }
+        val state = json.getString("state")
+        require(state == "reverted" || state == "committed") { "Invalid bank import undo state" }
+        val revision = json.strictLong("revision")
+        require(revision > 0L) { "Invalid bank import undo revision" }
+        val revertedCount = json.strictLong("revertedCount").also {
+            require(it <= Int.MAX_VALUE) { "Invalid bank import undo count" }
+        }.toInt()
+        require(revertedCount >= 0) { "Invalid bank import undo count" }
+        val conflictsJson = json.getJSONArray("conflicts")
+        require(conflictsJson.length() <= 10_000) { "Invalid bank import undo conflicts" }
+        val conflicts = (0 until conflictsJson.length()).map { index ->
+            conflictsJson.getString(index).also {
+                require(uuidPattern.matches(it)) { "Invalid bank import undo conflict id" }
+            }
+        }
+        require(conflicts.distinct().size == conflicts.size) { "Duplicate bank import undo conflict" }
+        require(if (state == "committed") revertedCount == 0 && conflicts.isNotEmpty()
+            else conflicts.isEmpty()) { "Invalid bank import undo outcome" }
+        return FinanceBankImportUndoResult(id, state, revision, revertedCount, conflicts)
+    }
 
     fun preview(json: JSONObject): FinanceBankImportPreview {
         val quality = json.getString("quality")
@@ -179,5 +212,12 @@ internal object FinanceBankImportModels {
     private fun JSONObject.requiredNullableString(name: String): String? {
         require(has(name)) { "Missing bank import field: $name" }
         return if (isNull(name)) null else getString(name)
+    }
+
+    private fun JSONObject.strictLong(name: String): Long {
+        val value = opt(name)
+        require(value is Number) { "Invalid bank import integer: $name" }
+        return runCatching { BigDecimal(value.toString()).longValueExact() }
+            .getOrElse { throw IllegalArgumentException("Invalid bank import integer: $name") }
     }
 }

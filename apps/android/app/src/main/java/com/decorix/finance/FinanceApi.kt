@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient
 import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.Response
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
@@ -153,6 +154,41 @@ class FinanceApi internal constructor(
             expectedSessionGeneration = expectedSessionGeneration,
         )
         return FinanceBankImportModels.preview(JSONObject(body))
+    }
+
+    fun undoBankImport(
+        tenantId: String,
+        importId: String,
+        expectedRevision: Long,
+        idempotencyKey: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceBankImportUndoResult {
+        require(isUuid(tenantId) && isUuid(importId)) { "Invalid bank import identifier" }
+        require(expectedRevision > 0L) { "Invalid bank import revision" }
+        require(idempotencyKey.length in 16..128 && idempotencyKey.none(Char::isISOControl)) {
+            "Invalid bank import undo key"
+        }
+        val path = "/api/v1/tenants/$tenantId/imports/$importId/undo"
+        val body = try {
+            executeRequest(path, "POST", ByteArray(0).toRequestBody("application/json".toMediaType()),
+                idempotencyKey = idempotencyKey, ifMatchVersion = expectedRevision,
+                retryUnauthorized = false, expectedSessionGeneration = expectedSessionGeneration,
+                preserveErrorBody = true, guardExpectedSessionDuringRequest = true)
+        } catch (failure: ApiFailure) {
+            if (failure.status != 409) throw failure
+            val conflict = runCatching { FinanceBankImportModels.undoResult(JSONObject(failure.responseBody.orEmpty())) }
+                .getOrNull()
+            if (conflict == null || conflict.id != importId || conflict.state != "committed" ||
+                conflict.revision != expectedRevision || conflict.revertedCount != 0 || conflict.conflicts.isEmpty()) {
+                throw ApiFailure(409, failure.message ?: "Request failed (409)", failure.authSessionGeneration)
+            }
+            return conflict
+        }
+        val result = FinanceBankImportModels.undoResult(JSONObject(body))
+        require(result.id == importId && result.state == "reverted" && result.conflicts.isEmpty()) {
+            "Invalid bank import undo result"
+        }
+        return result
     }
 
     fun uploadReceiptPhoto(tenantId: String, bytes: ByteArray, fileName: String, contentType: String,
@@ -726,7 +762,9 @@ class FinanceApi internal constructor(
     private fun executeRequest(path: String, method: String, requestBody: RequestBody?,
                                idempotencyKey: String? = null, ifMatchVersion: Long? = null,
                                retryUnauthorized: Boolean = true,
-                               expectedSessionGeneration: Long? = null): String {
+                               expectedSessionGeneration: Long? = null,
+                               preserveErrorBody: Boolean = false,
+                               guardExpectedSessionDuringRequest: Boolean = false): String {
         val (requestSessionGeneration, original) = synchronized(tokenRefreshLock) {
             val currentGeneration = sessionGeneration.get()
             if (expectedSessionGeneration != null && expectedSessionGeneration != currentGeneration) {
@@ -740,11 +778,25 @@ class FinanceApi internal constructor(
             if (accessToken != null && expiresAt > 0 && expiresAt <= System.currentTimeMillis() + 30_000) {
                 accessToken = refresh(accessToken, requestSessionGeneration)
             }
-            var response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
+            fun sendRequest(): Response {
+                val performRequest = {
+                    perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken,
+                        sessionBoundCall = guardExpectedSessionDuringRequest)
+                }
+                return if (guardExpectedSessionDuringRequest) {
+                    FinanceSessionRequestPolicy.performIfCurrent(
+                        expectedGeneration = expectedSessionGeneration ?: requestSessionGeneration,
+                        sessionLock = tokenRefreshLock,
+                        currentGeneration = sessionGeneration::get,
+                        action = performRequest,
+                    )
+                } else performRequest()
+            }
+            var response = sendRequest()
             if (retryUnauthorized && response.code == 401 && accessToken != null) {
                 response.close()
                 accessToken = refresh(accessToken, requestSessionGeneration)
-                response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
+                response = sendRequest()
             }
             response.use {
                 val text = it.body?.string().orEmpty()
@@ -753,7 +805,7 @@ class FinanceApi internal constructor(
                     if (BuildConfig.DEBUG) android.util.Log.w("FinanceApi",
                         "$method $path returned HTTP ${it.code}: ${detail?.takeIf(String::isNotBlank) ?: "no detail"}")
                     throw ApiFailure(it.code, detail?.takeIf(String::isNotBlank) ?: "Request failed (${it.code})",
-                        requestSessionGeneration)
+                        requestSessionGeneration, if (preserveErrorBody && it.code == 409) text else null)
                 }
                 return text
             }
@@ -805,7 +857,7 @@ class FinanceApi internal constructor(
     }
 
     private fun perform(path: String, method: String, requestBody: RequestBody?, idempotencyKey: String?,
-                        ifMatchVersion: Long?, accessToken: String?) = run {
+                        ifMatchVersion: Long?, accessToken: String?, sessionBoundCall: Boolean = false) = run {
         val builder = Request.Builder().url(endpoints.apiBaseUrl + path)
         when (method) {
             "POST" -> builder.post(requestBody ?: "{}".toRequestBody("application/json".toMediaType()))
@@ -817,8 +869,11 @@ class FinanceApi internal constructor(
         accessToken?.let { builder.header("Authorization", "Bearer $it") }
         idempotencyKey?.let { builder.header("Idempotency-Key", it) }
         ifMatchVersion?.let { builder.header("If-Match", "\"$it\"") }
-        client.newCall(builder.build()).execute()
+        val call = client.newCall(builder.build())
+        if (sessionBoundCall) call.timeout().timeout(20, TimeUnit.SECONDS)
+        call.execute()
     }
 }
 
-class ApiFailure(val status: Int, message: String, val authSessionGeneration: Long? = null) : IOException(message)
+class ApiFailure(val status: Int, message: String, val authSessionGeneration: Long? = null,
+                 internal val responseBody: String? = null) : IOException(message)

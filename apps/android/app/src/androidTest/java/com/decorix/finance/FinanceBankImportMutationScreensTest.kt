@@ -120,7 +120,7 @@ class FinanceBankImportMutationScreensTest {
         assertCoreTotal("excluded", "1,00")
     }
 
-    @Test fun explicitConfirmationOnlyAppearsForIncludedNeedsReviewRowsAndShowsCoreResultWithoutUndo() {
+    @Test fun explicitConfirmationOnlyAppearsForIncludedRowsAndCommittedResultOffersUndo() {
         var confirmations = 0
         val current = mutableStateOf(preview(includedCount = 0, rows = listOf(
             row(id = "fee", kind = "fee", amount = "-1.00", included = false,
@@ -145,13 +145,16 @@ class FinanceBankImportMutationScreensTest {
         assertEquals(1, confirmations)
         scrollTo("bank-import-confirm-result")
         compose.onNodeWithTag("bank-import-confirm-result").assertIsDisplayed()
-        compose.onAllNodesWithText("Отменить импорт", substring = true).assertCountEquals(0)
-        compose.onAllNodesWithText("Undo import", substring = true).assertCountEquals(0)
+        scrollTo("bank-import-undo")
+        compose.onNodeWithTag("bank-import-undo").assertIsDisplayed()
 
         compose.runOnIdle { current.value = current.value.copy(state = "needs_review", includedCount = 0) }
         compose.onAllNodesWithTag("bank-import-confirm").assertCountEquals(0)
+        compose.onAllNodesWithTag("bank-import-undo").assertCountEquals(0)
         compose.runOnIdle { current.value = current.value.copy(state = "committed", includedCount = 1) }
         compose.onAllNodesWithTag("bank-import-confirm").assertCountEquals(0)
+        scrollTo("bank-import-undo")
+        compose.onNodeWithTag("bank-import-undo").assertIsDisplayed()
     }
 
     @Test fun pendingAndViewerCannotChangeRowsOrConfirm() {

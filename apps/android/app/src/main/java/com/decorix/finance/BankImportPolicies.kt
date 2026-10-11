@@ -74,6 +74,30 @@ internal object BankImportResponsePolicy {
         current == null || current.id != incoming.id || incoming.revision >= current.revision
 }
 
+internal object BankImportUndoPolicy {
+    fun shouldRefreshAfterCompletion(
+        screenActive: Boolean,
+        requestStillCurrent: Boolean,
+        sessionMatches: Boolean,
+        tenantMatches: Boolean,
+    ): Boolean = screenActive && !requestStillCurrent && sessionMatches && tenantMatches
+}
+
+/** Serializes a session-bound side effect with logout/account replacement. */
+internal object FinanceSessionRequestPolicy {
+    fun <T> performIfCurrent(
+        expectedGeneration: Long,
+        sessionLock: Any,
+        currentGeneration: () -> Long,
+        action: () -> T,
+    ): T = synchronized(sessionLock) {
+        if (currentGeneration() != expectedGeneration) {
+            throw ApiFailure(401, "sign_in_required", expectedGeneration)
+        }
+        action()
+    }
+}
+
 internal object BankImportConfirmationKey {
     fun forImport(importId: String): String {
         require(runCatching { java.util.UUID.fromString(importId).toString().equals(importId, ignoreCase = true) }

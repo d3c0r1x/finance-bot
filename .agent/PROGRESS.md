@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 10:10 MSK, Europe/Moscow.
+Updated: 2026-10-11 10:41 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -18,7 +18,8 @@ Updated: 2026-10-11 10:10 MSK, Europe/Moscow.
 
 ## Current goal
 
-- F59 Android parity remains IN PROGRESS. Current registry: 43 partial, 13 missing, 2 approved N/A. F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
+- F59 Android parity remains IN PROGRESS. Current registry: 44 partial, 12 missing, 2 approved N/A. F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
+- F59.12 F49 Android duplicate outcomes and safe batch undo is locally GREEN; parity is PARTIAL pending live OIDC/Core, process-kill, and tenant-isolation E2E. Spec/plan: `.agent/specs/F49-android-import-dedup-undo.md` and `docs/superpowers/plans/2026-10-11-f49-android-import-dedup-undo.md`.
 - F59.2 F08 history/repeat/void locally GREEN: API 27 instrumentation 53/53; APK installed and launched; parity-contract tests 3/3. APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`.
 - F59.2 F09 basic search/type filters observed RED then GREEN; API 27 full instrumentation 54/54. Updated debug APK SHA-256: `FB008F9E13114578347D653E602C158C3870886AF379263F8124931CBABCC937`; `MainActivity` is resumed on isolated API 27 emulator. Remaining: server-backed date/member filters, cursor paging, transaction editing, and live Core E2E.
 - F59.2 F03.1 first-time onboarding is locally GREEN and pushed in `1395decae6c50d337193fb6ec3810e6710484116`. F03 Android stays PARTIAL because repeat setup from profile is a later slice. Live OIDC/Core E2E, remaining parity, and F60/production gates remain.
@@ -2004,3 +2005,12 @@ Updated: 2026-10-11 10:10 MSK, Europe/Moscow.
 - Review: independent Core/API review found no blocker in auth/session, revision, idempotency, lifecycle, or viewer guards. Review confirmed the row menu's null action resets Core defaults; label changed to “Сбросить выбор / Use default” to avoid implying a forced exclusion. Test review caught an impossible negative-purchase-to-income choice and stale fake totals/counts; fixtures now use Core-valid signs and returned totals, assert fee inclusion, and model created/duplicate references in separate coherent rows.
 - Status: F48 Android local acceptance GREEN; feature registry becomes 43 partial, 13 missing, 2 approved N/A. Still PARTIAL pending live authenticated Android-to-Core OIDC mutations and real tenant isolation. Synthetic/local tests do not verify production hosting. F49 deduplication/undo remain next Android parity gap.
 - Commit/push: `e2b6852b16b1b59877b445ac7ce27446681a4e92` (`feat(F48): add Android bank import confirmation`) pushed to `origin/feat/saas-rewrite`; remote ref matches. `gh run list --commit e2b6852` returned no workflows; GitHub CI is not confirmed.
+
+## F59.12 F49 Android import outcomes and safe batch undo — GREEN locally; PARTIAL pending live Core/OIDC — 2026-10-11
+
+- Plan/spec: `.agent/specs/F49-android-import-dedup-undo.md` and `docs/superpowers/plans/2026-10-11-f49-android-import-dedup-undo.md`. Core remains sole authority for duplicate fingerprints, atomic batch insert/undo, revisions, and conflicts.
+- TDD: API/UI and tenant checkpoint tests preceded implementation. RED exposed fractional integer coercion, Compose assertions outside the visible list, a return-to-screen refresh race, and a missing session-bound request guard. Regression tests now cover strict integer parsing, tenant-scoped recoverable UUID checkpoint, deterministic undo key, late response refresh, and serialized session replacement.
+- Implementation: Android renders committed Core duplicate/created/reverted outcomes; stores only the latest import UUID per tenant; and offers writer-only explicit batch undo with confirmation, quoted revision, deterministic idempotency key, no body, no 401 retry, strict structured conflict parsing, and Core preview reconciliation. Guarded undo is capped at 20 seconds; AppAuth token persistence is off the UI thread.
+- GREEN: 45/45 F47/F48/F49 API/UI instrumentation on isolated Android 8.1/API 27; selected JVM policy/checkpoint/key suite 15/15; parity contracts 63/63; debug and AndroidTest APK builds pass. APK installed/launched on isolated emulator; SHA-256 `F7B58D2930D36254F783641AD00354944383A6F30A53E09D669BDD26128D6E9E`. `git diff --check` passes.
+- Status: F49 Android parity is PARTIAL pending live authenticated Core/OIDC undo, process-kill recovery, and real tenant-isolation E2E. Synthetic tests do not establish production hosting or real-account behavior.
+- Next: F50 Android merchant-category rules and Core-owned batch suggestions.
