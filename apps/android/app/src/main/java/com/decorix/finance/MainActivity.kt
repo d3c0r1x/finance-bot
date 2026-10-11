@@ -106,6 +106,10 @@ class MainActivity : ComponentActivity() {
     private val adviceAnalyticsGeneration = AtomicLong(0L)
     private val goalRequestGeneration = AtomicLong(0L)
     @Volatile private var goalsScreenActive = false
+    private val bankImportGeneration = AtomicLong(0L)
+    @Volatile private var bankImportScreenActive = false
+    @Volatile private var bankImportUploadInProgress = false
+    private var bankImportPickerGeneration: Long? = null
     private val receiptRecalculationGeneration = AtomicLong(0L)
     private val familyBudgetFoodRequestGeneration = AtomicLong(0L)
     private val shoppingRequestGeneration = AtomicLong(0L)
@@ -130,6 +134,14 @@ class MainActivity : ComponentActivity() {
         receiptPickerOperationToken = null
         if (uri != null && operationToken != null && ReceiptOperationGeneration.isCurrent(operationToken)) {
             acceptReceiptPhoto(uri, operationToken)
+        }
+    }
+    private val bankImportPdfPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val generation = bankImportPickerGeneration
+        bankImportPickerGeneration = null
+        if (uri != null && generation != null && bankImportScreenActive &&
+            generation == bankImportGeneration.get()) {
+            acceptBankImportPdf(uri)
         }
     }
 
@@ -203,7 +215,11 @@ class MainActivity : ComponentActivity() {
                         onReceiptDisputedItemsPage = ::loadReceiptDisputedItems,
                         onReceiptRepeatWarningsRefresh = ::loadReceiptRepeatWarnings,
                         onReceiptDisputedProductDecision = ::decideReceiptDisputedProduct,
-                        onReceiptPriceComparison = ::loadReceiptPriceComparison)
+                        onReceiptPriceComparison = ::loadReceiptPriceComparison,
+                        onBankImportPick = ::launchBankImportPicker,
+                        onBankImportRefresh = ::refreshBankImportPreview,
+                        onBankImportScreenEnter = ::enterBankImportScreen,
+                        onBankImportScreenExit = ::leaveBankImportScreen)
                 }
             }
         }
@@ -253,6 +269,131 @@ class MainActivity : ComponentActivity() {
         receiptPickerOperationToken = operationToken
         receiptPhotoPicker.launch(arrayOf("image/jpeg", "image/png"))
     }
+
+    private fun launchBankImportPicker() {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || !bankImportScreenActive || ui.bankImportLoading) return
+        bankImportPickerGeneration = bankImportGeneration.incrementAndGet()
+        ui = ui.copy(bankImportError = null)
+        bankImportPdfPicker.launch(arrayOf("application/pdf"))
+    }
+
+    private fun acceptBankImportPdf(uri: Uri) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!ui.authenticated || tenant.role == "viewer" || !bankImportScreenActive) return
+        val tenantId = tenant.id
+        val authGeneration = api.authSessionGeneration
+        val requestGeneration = bankImportGeneration.incrementAndGet()
+        bankImportUploadInProgress = true
+        ui = ui.copy(bankImportTenantId = tenantId, bankImportPreview = null,
+            bankImportLoading = true, bankImportError = null)
+        executor.execute {
+            val result = runCatching {
+                val mimeType = contentResolver.getType(uri)
+                require(mimeType == null || mimeType == "application/pdf" ||
+                    mimeType == "application/octet-stream") { "invalid_pdf" }
+                val candidateName = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME),
+                    null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                }
+                val fileName = BankImportFilePolicy.safeFileName(candidateName)
+                val bytes = contentResolver.openInputStream(uri)?.use { BankImportFilePolicy.readBounded(it) }
+                    ?: throw IllegalArgumentException("invalid_pdf")
+                if (!bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                    throw java.util.concurrent.CancellationException("bank_import_request_obsolete")
+                }
+                val preview = api.uploadBankImport(tenantId, bytes, fileName, authGeneration)
+                require(preview.tenantId == tenantId) { "request_failed" }
+                preview
+            }
+            bankImportUploadInProgress = false
+            result.onSuccess { preview ->
+                if (BankImportResponsePolicy.canCachePreview(
+                        authGeneration, api.authSessionGeneration, tenantId, ui.tenants.firstOrNull()?.id) &&
+                    ui.authenticated) {
+                    val applyToCurrentScreen = bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)
+                    ui = ui.copy(bankImportPreview = preview, bankImportTenantId = tenantId,
+                        bankImportLoading = false, bankImportError = null)
+                    if (bankImportScreenActive && !applyToCurrentScreen && !ui.bankImportLoading) {
+                        refreshBankImportPreview(preview.id)
+                    }
+                }
+            }.onFailure { failure ->
+                if (failure is ApiFailure && failure.status == 401 &&
+                    failure.authSessionGeneration == api.authSessionGeneration) {
+                    expireAuthenticatedSession(failure)
+                }
+                if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                    ui = ui.copy(bankImportLoading = false,
+                        bankImportError = BankImportErrorPolicy.code((failure as? ApiFailure)?.status,
+                            (failure as? ApiFailure)?.message ?: failure.message))
+                } else if (BankImportResponsePolicy.canCachePreview(
+                        authGeneration, api.authSessionGeneration, tenantId, ui.tenants.firstOrNull()?.id) &&
+                    ui.authenticated) {
+                    val safeError = if (failure is java.util.concurrent.CancellationException) null else
+                        BankImportErrorPolicy.code((failure as? ApiFailure)?.status,
+                            (failure as? ApiFailure)?.message ?: failure.message)
+                    ui = ui.copy(bankImportLoading = false,
+                        bankImportError = safeError)
+                }
+            }
+        }
+    }
+
+    private fun enterBankImportScreen() {
+        bankImportScreenActive = true
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val preview = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenantId } ?: return
+        refreshBankImportPreview(preview.id)
+    }
+
+    private fun leaveBankImportScreen() {
+        bankImportScreenActive = false
+        bankImportPickerGeneration = null
+        bankImportGeneration.incrementAndGet()
+        if (!bankImportUploadInProgress) ui = ui.copy(bankImportLoading = false)
+    }
+
+    private fun refreshBankImportPreview(importId: String? = null) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!ui.authenticated || !bankImportScreenActive) return
+        val preview = ui.bankImportPreview?.takeIf { ui.bankImportTenantId == tenant.id } ?: return
+        val id = importId ?: preview.id
+        if (id.isBlank() || id != preview.id) return
+        val tenantId = tenant.id
+        val authGeneration = api.authSessionGeneration
+        val requestGeneration = bankImportGeneration.incrementAndGet()
+        ui = ui.copy(bankImportTenantId = tenantId, bankImportLoading = true, bankImportError = null)
+        executor.execute {
+            runCatching { api.bankImportPreview(tenantId, id, authGeneration) }
+                .onSuccess { refreshed ->
+                    if (refreshed.tenantId == tenantId &&
+                        bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                        ui = ui.copy(bankImportPreview = refreshed, bankImportLoading = false,
+                            bankImportError = null)
+                    }
+                }
+                .onFailure { failure ->
+                    if (bankImportRequestCanApply(authGeneration, tenantId, requestGeneration)) {
+                        if (failure is ApiFailure && failure.status == 401) expireAuthenticatedSession(failure)
+                        ui = ui.copy(bankImportLoading = false,
+                            bankImportError = BankImportErrorPolicy.code((failure as? ApiFailure)?.status,
+                                (failure as? ApiFailure)?.message ?: failure.message))
+                    }
+                }
+        }
+    }
+
+    private fun bankImportRequestCanApply(authGeneration: Long, tenantId: String, requestGeneration: Long): Boolean =
+        BankImportResponsePolicy.canApply(
+            requestAuthGeneration = authGeneration,
+            currentAuthGeneration = api.authSessionGeneration,
+            requestTenantId = tenantId,
+            currentTenantId = ui.tenants.firstOrNull()?.id,
+            requestGeneration = requestGeneration,
+            currentGeneration = bankImportGeneration.get(),
+            screenActive = bankImportScreenActive && ui.authenticated,
+        )
 
     private fun acceptReceiptPhoto(uri: Uri, operationToken: Long) {
         if (!ReceiptOperationGeneration.isCurrent(operationToken)) return
@@ -825,6 +966,9 @@ class MainActivity : ComponentActivity() {
                 if (failure?.authSessionGeneration != null && api.hasSession() &&
                     failure.authSessionGeneration != api.authSessionGeneration) return@synchronized
                 productCatalogGeneration.incrementAndGet()
+                bankImportGeneration.incrementAndGet()
+                bankImportScreenActive = false
+                bankImportPickerGeneration = null
                 receiptRecalculationGeneration.incrementAndGet()
                 goalRequestGeneration.incrementAndGet()
                 goalsScreenActive = false
@@ -2641,6 +2785,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
+        bankImportGeneration.incrementAndGet()
+        bankImportScreenActive = false
+        bankImportPickerGeneration = null
         receiptRecalculationGeneration.incrementAndGet()
         goalRequestGeneration.incrementAndGet()
         goalsScreenActive = false
@@ -2756,6 +2903,10 @@ data class FinanceUiState(
     val recurringError: String? = null,
     val transactionEditSavedToken: String? = null,
     val receiptJob: FinanceReceiptProcessingJob? = null,
+    val bankImportPreview: FinanceBankImportPreview? = null,
+    val bankImportTenantId: String? = null,
+    val bankImportLoading: Boolean = false,
+    val bankImportError: String? = null,
     val receiptDraft: FinanceReceipt? = null,
     val receiptReading: FinanceReceiptReading? = null,
     val receiptReadingReceiptId: String? = null,
@@ -3089,7 +3240,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onGoalSelectedUnit: (String) -> Unit = {},
                           onGoalSaveUnit: (String) -> Unit = {},
                           onGoalAccept: (String, String) -> Unit = { _, _ -> },
-                          onGoalCancel: (String) -> Unit = {}) {
+                          onGoalCancel: (String) -> Unit = {},
+                          onBankImportPick: () -> Unit = {},
+                          onBankImportRefresh: () -> Unit = {},
+                          onBankImportScreenEnter: () -> Unit = {},
+                          onBankImportScreenExit: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -3346,9 +3501,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products").forEach { screen ->
+                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products", "imports").forEach { screen ->
                         TextButton(onClick = {
                             if (activeScreen == "goals" && screen != "goals") onGoalsScreenExit()
+                            if (activeScreen == "imports" && screen != "imports") onBankImportScreenExit()
+                            if (activeScreen != "imports" && screen == "imports") onBankImportScreenEnter()
                             activeScreen = screen
                             val catalogTenantId = state.tenants.firstOrNull()?.id
                             if (screen == "products" && catalogTenantId != null &&
@@ -3368,6 +3525,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
                                 "receipts" -> if (russian) "Чеки" else "Receipts"
+                                "imports" -> if (russian) "Выписки" else "Statements"
                                 "products" -> if (russian) "Товары" else "Products"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
                                 "nobuy" -> if (russian) "Не брать" else "Do not buy"
@@ -3385,6 +3543,19 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
+                    "imports" -> BankImportPreviewSection(
+                        modifier = Modifier.weight(1f),
+                        role = state.tenants.firstOrNull()?.role.orEmpty(),
+                        language = language,
+                        preview = state.bankImportPreview?.takeIf {
+                            it.tenantId == state.tenants.firstOrNull()?.id && state.bankImportTenantId == it.tenantId
+                        },
+                        busy = state.bankImportLoading,
+                        error = state.bankImportError,
+                        onRefresh = onBankImportRefresh,
+                        canUpload = state.authenticated && state.tenants.firstOrNull()?.role != "viewer",
+                        onPick = onBankImportPick,
+                    )
                     "receipts" -> ReceiptUploadScreen(Modifier.weight(1f), language,
                         state.tenants.firstOrNull()?.role != "viewer",
                         canWriteReceiptCategory(state.tenants.firstOrNull()?.role),

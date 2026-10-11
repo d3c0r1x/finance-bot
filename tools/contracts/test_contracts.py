@@ -991,6 +991,22 @@ def test_feature_registry_accounts_for_all_legacy_and_new_parity_ids():
                for feature_id in ("F11", "F12", "F13", "F14", "F59", "F60"))
 
 
+def test_f47_android_contract_marks_preview_only_partial_parity():
+    registry = yaml.safe_load((ROOT / "contracts/parity/feature-parity.yaml").read_text("utf-8"))
+    feature = next(item for item in registry["features"] if item["id"] == "F47")
+    android = feature["android"]
+
+    assert android["status"] == "partial"
+    assert "upload" in android["scenario"].lower() and "preview" in android["scenario"].lower()
+    assert "F48/F49" in android["gap"]
+    assert "mutations are absent" in android["gap"].lower()
+    assert "upload/preview" in android["evidence"][0].lower()
+    assert "live android core/oidc e2e pending" in android["evidence"][0].lower()
+    assert "mutation" in android["gap"].lower()
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt" in android["tests"]
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportScreensTest.kt" in android["tests"]
+
+
 def test_advice_waste_internal_contract_is_strict_and_fixture_matches_schema():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
     operation = spec["paths"]["/internal/v1/analytics/waste"]["post"]

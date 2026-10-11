@@ -80,6 +80,33 @@ class FinanceApi internal constructor(
     fun members(tenantId: String): List<FinanceTenantMember> =
         FinanceModels.tenantMembers(org.json.JSONArray(execute("/api/v1/tenants/$tenantId/members", "GET")))
 
+    fun uploadBankImport(
+        tenantId: String,
+        bytes: ByteArray,
+        fileName: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceBankImportPreview {
+        BankImportFilePolicy.validateUpload(bytes, fileName)
+        val safeName = BankImportFilePolicy.safeFileName(fileName)
+        val multipart = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("file", safeName, bytes.toRequestBody("application/pdf".toMediaType()))
+            .build()
+        val body = executeRequest("/api/v1/tenants/$tenantId/imports", "POST", multipart,
+            retryUnauthorized = false, expectedSessionGeneration = expectedSessionGeneration)
+        return FinanceBankImportModels.preview(JSONObject(body))
+    }
+
+    fun bankImportPreview(
+        tenantId: String,
+        importId: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceBankImportPreview {
+        require(isUuid(importId)) { "Invalid bank import identifier" }
+        val body = executeRequest("/api/v1/tenants/$tenantId/imports/$importId/preview", "GET", null,
+            expectedSessionGeneration = expectedSessionGeneration)
+        return FinanceBankImportModels.preview(JSONObject(body))
+    }
+
     fun uploadReceiptPhoto(tenantId: String, bytes: ByteArray, fileName: String, contentType: String,
                            idempotencyKey: String): FinanceReceiptProcessingJob {
         require(bytes.isNotEmpty() && bytes.size <= 10 * 1024 * 1024) { "Receipt image size is invalid" }
@@ -650,9 +677,14 @@ class FinanceApi internal constructor(
 
     private fun executeRequest(path: String, method: String, requestBody: RequestBody?,
                                idempotencyKey: String? = null, ifMatchVersion: Long? = null,
-                               retryUnauthorized: Boolean = true): String {
+                               retryUnauthorized: Boolean = true,
+                               expectedSessionGeneration: Long? = null): String {
         val (requestSessionGeneration, original) = synchronized(tokenRefreshLock) {
-            sessionGeneration.get() to tokens.read()
+            val currentGeneration = sessionGeneration.get()
+            if (expectedSessionGeneration != null && expectedSessionGeneration != currentGeneration) {
+                throw ApiFailure(401, "sign_in_required", expectedSessionGeneration)
+            }
+            currentGeneration to tokens.read()
         }
         try {
             var accessToken = original?.optString("accessToken")?.takeIf(String::isNotBlank)

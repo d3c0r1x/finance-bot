@@ -1061,9 +1061,14 @@ features:
     evidence:
       - "A versioned in-memory PDF parser preserves signed Decimal operations, date/time, merchant/card, totals and valid/mismatch/unverifiable status. Core validates the strict parser contract and tenant-scoped staging; full parser/Python contracts pass. A generated Cyrillic T-Bank PDF parses through the authenticated HTTP endpoint with HTTP 200 and valid reconciliation."
     android:
-      status: missing
-      scenario: "Android counterpart for F47: PDF Т-Банка: операции, даты, merchant/card, сверка итогов"
-      gap: "No Android user screen or equivalent flow is verified for F47 yet."
+      status: partial
+      scenario: "Android F47: PDF Т-Банка upload and read-only preview with operations and reconciliation"
+      gap: "F48/F49 Android mutations are absent: row selection, confirmation, deduplication and undo. Live Android Core/OIDC E2E is pending."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportScreensTest.kt
+      evidence:
+        - "Android upload/preview is covered by API and screen tests. F48/F49 mutations are not implemented in Android. Live Android Core/OIDC E2E pending."
     intentional_differences: []
   - id: F48
     feature: "Preview импорта, подтверждение, покупки/доходы/refund, skipped"
