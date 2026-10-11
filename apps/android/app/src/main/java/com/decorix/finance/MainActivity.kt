@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
     private val receiptDisputedItemsGeneration = AtomicLong(0L)
     private val receiptRepeatWarningsGeneration = AtomicLong(0L)
     private val reportRequestGeneration = AtomicLong(0L)
+    private val receiptRecalculationGeneration = AtomicLong(0L)
     private val familyBudgetFoodRequestGeneration = AtomicLong(0L)
     private val shoppingRequestGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
@@ -155,6 +156,10 @@ class MainActivity : ComponentActivity() {
                         onBudgetProposal = ::createBudgetProposal, onBudgetApply = ::applyBudgetProposal,
                         onDebtCreate = ::createDebt, onDebtPay = ::payDebt, onDebtAdjust = ::adjustDebt,
                         onDebtForecast = ::loadDebtForecast, onReportLoad = ::loadReport,
+                        onRecalculationPreview = ::previewReceiptRecalculation,
+                        onRecalculationApply = ::applyReceiptRecalculation,
+                        onRecalculationHistory = ::loadReceiptRecalculationHistory,
+                        onRecalculationDetail = ::loadReceiptRecalculationDetail,
                         onFamilyBudgetFoodStatusLoad = ::loadFamilyBudgetFoodStatus,
                         onShoppingLoad = ::loadShoppingCandidates, onShoppingDecision = ::applyShoppingDecision,
                         onShoppingCopy = ::copyShoppingList, onPersonalInflationLoad = ::loadPersonalInflation,
@@ -792,6 +797,7 @@ class MainActivity : ComponentActivity() {
                 if (failure?.authSessionGeneration != null && api.hasSession() &&
                     failure.authSessionGeneration != api.authSessionGeneration) return@synchronized
                 productCatalogGeneration.incrementAndGet()
+                receiptRecalculationGeneration.incrementAndGet()
                 ui = FinanceUiState(error = "Sign in again")
             }
         }
@@ -1741,6 +1747,7 @@ class MainActivity : ComponentActivity() {
                     }
                     val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
                     if (!sameTenant) {
+                        receiptRecalculationGeneration.incrementAndGet()
                         synchronized(productCatalogStateLock) { productCatalogGeneration.incrementAndGet() }
                         ShoppingResponsePolicy.beginRequest(shoppingRequestGeneration)
                     }
@@ -1769,6 +1776,12 @@ class MainActivity : ComponentActivity() {
                         shoppingList = ui.shoppingList.takeIf { sameTenant },
                         shoppingLoading = ui.shoppingLoading && sameTenant,
                         shoppingError = ui.shoppingError.takeIf { sameTenant },
+                        receiptRecalculationPreview = ui.receiptRecalculationPreview.takeIf { sameTenant },
+                        receiptRecalculationApplyResult = ui.receiptRecalculationApplyResult.takeIf { sameTenant },
+                        receiptRecalculationHistory = ui.receiptRecalculationHistory.takeIf { sameTenant },
+                        receiptRecalculationDetail = ui.receiptRecalculationDetail.takeIf { sameTenant },
+                        receiptRecalculationBusy = ui.receiptRecalculationBusy && sameTenant,
+                        receiptRecalculationError = ui.receiptRecalculationError.takeIf { sameTenant },
                         receiptDisputedItemsPage = ui.receiptDisputedItemsPage.takeIf { sameTenant },
                         receiptDisputedItemsReceiptId = ui.receiptDisputedItemsReceiptId.takeIf { sameTenant },
                         receiptDisputedItemsRequestedPage = ui.receiptDisputedItemsRequestedPage.takeIf { sameTenant },
@@ -1921,6 +1934,111 @@ class MainActivity : ComponentActivity() {
                     }
                 }
         }
+    }
+
+    private fun previewReceiptRecalculation() {
+        val tenantId = activeTenantId()
+        val requestGeneration = receiptRecalculationGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(receiptRecalculationBusy = true, receiptRecalculationError = null,
+            receiptRecalculationPreview = null, receiptRecalculationApplyResult = null)
+        executor.execute {
+            runCatching { api.previewReceiptRecalculation(tenantId) }
+                .onSuccess { preview -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    ui = ui.copy(receiptRecalculationBusy = false, receiptRecalculationPreview = preview,
+                        receiptRecalculationError = null)
+                } }
+                .onFailure { error -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                    else ui = ui.copy(receiptRecalculationBusy = false,
+                        receiptRecalculationError = receiptRecalculationErrorCode(error))
+                } }
+        }
+    }
+
+    private fun applyReceiptRecalculation(runId: String) {
+        val tenantId = activeTenantId()
+        val requestGeneration = receiptRecalculationGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(receiptRecalculationBusy = true, receiptRecalculationError = null,
+            receiptRecalculationPreview = null, receiptRecalculationApplyResult = null)
+        executor.execute {
+            runCatching { api.applyReceiptRecalculation(tenantId, runId) }
+                .onSuccess { result -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    ui = ui.copy(receiptRecalculationBusy = false, receiptRecalculationPreview = null,
+                        receiptRecalculationApplyResult = result,
+                        receiptRecalculationHistory = null, receiptRecalculationDetail = null,
+                        receiptRecalculationError = null)
+                } }
+                .onFailure { error -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                    else ui = ui.copy(receiptRecalculationBusy = false,
+                        receiptRecalculationError = receiptRecalculationErrorCode(error),
+                        receiptRecalculationPreview = null)
+                } }
+        }
+    }
+
+    private fun loadReceiptRecalculationHistory(cursor: String?) {
+        val tenantId = activeTenantId()
+        val requestGeneration = if (cursor == null) receiptRecalculationGeneration.incrementAndGet()
+            else receiptRecalculationGeneration.get()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(receiptRecalculationBusy = true, receiptRecalculationError = null)
+        executor.execute {
+            runCatching { api.receiptRecalculationHistory(tenantId, cursor = cursor) }
+                .onSuccess { page -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    val runs = if (cursor == null) page.runs else
+                        (ui.receiptRecalculationHistory?.runs.orEmpty() + page.runs).distinctBy { it.runId }
+                    ui = ui.copy(receiptRecalculationBusy = false,
+                        receiptRecalculationHistory = page.copy(runs = runs), receiptRecalculationError = null)
+                } }
+                .onFailure { error -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                    else ui = ui.copy(receiptRecalculationBusy = false,
+                        receiptRecalculationError = receiptRecalculationErrorCode(error))
+                } }
+        }
+    }
+
+    private fun loadReceiptRecalculationDetail(runId: String, cursor: String?) {
+        val tenantId = activeTenantId()
+        val requestGeneration = if (cursor == null) receiptRecalculationGeneration.incrementAndGet()
+            else receiptRecalculationGeneration.get()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(receiptRecalculationBusy = true, receiptRecalculationError = null)
+        executor.execute {
+            runCatching { api.receiptRecalculationDetail(tenantId, runId, cursor = cursor) }
+                .onSuccess { page -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    val previous = ui.receiptRecalculationDetail?.takeIf { cursor != null && it.run.runId == runId }
+                    val changes = if (previous == null) page.changes else
+                        (previous.changes + page.changes).distinctBy { it.itemId }
+                    ui = ui.copy(receiptRecalculationBusy = false,
+                        receiptRecalculationDetail = page.copy(changes = changes), receiptRecalculationError = null)
+                } }
+                .onFailure { error -> if (receiptRecalculationResponseIsCurrent(tenantId, requestGeneration, sessionGeneration)) {
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                    else ui = ui.copy(receiptRecalculationBusy = false,
+                        receiptRecalculationError = receiptRecalculationErrorCode(error))
+                } }
+        }
+    }
+
+    private fun receiptRecalculationResponseIsCurrent(tenantId: String, requestGeneration: Long,
+                                                       sessionGeneration: Long): Boolean =
+        ReportResponsePolicy.canApply(
+            requestTenantId = tenantId,
+            activeTenantId = ui.tenants.firstOrNull()?.id,
+            authenticated = ui.authenticated,
+            requestGeneration = requestGeneration,
+            currentRequestGeneration = receiptRecalculationGeneration.get(),
+            sessionCurrent = ReceiptOperationGeneration.isCurrent(sessionGeneration),
+        )
+
+    private fun receiptRecalculationErrorCode(error: Throwable): String = when ((error as? ApiFailure)?.status) {
+        412 -> "stale_preview"
+        403 -> "forbidden"
+        else -> "unavailable"
     }
 
     private fun loadFamilyBudgetFoodStatus(month: String) {
@@ -2212,6 +2330,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
+        receiptRecalculationGeneration.incrementAndGet()
         invalidateProductCatalogRequests()
         ReceiptOperationGeneration.invalidate()
         receiptDisputedItemsGeneration.incrementAndGet()
@@ -2271,6 +2390,12 @@ data class FinanceUiState(
     val debtForecasts: Map<String, DebtForecast> = emptyMap(),
     val dashboardSummary: DashboardSummary? = null,
     val report: FinanceReport? = null,
+    val receiptRecalculationPreview: FinanceReceiptRecalculationPreview? = null,
+    val receiptRecalculationApplyResult: FinanceReceiptRecalculationApplyResult? = null,
+    val receiptRecalculationHistory: FinanceReceiptRecalculationHistoryPage? = null,
+    val receiptRecalculationDetail: FinanceReceiptRecalculationDetail? = null,
+    val receiptRecalculationBusy: Boolean = false,
+    val receiptRecalculationError: String? = null,
     val familyBudgetFoodStatus: RollingFoodStatus? = null,
     val familyBudgetFoodMonth: String? = null,
     val familyBudgetFoodTenantId: String? = null,
@@ -2587,6 +2712,10 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onDebtAdjust: (String, String, Long) -> Unit,
                           onDebtForecast: (String) -> Unit,
                           onReportLoad: (String, String, String, String, String) -> Unit,
+                          onRecalculationPreview: () -> Unit = {},
+                          onRecalculationApply: (String) -> Unit = {},
+                          onRecalculationHistory: (String?) -> Unit = {},
+                          onRecalculationDetail: (String, String?) -> Unit = { _, _ -> },
                           onFamilyBudgetFoodStatusLoad: (String) -> Unit = {},
                           onCreateTelegramLink: () -> Unit = {},
                           onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
@@ -2974,7 +3103,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "budgets" -> BudgetScreen(Modifier.weight(1f), state, language, onBudgetUpdate, onBudgetReset,
                         onBudgetProposal, onBudgetApply, onFamilyBudgetFoodStatusLoad)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
-                    "reports" -> ReportScreen(state, language, onReportLoad)
+                    "reports" -> ReportScreen(state, language, onReportLoad,
+                        onRecalculationPreview, onRecalculationApply,
+                        onRecalculationHistory, onRecalculationDetail)
                     "profile" -> ProfileScreen(Modifier.weight(1f), state, language, onProfileSave,
                         onRepeatSetup = { name, income ->
                             memberName = name
@@ -5648,7 +5779,11 @@ private fun transactionDateValidationError(from: String, to: String, russian: Bo
 
 @androidx.compose.runtime.Composable
 private fun ReportScreen(state: FinanceUiState, language: String,
-                         onLoad: (String, String, String, String, String) -> Unit) {
+                         onLoad: (String, String, String, String, String) -> Unit,
+                         onRecalculationPreview: () -> Unit,
+                         onRecalculationApply: (String) -> Unit,
+                         onRecalculationHistory: (String?) -> Unit,
+                         onRecalculationDetail: (String, String?) -> Unit) {
     val russian = language == "ru"
     val initialMonth = state.report?.fromDate?.take(7) ?: YearMonth.now().toString()
     var period by androidx.compose.runtime.remember { mutableStateOf("month") }
@@ -5802,6 +5937,23 @@ private fun ReportScreen(state: FinanceUiState, language: String,
                                 modifier = Modifier.fillMaxWidth())
                         }
                     }
+                }
+                item {
+                    ReceiptRecalculationSection(
+                        role = state.tenants.firstOrNull()?.role,
+                        language = language,
+                        currency = state.report?.currency ?: state.memberProfile?.currency ?: "RUB",
+                        preview = state.receiptRecalculationPreview,
+                        applied = state.receiptRecalculationApplyResult,
+                        history = state.receiptRecalculationHistory,
+                        selectedDetail = state.receiptRecalculationDetail,
+                        busy = state.receiptRecalculationBusy,
+                        error = state.receiptRecalculationError,
+                        onPreview = onRecalculationPreview,
+                        onApply = onRecalculationApply,
+                        onLoadHistory = onRecalculationHistory,
+                        onLoadDetail = onRecalculationDetail,
+                    )
                 }
             }
         }

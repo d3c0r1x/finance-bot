@@ -180,6 +180,77 @@ data class FinanceDoNotBuy(
 
 data class FinanceProductDecisions(val productKeys: List<String>, val confirmedProductKeys: List<String>)
 
+data class FinanceReceiptRecalculationImpact(
+    val algorithmVersion: String,
+    val inputVersion: String,
+    val reasonCode: String,
+    val completeness: String,
+    val optionalSpendBefore: String?,
+    val optionalSpendAfter: String?,
+    val optionalSpendDelta: String?,
+    val currency: String?,
+)
+
+data class FinanceReceiptRecalculationChange(
+    val itemId: String,
+    val name: String,
+    val lineSum: String?,
+    val itemVersion: Long,
+    val beforeVerdict: String?,
+    val beforeReason: String?,
+    val beforeAction: String?,
+    val beforeSource: String?,
+    val afterVerdict: String?,
+    val afterReason: String?,
+    val afterAction: String?,
+    val afterSource: String?,
+    val changed: Boolean,
+)
+
+data class FinanceReceiptRecalculationPreview(
+    val runId: String,
+    val algorithmVersion: String,
+    val state: String,
+    val checked: Int,
+    val updateCount: Int,
+    val changedCount: Int,
+    val impact: FinanceReceiptRecalculationImpact?,
+    val changes: List<FinanceReceiptRecalculationChange>,
+)
+
+data class FinanceReceiptRecalculationApplyResult(
+    val runId: String,
+    val algorithmVersion: String,
+    val state: String,
+    val appliedCount: Int,
+    val changedCount: Int,
+    val impact: FinanceReceiptRecalculationImpact?,
+    val changes: List<FinanceReceiptRecalculationChange>,
+)
+
+data class FinanceReceiptRecalculationRunSummary(
+    val runId: String,
+    val algorithmVersion: String,
+    val state: String,
+    val checked: Int,
+    val updateCount: Int,
+    val changedCount: Int,
+    val createdAt: String,
+    val appliedAt: String?,
+    val impact: FinanceReceiptRecalculationImpact?,
+)
+
+data class FinanceReceiptRecalculationHistoryPage(
+    val runs: List<FinanceReceiptRecalculationRunSummary>,
+    val nextCursor: String?,
+)
+
+data class FinanceReceiptRecalculationDetail(
+    val run: FinanceReceiptRecalculationRunSummary,
+    val changes: List<FinanceReceiptRecalculationChange>,
+    val nextCursor: String?,
+)
+
 data class FinancePersonalInflationItem(
     val productName: String,
     val oldUnitPrice: String,
@@ -1226,6 +1297,149 @@ internal object FinanceModels {
         return FinanceShoppingList(candidates, totalRaw, false, bought, muted, blocked)
     }
 
+    fun receiptRecalculationPreview(json: JSONObject): FinanceReceiptRecalculationPreview {
+        val runId = json.getString("runId")
+        val algorithmVersion = json.getString("algorithmVersion")
+        val state = json.getString("state")
+        val checked = exactInt(json, "checked")
+        val updates = exactInt(json, "updateCount")
+        val changed = exactInt(json, "changedCount")
+        val impact = requiredNullableObject(json, "impact")?.let(::receiptRecalculationImpact)
+        val changes = receiptRecalculationChanges(json.getJSONArray("changes"), maximum = 50_000)
+        require(isCanonicalUuid(runId) && algorithmVersion.isNotBlank() && algorithmVersion.length <= 128
+            && state.isNotBlank() && state.length <= 64 && checked in 0..50_000
+            && updates in 0..checked && changed in 0..updates
+            && changes.size <= updates) { "Invalid receipt recalculation preview" }
+        return FinanceReceiptRecalculationPreview(runId, algorithmVersion, state, checked, updates,
+            changed, impact, changes)
+    }
+
+    fun receiptRecalculationApplyResult(json: JSONObject): FinanceReceiptRecalculationApplyResult {
+        val runId = json.getString("runId")
+        val algorithmVersion = json.getString("algorithmVersion")
+        val state = json.getString("state")
+        val applied = exactInt(json, "appliedCount")
+        val changed = exactInt(json, "changedCount")
+        val impact = requiredNullableObject(json, "impact")?.let(::receiptRecalculationImpact)
+        val changes = receiptRecalculationChanges(json.getJSONArray("changes"), maximum = 50_000)
+        require(isCanonicalUuid(runId) && algorithmVersion.isNotBlank() && algorithmVersion.length <= 128
+            && state.isNotBlank() && state.length <= 64 && applied in 0..50_000
+            && changed in 0..applied && changes.size <= applied) { "Invalid receipt recalculation result" }
+        return FinanceReceiptRecalculationApplyResult(runId, algorithmVersion, state, applied,
+            changed, impact, changes)
+    }
+
+    fun receiptRecalculationHistory(json: JSONObject): FinanceReceiptRecalculationHistoryPage {
+        val rows = json.getJSONArray("runs")
+        require(rows.length() <= 100) { "Too many recalculation history rows" }
+        val runs = (0 until rows.length()).map { index -> receiptRecalculationRun(rows.getJSONObject(index)) }
+        val cursor = nullableString(json, "nextCursor")
+        require(cursor == null || cursor.isNotBlank() && cursor.length <= 1024) { "Invalid recalculation cursor" }
+        return FinanceReceiptRecalculationHistoryPage(runs, cursor)
+    }
+
+    fun receiptRecalculationDetail(json: JSONObject): FinanceReceiptRecalculationDetail {
+        val run = receiptRecalculationRun(json.getJSONObject("run"))
+        val changes = receiptRecalculationChanges(json.getJSONArray("changes"), maximum = 100)
+        val cursor = nullableString(json, "nextCursor")
+        require(cursor == null || cursor.isNotBlank() && cursor.length <= 1024) { "Invalid recalculation cursor" }
+        return FinanceReceiptRecalculationDetail(run, changes, cursor)
+    }
+
+    private fun receiptRecalculationRun(json: JSONObject): FinanceReceiptRecalculationRunSummary {
+        val runId = json.getString("runId")
+        val algorithmVersion = json.getString("algorithmVersion")
+        val state = json.getString("state")
+        val checked = exactInt(json, "checked")
+        val updates = exactInt(json, "updateCount")
+        val changed = exactInt(json, "changedCount")
+        val createdAt = json.getString("createdAt")
+        val appliedAt = nullableString(json, "appliedAt")
+        val impact = requiredNullableObject(json, "impact")?.let(::receiptRecalculationImpact)
+        require(isCanonicalUuid(runId) && algorithmVersion.isNotBlank() && algorithmVersion.length <= 128
+            && state.isNotBlank() && state.length <= 64 && checked in 0..50_000
+            && updates in 0..checked && changed in 0..updates
+            && runCatching { Instant.parse(createdAt) }.isSuccess
+            && (appliedAt == null || runCatching { Instant.parse(appliedAt) }.isSuccess)) {
+            "Invalid receipt recalculation history run"
+        }
+        return FinanceReceiptRecalculationRunSummary(runId, algorithmVersion, state, checked,
+            updates, changed, createdAt, appliedAt, impact)
+    }
+
+    private fun receiptRecalculationImpact(json: JSONObject): FinanceReceiptRecalculationImpact {
+        val algorithmVersion = json.getString("algorithmVersion")
+        val inputVersion = json.getString("inputVersion")
+        val reason = json.getString("reasonCode")
+        val completeness = json.getString("completeness")
+        val before = requiredNullableString(json, "optionalSpendBefore")
+        val after = requiredNullableString(json, "optionalSpendAfter")
+        val delta = requiredNullableString(json, "optionalSpendDelta")
+        val currency = requiredNullableString(json, "currency")
+        val moneyPattern = Regex("^(?:0|[1-9]\\d{0,29})\\.\\d{2}$")
+        val deltaPattern = Regex("^-?(?:0|[1-9]\\d{0,29})\\.\\d{2}$")
+        val hasAmounts = before != null && after != null && delta != null
+        val amountsAbsent = before == null && after == null && delta == null
+        val consistentAvailability = if (reason == "available") {
+            completeness == "complete" && hasAmounts
+        } else {
+            amountsAbsent && when (reason) {
+                "no_reviewed_items" -> completeness == "complete"
+                "missing_amounts", "analytics_unavailable" -> completeness == "partial"
+                else -> false
+            }
+        }
+        require(algorithmVersion == "receipt-recalculation-impact.v1"
+            && Regex("^[0-9a-f]{64}$").matches(inputVersion)
+            && reason in setOf("available", "no_reviewed_items", "missing_amounts", "analytics_unavailable")
+            && completeness in setOf("complete", "partial")
+            && (before == null || moneyPattern.matches(before))
+            && (after == null || moneyPattern.matches(after))
+            && (delta == null || deltaPattern.matches(delta))
+            && consistentAvailability
+            && (currency == null || Regex("^[A-Z]{3}$").matches(currency))) {
+            "Invalid receipt recalculation impact"
+        }
+        return FinanceReceiptRecalculationImpact(algorithmVersion, inputVersion, reason,
+            completeness, before, after, delta, currency)
+    }
+
+    private fun receiptRecalculationChanges(
+        rows: JSONArray,
+        maximum: Int,
+    ): List<FinanceReceiptRecalculationChange> {
+        require(rows.length() <= maximum) { "Too many receipt recalculation changes" }
+        val ids = mutableSetOf<String>()
+        val moneyPattern = Regex("^(?:0|[1-9]\\d{0,29})\\.\\d{2}$")
+        return (0 until rows.length()).map { index ->
+            val json = rows.getJSONObject(index)
+            val itemId = json.getString("itemId")
+            val name = json.getString("name")
+            val lineSum = requiredNullableString(json, "lineSum")
+            val itemVersion = exactLong(json, "itemVersion")
+            require(isCanonicalUuid(itemId) && ids.add(itemId) && name.isNotBlank() && name.length <= 200
+                && (lineSum == null || moneyPattern.matches(lineSum)) && itemVersion > 0L) {
+                "Invalid receipt recalculation change"
+            }
+            FinanceReceiptRecalculationChange(itemId, name, lineSum, itemVersion,
+                requiredNullableString(json, "beforeVerdict"),
+                requiredNullableString(json, "beforeReason"),
+                requiredNullableString(json, "beforeAction"),
+                requiredNullableString(json, "beforeSource"),
+                requiredNullableString(json, "afterVerdict"),
+                requiredNullableString(json, "afterReason"),
+                requiredNullableString(json, "afterAction"),
+                requiredNullableString(json, "afterSource"),
+                requiredBoolean(json, "changed"))
+        }
+    }
+
+    private fun requiredNullableObject(json: JSONObject, key: String): JSONObject? {
+        require(json.has(key)) { "Missing nullable field: $key" }
+        if (json.isNull(key)) return null
+        return json.get(key) as? JSONObject ?: throw IllegalArgumentException("Invalid object field: $key")
+    }
+
     fun doNotBuy(json: JSONObject): FinanceDoNotBuy {
         val available = json.getBoolean("available")
         val reason = json.getString("reasonCode")
@@ -1516,6 +1730,11 @@ internal object FinanceModels {
     private fun exactInt(json: JSONObject, key: String): Int {
         val value = json.get(key) as? Number ?: throw IllegalArgumentException("Invalid shopping integer")
         return java.math.BigDecimal(value.toString()).intValueExact()
+    }
+
+    private fun exactLong(json: JSONObject, key: String): Long {
+        val value = json.get(key) as? Number ?: throw IllegalArgumentException("Invalid receipt item version")
+        return java.math.BigDecimal(value.toString()).longValueExact()
     }
 
     private fun longMap(json: JSONObject, key: String): Map<String, Long> =

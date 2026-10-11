@@ -184,6 +184,52 @@ class FinanceApi internal constructor(
         )
     }
 
+    fun previewReceiptRecalculation(tenantId: String): FinanceReceiptRecalculationPreview {
+        require(isUuid(tenantId)) { "Receipt recalculation tenant ID must be a UUID" }
+        return FinanceModels.receiptRecalculationPreview(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/review-recalculations/preview", "POST", "{}",
+            retryUnauthorized = false,
+        )))
+    }
+
+    fun applyReceiptRecalculation(tenantId: String, runId: String): FinanceReceiptRecalculationApplyResult {
+        require(isUuid(tenantId) && isUuid(runId)) { "Receipt recalculation IDs must be UUIDs" }
+        val body = JSONObject().put("runId", runId).toString()
+        return FinanceModels.receiptRecalculationApplyResult(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/review-recalculations/apply", "POST", body,
+            idempotencyKey = "receipt-recalculation-apply-$runId",
+        )))
+    }
+
+    fun receiptRecalculationHistory(
+        tenantId: String,
+        limit: Int = 20,
+        cursor: String? = null,
+    ): FinanceReceiptRecalculationHistoryPage {
+        require(isUuid(tenantId) && limit in 1..100) { "Invalid receipt recalculation history request" }
+        require(cursor == null || cursor.isNotBlank() && cursor.length <= 1024) { "Invalid history cursor" }
+        val query = "limit=$limit" + (cursor?.let { "&cursor=${encodeRfc3986(it)}" } ?: "")
+        return FinanceModels.receiptRecalculationHistory(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/review-recalculations?$query", "GET",
+        )))
+    }
+
+    fun receiptRecalculationDetail(
+        tenantId: String,
+        runId: String,
+        limit: Int = 100,
+        cursor: String? = null,
+    ): FinanceReceiptRecalculationDetail {
+        require(isUuid(tenantId) && isUuid(runId) && limit in 1..100) {
+            "Invalid receipt recalculation detail request"
+        }
+        require(cursor == null || cursor.isNotBlank() && cursor.length <= 1024) { "Invalid detail cursor" }
+        val query = "limit=$limit" + (cursor?.let { "&cursor=${encodeRfc3986(it)}" } ?: "")
+        return FinanceModels.receiptRecalculationDetail(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/review-recalculations/${encodeRfc3986(runId)}?$query", "GET",
+        )))
+    }
+
     fun productCatalog(tenantId: String, query: String): FinanceProductCatalog {
         val normalizedQuery = query.trim()
         require(isValidProductCatalogQuery(normalizedQuery)) {
@@ -521,9 +567,9 @@ class FinanceApi internal constructor(
     }
 
     private fun execute(path: String, method: String, body: String? = null, idempotencyKey: String? = null,
-                        ifMatchVersion: Long? = null): String {
+                        ifMatchVersion: Long? = null, retryUnauthorized: Boolean = true): String {
         val requestBody = body?.toRequestBody("application/json".toMediaType())
-        return executeRequest(path, method, requestBody, idempotencyKey, ifMatchVersion)
+        return executeRequest(path, method, requestBody, idempotencyKey, ifMatchVersion, retryUnauthorized)
     }
 
     private fun isUuid(value: String): Boolean =
@@ -546,7 +592,8 @@ class FinanceApi internal constructor(
     }
 
     private fun executeRequest(path: String, method: String, requestBody: RequestBody?,
-                               idempotencyKey: String? = null, ifMatchVersion: Long? = null): String {
+                               idempotencyKey: String? = null, ifMatchVersion: Long? = null,
+                               retryUnauthorized: Boolean = true): String {
         val (requestSessionGeneration, original) = synchronized(tokenRefreshLock) {
             sessionGeneration.get() to tokens.read()
         }
@@ -557,7 +604,7 @@ class FinanceApi internal constructor(
                 accessToken = refresh(accessToken, requestSessionGeneration)
             }
             var response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)
-            if (response.code == 401 && accessToken != null) {
+            if (retryUnauthorized && response.code == 401 && accessToken != null) {
                 response.close()
                 accessToken = refresh(accessToken, requestSessionGeneration)
                 response = perform(path, method, requestBody, idempotencyKey, ifMatchVersion, accessToken)

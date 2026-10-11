@@ -944,9 +944,14 @@ features:
     evidence:
       - "F42.1 policy is pushed as 6f80afc. F42.2 adds RLS-protected durable preview snapshots, explicit member-scoped API/BFF preview and apply, stale-preview 412, idempotent retry, unchanged receipt totals and review audit. F42.4 adds authenticated Go impact from equal before/after receipt facts, stores the exact report and profile currency in Core V36, and presents the delta or unavailable reason in Web. F42.5 adds private Telegram /recalculate with actor-scoped preview, stale callback rejection, viewer denial and separate Apply button. F42.6 adds owner-scoped run history: stable cursor pages for 20 runs and bounded 100-change detail pages; Core rejects limits outside 1..100 and retains existing 50,000-item recalculation cap. Web displays stored run status, impact delta and before/after decisions. GREEN: isolated PostgreSQL 18.6 Core `:check`, 245 tests/0 failures/2 skips; `TransactionApiPostgresTest` 102/102; Web 60/60 plus production build; contracts 47/47; `git diff --check`. GitHub CI and runtime/public HTTPS remain separate gates."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F42: Пересчёт старых verdict по текущим правилам и отчёт изменений"
-      gap: "No Android user screen or equivalent flow is verified for F42 yet."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceRecalculationApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceRecalculationScreensTest.kt
+      gap: "MockWebServer and API 27 UI acceptance pass; live authenticated Android-to-Core OIDC preview/apply/history remains unverified."
+      evidence:
+        - "API 27 direct instrumentation: F42 API 9/9, F42 screen 9/9, FinanceScreensTest 85/85, FinanceModelsTest 31/31 (134/134 combined). Contracts 60 passed. Previews render at most 100 changes until expanded; cursor appends preserve expanded rows for the same run; line sums use report currency. The preview is never auto-replayed after 401; final pages accept omitted nextCursor; null impact is not displayed as zero; viewers have no actions/history. Live authenticated Android-to-Core OIDC remains unverified."
     intentional_differences: []
   - id: F43
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"
