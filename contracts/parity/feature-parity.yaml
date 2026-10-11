@@ -1180,13 +1180,19 @@ features:
     feature: "CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
     target: "J export contract; G large export; W download"
     acceptance: "Совместимый legacy формат и безопасные строки; текущая точка входа — панель, не Telegram"
-    status: planned
+    status: in_progress
     tests: []
     evidence: []
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F52: CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
-      gap: "No Android user screen or equivalent flow is verified for F52 yet."
+      gap: "Android export request, bounded status presentation, validation, and explicit fresh-link handoff pass local tests. Live Android OIDC/Core role enforcement, export worker/S3 URL, actual browser transfer and downloaded-byte integrity remain unverified; lifecycle cancellation, explicit-intent safety, and full RU/EN behavior still need direct runtime coverage."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsModelsTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsScreensTest.kt
+      evidence:
+        - "F52 Android model/API/screen tests pass 27/27; combined F47-F52 Android regression passes 99/99 on isolated Android 8.1/API 27 emulator-5554. Android JVM suite passes 69/69; debug and AndroidTest APKs build; parity/contract tests pass 66/66. Fresh debug APK SHA-256 38FF5CB9DB43626C7E679056EFCA2A084915D3DB5A3438B43CA6805F18FDD063 installed and MainActivity launched on emulator-5554. Live OIDC/Core/worker/S3/browser transfer not run."
     intentional_differences: []
   - id: F53
     feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"

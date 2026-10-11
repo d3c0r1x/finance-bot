@@ -81,6 +81,29 @@ class FinanceApi internal constructor(
     fun members(tenantId: String): List<FinanceTenantMember> =
         FinanceModels.tenantMembers(org.json.JSONArray(execute("/api/v1/tenants/$tenantId/members", "GET")))
 
+    internal fun createExport(
+        tenantId: String,
+        request: FinanceExportRequest,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceExportJob {
+        require(isUuid(tenantId)) { "Invalid tenant identifier" }
+        val response = executeRequest("/api/v1/tenants/$tenantId/exports", "POST",
+            request.json().toString().toRequestBody("application/json".toMediaType()),
+            retryUnauthorized = false, expectedSessionGeneration = expectedSessionGeneration)
+        return FinanceExportModels.job(JSONObject(response))
+    }
+
+    internal fun exportStatus(
+        tenantId: String,
+        exportId: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceExportJob {
+        require(isUuid(tenantId) && isUuid(exportId)) { "Invalid export identifier" }
+        val response = executeRequest("/api/v1/tenants/$tenantId/exports/$exportId", "GET", null,
+            retryUnauthorized = false, expectedSessionGeneration = expectedSessionGeneration)
+        return FinanceExportModels.job(JSONObject(response))
+    }
+
     fun uploadBankImport(
         tenantId: String,
         bytes: ByteArray,

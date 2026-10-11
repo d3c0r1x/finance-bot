@@ -80,7 +80,22 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
+private val ambiguousExportCreateErrors = setOf("network", "unavailable")
+
 class MainActivity : ComponentActivity() {
+    private data class PendingExportDownload(
+        val tenantId: String,
+        val exportId: String,
+        val sessionGeneration: Long,
+        val generation: Long,
+    )
+    private data class PendingExportCompletion(
+        val tenantId: String,
+        val sessionGeneration: Long,
+        val job: FinanceExportJob? = null,
+        val errorCode: String? = null,
+    )
+
     private lateinit var authService: AuthorizationService
     private val api by lazy { FinanceApi(this) }
     private val receiptCheckpointStore by lazy { ReceiptUploadCheckpointStore(this) }
@@ -109,6 +124,14 @@ class MainActivity : ComponentActivity() {
     private val goalRequestGeneration = AtomicLong(0L)
     @Volatile private var goalsScreenActive = false
     private val bankImportGeneration = AtomicLong(0L)
+    private val exportMembersGeneration = AtomicLong(0L)
+    private val exportCreateGeneration = AtomicLong(0L)
+    private val exportStatusGeneration = AtomicLong(0L)
+    private val exportDownloadGeneration = AtomicLong(0L)
+    @Volatile private var exportScreenActive = false
+    @Volatile private var pendingExportDownload: PendingExportDownload? = null
+    @Volatile private var pendingExportCompletion: PendingExportCompletion? = null
+    @Volatile private var exportBusyKind: String? = null
     @Volatile private var bankImportScreenActive = false
     @Volatile private var bankImportUploadInProgress = false
     @Volatile private var bankImportMutationInProgress = false
@@ -229,7 +252,12 @@ class MainActivity : ComponentActivity() {
                         onBankImportReclassificationReview = ::reviewMerchantReclassification,
                         onBankImportReclassificationApply = ::applyMerchantReclassification,
                         onBankImportScreenEnter = ::enterBankImportScreen,
-                        onBankImportScreenExit = ::leaveBankImportScreen)
+                        onBankImportScreenExit = ::leaveBankImportScreen,
+                        onExportCreate = ::createExport,
+                        onExportRefresh = ::loadExportStatus,
+                        onExportDownload = ::requestExportDownload,
+                        onExportScreenEnter = ::enterExportScreen,
+                        onExportScreenExit = ::leaveExportScreen)
                 }
             }
         }
@@ -3172,6 +3200,185 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadExportMembers() {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (tenant.role != "owner" && tenant.role != "admin") return
+        if (ui.exportMembersTenantId == tenant.id || ui.exportMembersLoading) return
+        val requestGeneration = exportMembersGeneration.incrementAndGet()
+        val sessionGeneration = api.authSessionGeneration
+        ui = ui.copy(exportMembersLoading = true, exportError = null)
+        executor.execute {
+            runCatching { api.members(tenant.id) }
+                .onSuccess { members ->
+                    if (exportMembersGeneration.get() == requestGeneration &&
+                        api.authSessionGeneration == sessionGeneration &&
+                        ui.authenticated && ui.tenants.firstOrNull()?.id == tenant.id) {
+                        ui = ui.copy(exportMembersLoading = false, exportMembers = members,
+                            exportMembersTenantId = tenant.id, exportError = null)
+                    }
+                }
+                .onFailure { error ->
+                    if (exportMembersGeneration.get() == requestGeneration &&
+                        api.authSessionGeneration == sessionGeneration &&
+                        ui.authenticated && ui.tenants.firstOrNull()?.id == tenant.id) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else ui = ui.copy(exportMembersLoading = false, exportError = financeExportErrorCode(error))
+                    }
+                }
+        }
+    }
+
+    private fun enterExportScreen() {
+        exportScreenActive = true
+        val completion = pendingExportCompletion
+        val tenantId = ui.tenants.firstOrNull()?.id
+        if (completion != null && completion.tenantId == tenantId &&
+            completion.sessionGeneration == api.authSessionGeneration) {
+            pendingExportCompletion = null
+            exportBusyKind = null
+            ui = ui.copy(exportBusy = false, exportJob = completion.job?.copy(downloadUrl = null),
+                exportJobTenantId = completion.tenantId, exportError = completion.errorCode,
+                exportCreateRetryRequiresConfirmation = completion.errorCode in ambiguousExportCreateErrors)
+        }
+        loadExportMembers()
+    }
+
+    private fun leaveExportScreen() {
+        exportScreenActive = false
+        pendingExportDownload = null
+        exportDownloadGeneration.incrementAndGet()
+        exportStatusGeneration.incrementAndGet()
+        if (exportBusyKind == "status") {
+            exportBusyKind = null
+            ui = ui.copy(exportBusy = false)
+        }
+        ui = ui.copy(exportJob = ui.exportJob?.copy(downloadUrl = null))
+    }
+
+    private fun createExport(request: FinanceExportRequest) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!ui.authenticated || ui.exportBusy) return
+        if (request.memberId != null && tenant.role != "owner" && tenant.role != "admin") return
+        val requestGeneration = exportCreateGeneration.incrementAndGet()
+        val sessionGeneration = api.authSessionGeneration
+        pendingExportCompletion = null
+        exportBusyKind = "create"
+        ui = ui.copy(exportBusy = true, exportError = null, exportJob = null,
+            exportJobTenantId = tenant.id, exportCreateRetryRequiresConfirmation = false)
+        executor.execute {
+            runCatching { api.createExport(tenant.id, request, sessionGeneration) }
+                .onSuccess { job ->
+                    if (exportCreateGeneration.get() == requestGeneration &&
+                        api.authSessionGeneration == sessionGeneration && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id) {
+                        if (exportScreenActive) {
+                            exportBusyKind = null
+                            ui = ui.copy(exportBusy = false, exportJob = job, exportJobTenantId = tenant.id,
+                                exportError = null, exportCreateRetryRequiresConfirmation = false)
+                        } else {
+                            pendingExportCompletion = PendingExportCompletion(tenant.id, sessionGeneration,
+                                job = job.copy(downloadUrl = null))
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    if (exportCreateGeneration.get() == requestGeneration &&
+                        api.authSessionGeneration == sessionGeneration && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else if (exportScreenActive) {
+                            exportBusyKind = null
+                            val errorCode = financeExportErrorCode(error)
+                            ui = ui.copy(exportBusy = false, exportError = errorCode,
+                                exportCreateRetryRequiresConfirmation = errorCode in ambiguousExportCreateErrors)
+                        } else {
+                            pendingExportCompletion = PendingExportCompletion(tenant.id, sessionGeneration,
+                                errorCode = financeExportErrorCode(error))
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun loadExportStatus(exportId: String) {
+        refreshExportStatus(exportId, null)
+    }
+
+    private fun requestExportDownload(exportId: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val job = ui.exportJob?.takeIf { it.id == exportId && it.status == "ready" } ?: return
+        if (!ui.authenticated || !exportScreenActive || ui.exportBusy) return
+        val attempt = PendingExportDownload(tenant.id, exportId, api.authSessionGeneration,
+            exportDownloadGeneration.incrementAndGet())
+        pendingExportDownload = attempt
+        refreshExportStatus(exportId, attempt)
+    }
+
+    private fun refreshExportStatus(exportId: String, downloadAttempt: PendingExportDownload?) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!ui.authenticated || ui.exportJob?.id != exportId || ui.exportJobTenantId != tenant.id ||
+            ui.exportBusy) return
+        val requestGeneration = exportStatusGeneration.incrementAndGet()
+        val sessionGeneration = api.authSessionGeneration
+        exportBusyKind = "status"
+        ui = ui.copy(exportBusy = true, exportError = null)
+        executor.execute {
+            runCatching { api.exportStatus(tenant.id, exportId, sessionGeneration) }
+                .onSuccess { job ->
+                    if (exportStatusGeneration.get() == requestGeneration && exportScreenActive &&
+                        api.authSessionGeneration == sessionGeneration && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
+                        exportBusyKind = null
+                        val visibleJob = if (exportScreenActive &&
+                            lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) job
+                        else job.copy(downloadUrl = null)
+                        ui = ui.copy(exportBusy = false, exportJob = visibleJob, exportError = null)
+                        if (downloadAttempt != null && pendingExportDownload == downloadAttempt) {
+                            pendingExportDownload = null
+                            val mayOpen = exportScreenActive && downloadAttempt.tenantId == tenant.id &&
+                                downloadAttempt.sessionGeneration == api.authSessionGeneration &&
+                                downloadAttempt.generation == exportDownloadGeneration.get() &&
+                                lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                            if (mayOpen && job.status == "ready" && job.downloadUrl != null) {
+                                openExportDownload(job.downloadUrl)
+                            } else if (mayOpen) {
+                                Toast.makeText(this, if (language == "ru") "Ссылка больше недоступна. Обновите статус." else
+                                    "The download link is no longer available. Refresh the status.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    if (exportStatusGeneration.get() == requestGeneration && exportScreenActive &&
+                        api.authSessionGeneration == sessionGeneration && ui.authenticated &&
+                        ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
+                        exportBusyKind = null
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else ui = ui.copy(exportBusy = false, exportError = financeExportErrorCode(error))
+                        if (downloadAttempt != null && pendingExportDownload == downloadAttempt) {
+                            pendingExportDownload = null
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun openExportDownload(url: String) {
+        runCatching { FinanceExportModels.requireSafeDownloadUrl(url) }
+            .onFailure {
+                Toast.makeText(this, if (language == "ru") "Ссылка экспорта недействительна." else
+                    "The export link is invalid.", Toast.LENGTH_SHORT).show()
+                return
+            }
+        runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            startActivity(Intent.createChooser(intent, if (language == "ru") "Скачать CSV" else "Download CSV"))
+        }.onFailure {
+            Toast.makeText(this, if (language == "ru") "Не удалось открыть ссылку. Обновите статус." else
+                "Could not open the link. Refresh the status.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun applyRecurringDecision(seriesId: String, muted: Boolean) {
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
         ui = ui.copy(recurringLoading = true, recurringError = null)
@@ -3244,6 +3451,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun logout() {
+        exportScreenActive = false
+        pendingExportDownload = null
+        exportDownloadGeneration.incrementAndGet()
+        exportCreateGeneration.incrementAndGet()
+        exportStatusGeneration.incrementAndGet()
+        exportMembersGeneration.incrementAndGet()
+        pendingExportCompletion = null
+        exportBusyKind = null
         bankImportGeneration.incrementAndGet()
         bankImportScreenActive = false
         bankImportPickerGeneration = null
@@ -3291,6 +3506,13 @@ class MainActivity : ComponentActivity() {
         executor.shutdownNow()
         receiptPollExecutor.shutdownNow()
         super.onDestroy()
+    }
+
+    override fun onPause() {
+        pendingExportDownload = null
+        exportDownloadGeneration.incrementAndGet()
+        ui = ui.copy(exportJob = ui.exportJob?.copy(downloadUrl = null))
+        super.onPause()
     }
 }
 
@@ -3361,6 +3583,14 @@ data class FinanceUiState(
     val recurringProjection: FinanceRecurringProjection? = null,
     val recurringLoading: Boolean = false,
     val recurringError: String? = null,
+    val exportMembers: List<FinanceTenantMember> = emptyList(),
+    val exportMembersTenantId: String? = null,
+    val exportMembersLoading: Boolean = false,
+    val exportJob: FinanceExportJob? = null,
+    val exportJobTenantId: String? = null,
+    val exportBusy: Boolean = false,
+    val exportError: String? = null,
+    val exportCreateRetryRequiresConfirmation: Boolean = false,
     val transactionEditSavedToken: String? = null,
     val receiptJob: FinanceReceiptProcessingJob? = null,
     val bankImportPreview: FinanceBankImportPreview? = null,
@@ -3717,7 +3947,12 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onBankImportReclassificationReview: (String) -> Unit = {},
                           onBankImportReclassificationApply: (FinanceMerchantReclassificationPreview) -> Unit = {},
                           onBankImportScreenEnter: () -> Unit = {},
-                          onBankImportScreenExit: () -> Unit = {}) {
+                          onBankImportScreenExit: () -> Unit = {},
+                          onExportCreate: (FinanceExportRequest) -> Unit = {},
+                          onExportRefresh: (String) -> Unit = {},
+                          onExportDownload: (String) -> Unit = {},
+                          onExportScreenEnter: () -> Unit = {},
+                          onExportScreenExit: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -3974,11 +4209,13 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products", "imports").forEach { screen ->
+                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products", "imports", "exports").forEach { screen ->
                         TextButton(onClick = {
                             if (activeScreen == "goals" && screen != "goals") onGoalsScreenExit()
                             if (activeScreen == "imports" && screen != "imports") onBankImportScreenExit()
                             if (activeScreen != "imports" && screen == "imports") onBankImportScreenEnter()
+                            if (activeScreen == "exports" && screen != "exports") onExportScreenExit()
+                            if (activeScreen != "exports" && screen == "exports") onExportScreenEnter()
                             activeScreen = screen
                             val catalogTenantId = state.tenants.firstOrNull()?.id
                             if (screen == "products" && catalogTenantId != null &&
@@ -3999,6 +4236,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 "overview" -> if (russian) "Обзор" else "Overview"
                                 "receipts" -> if (russian) "Чеки" else "Receipts"
                                 "imports" -> if (russian) "Выписки" else "Statements"
+                                "exports" -> if (russian) "Экспорт" else "Export"
                                 "products" -> if (russian) "Товары" else "Products"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
                                 "nobuy" -> if (russian) "Не брать" else "Do not buy"
@@ -4016,6 +4254,25 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
+                    "exports" -> FinanceExportsSection(
+                        role = state.tenants.firstOrNull()?.role.orEmpty(),
+                        language = language,
+                        timezone = state.tenants.firstOrNull()?.timezone ?: "UTC",
+                        members = state.exportMembers.takeIf {
+                            state.exportMembersTenantId == state.tenants.firstOrNull()?.id
+                        }.orEmpty(),
+                        membersLoading = state.exportMembersLoading,
+                        job = state.exportJob?.takeIf {
+                            state.exportJobTenantId == state.tenants.firstOrNull()?.id
+                        },
+                        busy = state.exportBusy,
+                        error = state.exportError,
+                        retryNeedsConfirmation = state.exportCreateRetryRequiresConfirmation,
+                        onCreate = onExportCreate,
+                        onRefresh = onExportRefresh,
+                        onDownload = onExportDownload,
+                        modifier = Modifier.weight(1f),
+                    )
                     "imports" -> BankImportPreviewSection(
                         modifier = Modifier.weight(1f),
                         role = state.tenants.firstOrNull()?.role.orEmpty(),

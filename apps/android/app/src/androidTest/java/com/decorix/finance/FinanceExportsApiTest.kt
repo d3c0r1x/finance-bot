@@ -61,9 +61,6 @@ class FinanceExportsApiTest {
     @Test fun createAndStatusSurface401WithoutRefreshingOrReplayingRequest() {
         val api = api()
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"expired"}"""))
-        server.enqueue(MockResponse().setBody(
-            """{"access_token":"refreshed-token","refresh_token":"next-refresh","expires_in":300}""",
-        ))
         val createFailure = runCatching {
             api.createExport(TENANT_ID, FinanceExportModels.request("2026-10-01", "2026-10-01"))
         }.exceptionOrNull()
@@ -77,9 +74,6 @@ class FinanceExportsApiTest {
             server.takeRequest(250, TimeUnit.MILLISECONDS))
 
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"detail":"expired"}"""))
-        server.enqueue(MockResponse().setBody(
-            """{"access_token":"refreshed-token","refresh_token":"next-refresh","expires_in":300}""",
-        ))
         val statusFailure = runCatching { api.exportStatus(TENANT_ID, EXPORT_ID) }.exceptionOrNull()
 
         assertTrue("status request must surface the original 401, got $statusFailure", statusFailure is ApiFailure)

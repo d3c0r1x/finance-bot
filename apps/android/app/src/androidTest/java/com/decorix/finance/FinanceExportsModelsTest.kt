@@ -71,6 +71,25 @@ class FinanceExportsModelsTest {
         assertNull(job.downloadUrl)
     }
 
+    @Test fun parserRejectsMissingNullableMemberIdKey() {
+        val json = jobJson("ready").put("allMembers", true).put("memberId", JSONObject.NULL)
+            .put("downloadUrl", DOWNLOAD_URL)
+        json.remove("memberId")
+
+        assertTrue("missing memberId must not be treated as explicit null", runCatching {
+            FinanceExportModels.job(json)
+        }.isFailure)
+    }
+
+    @Test fun parserRejectsMissingNullableDownloadUrlKey() {
+        val json = jobJson("ready").put("downloadUrl", DOWNLOAD_URL)
+        json.remove("downloadUrl")
+
+        assertTrue("missing downloadUrl must not be treated as explicit null", runCatching {
+            FinanceExportModels.job(json)
+        }.isFailure)
+    }
+
     @Test fun failedAndExpiredJobsCannotExposeDownloadUrl() {
         for (status in listOf("failed", "expired")) {
             assertNull(FinanceExportModels.job(jobJson(status)).downloadUrl)
@@ -97,6 +116,25 @@ class FinanceExportsModelsTest {
             assertTrue("unsafe URL must be rejected: $url", runCatching {
                 FinanceExportModels.job(jobJson("ready").put("downloadUrl", url))
             }.isFailure)
+        }
+    }
+
+    @Test fun serverFailuresMapToSafeLocalizedCodesWithoutLeakingCoreDetails() {
+        assertEquals("too_many_rows", financeExportErrorCode(ApiFailure(413, "private Core detail")))
+        assertEquals("forbidden", financeExportErrorCode(ApiFailure(403, "tenant scope rejected")))
+        assertEquals("unavailable", financeExportErrorCode(ApiFailure(503, "storage host name")))
+        assertEquals("network", financeExportErrorCode(IllegalStateException("private exception text")))
+    }
+
+    @Test fun pollingIsFiveSecondsBoundedAndStopsInBackgroundOrOnTerminalJobs() {
+        assertEquals(5_000L, FinanceExportPollingPolicy.INTERVAL_MILLIS)
+        assertTrue(FinanceExportPollingPolicy.shouldPoll("queued", 0, screenResumed = true))
+        assertTrue(FinanceExportPollingPolicy.shouldPoll("processing", 11, screenResumed = true))
+        assertTrue(!FinanceExportPollingPolicy.shouldPoll("processing", 12, screenResumed = true))
+        assertTrue(!FinanceExportPollingPolicy.shouldPoll("processing", 0, screenResumed = false))
+        for (status in listOf("ready", "failed", "expired")) {
+            assertTrue("terminal status $status must not be polled",
+                !FinanceExportPollingPolicy.shouldPoll(status, 0, screenResumed = true))
         }
     }
 
