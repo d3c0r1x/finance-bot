@@ -24,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.testTag
+import java.math.BigDecimal
+import java.math.RoundingMode
 
 @Composable
 internal fun BankImportPreviewSection(
@@ -37,6 +39,8 @@ internal fun BankImportPreviewSection(
     canUpload: Boolean = false,
     onPick: () -> Unit = {},
     onSelectRow: (String, String?) -> Unit = { _, _ -> },
+    onClassify: () -> Unit = {},
+    onSelectCategory: (String, String) -> Unit = { _, _ -> },
     onConfirm: () -> Unit = {},
     confirmationNeedsRefresh: Boolean = false,
     undoResult: FinanceBankImportUndoResult? = null,
@@ -76,6 +80,42 @@ internal fun BankImportPreviewSection(
         } }
         preview?.let { statement ->
             item(key = "summary") { BankImportStatementSummary(statement, language) }
+            val classifiable = statement.state == "needs_review" && statement.rows.any {
+                it.included && it.transactionType == "expense" && !it.merchant.isNullOrBlank()
+            }
+            if (classifiable && role != "viewer" && canUpload) {
+                item(key = "classify") {
+                    androidx.compose.material3.Button(
+                        modifier = Modifier.testTag("bank-import-classify"),
+                        onClick = onClassify,
+                        enabled = !busy,
+                    ) { Text(if (russian) "Предложить категории" else "Suggest categories") }
+                    Text(
+                        if (russian) "Core покажет гипотезы по названиям магазинов, без сумм и описаний."
+                        else "Core suggests categories from merchant names only; amounts and descriptions are not sent.",
+                    )
+                }
+            }
+            val clarificationMerchants = if (statement.state == "needs_review") {
+                statement.rows.filter { it.clarificationCandidate }
+                    .mapNotNull { it.merchant?.takeIf(String::isNotBlank) }.distinct()
+            } else emptyList()
+            if (clarificationMerchants.isNotEmpty()) {
+                item(key = "clarification") {
+                    androidx.compose.foundation.layout.Column(
+                        Modifier.fillMaxWidth().testTag("bank-import-clarification"),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(if (russian) "Нужно уточнить категории" else "Categories need review",
+                            style = MaterialTheme.typography.titleSmall)
+                        Text(if (russian) "До 6 магазинов, расходы от 300 ₽."
+                            else "Up to 6 merchants with at least RUB 300")
+                        clarificationMerchants.forEach { merchant ->
+                            Text(merchant, modifier = Modifier.testTag("bank-import-clarification-merchant-$merchant"))
+                        }
+                    }
+                }
+            }
             itemsIndexed(statement.rows, key = { index, row -> row.id.ifBlank { "operation-$index" } }) { _, row ->
                 BankImportRowCard(
                     row = row,
@@ -83,6 +123,7 @@ internal fun BankImportPreviewSection(
                     canEdit = canUpload && role != "viewer" && statement.state == "needs_review",
                     busy = busy,
                     onSelect = { type -> onSelectRow(row.id, type) },
+                    onSelectCategory = { code -> onSelectCategory(row.id, code) },
                 )
             }
             if (statement.state == "committed" && role != "viewer" && canUpload) {
@@ -238,9 +279,11 @@ private fun BankImportRowCard(
     canEdit: Boolean,
     busy: Boolean,
     onSelect: (String?) -> Unit,
+    onSelectCategory: (String) -> Unit,
 ) {
     val russian = language == "ru"
     var expanded by remember(row.id) { mutableStateOf(false) }
+    var categoryExpanded by remember(row.id) { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().testTag("bank-import-row-${row.id}")) {
         androidx.compose.foundation.layout.Column(Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -267,6 +310,25 @@ private fun BankImportRowCard(
                 if (russian) "Исключено · $reason" else "Excluded · $reason"
             }
             Text(decision, modifier = Modifier.testTag("bank-import-row-state-${row.id}"))
+            row.suggestedCategoryCode?.let { suggestion ->
+                val percentage = row.categoryConfidence?.toBigDecimalOrNull()
+                    ?.multiply(BigDecimal("100"))?.setScale(0, RoundingMode.HALF_UP)?.toPlainString()
+                Text(
+                    (if (russian) "Гипотеза: " else "Hypothesis: ") + merchantCategoryLabel(suggestion, language) +
+                        (percentage?.let { " · $it%" } ?: ""),
+                    modifier = Modifier.testTag("bank-import-row-hypothesis-${row.id}"),
+                )
+            }
+            row.categoryCode?.let { code ->
+                val source = when (row.categorySource) {
+                    "human" -> if (russian) "выбрано вами" else "chosen by you"
+                    "mapping" -> if (russian) "ваше правило" else "your rule"
+                    "model" -> if (russian) "гипотеза" else "model"
+                    else -> if (russian) "без правила" else "unmapped"
+                }
+                Text("${if (russian) "Категория" else "Category"}: ${merchantCategoryLabel(code, language)} · $source",
+                    modifier = Modifier.testTag("bank-import-row-category-state-${row.id}"))
+            }
             if (canEdit) {
                 androidx.compose.foundation.layout.Box {
                     TextButton(
@@ -293,7 +355,50 @@ private fun BankImportRowCard(
                     }
                 }
             }
+            if (canEdit && row.included && row.transactionType == "expense" && !row.merchant.isNullOrBlank()) {
+                androidx.compose.foundation.layout.Box {
+                    TextButton(
+                        modifier = Modifier.testTag("bank-import-row-category-${row.id}"),
+                        onClick = { categoryExpanded = true },
+                        enabled = !busy,
+                    ) {
+                        Text(row.categoryCode?.let { code ->
+                            "${if (russian) "Категория" else "Category"}: ${merchantCategoryLabel(code, language)}"
+                        } ?: if (russian) "Выбрать категорию" else "Choose category")
+                    }
+                    DropdownMenu(expanded = categoryExpanded, onDismissRequest = { categoryExpanded = false }) {
+                        merchantCategoryCodes.forEach { code ->
+                            DropdownMenuItem(
+                                modifier = Modifier.testTag("bank-import-category-choice-$code"),
+                                text = { Text(merchantCategoryLabel(code, language)) },
+                                onClick = { categoryExpanded = false; onSelectCategory(code) },
+                                enabled = !busy,
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+private val merchantCategoryCodes = listOf(
+    "еда", "транспорт", "жилье", "досуг", "одежда", "здоровье", "работа", "техника", "долги", "прочее",
+)
+
+private fun merchantCategoryLabel(code: String, language: String): String {
+    if (language == "ru") return code
+    return when (code) {
+        "еда" -> "Food"
+        "транспорт" -> "Transport"
+        "жилье" -> "Housing"
+        "досуг" -> "Leisure"
+        "одежда" -> "Clothing"
+        "здоровье" -> "Health"
+        "работа" -> "Work"
+        "техника" -> "Technology"
+        "долги" -> "Debt"
+        else -> "Other"
     }
 }
 

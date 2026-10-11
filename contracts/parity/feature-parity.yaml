@@ -1138,9 +1138,15 @@ features:
     evidence:
       - "Core check passes 153/153 with PostgreSQL 18.6 and no skips. The PostgreSQL API test verifies merchant-only AI input, 90-day cache reuse, personal-rule precedence, durable mapping readback and imported category. Python/contracts pass 208 with 3 optional database skips; Web passes 31/31 and production build."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F50: Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"
-      gap: "No Android user screen or equivalent flow is verified for F50 yet."
+      gap: "Live Android Core/OIDC classification, deployed AI availability, and real tenant-isolation E2E remain unverified."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportClassificationModelsTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportCategoryApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportClassificationScreensTest.kt
+      evidence:
+        - "Android API 27 import regression F47-F50 passes 57/57 on isolated emulator-5554; parity contracts pass 63/63; debug and AndroidTest APKs build; installed app launches. APK SHA-256 F2DF93FC648DC7D83088F441A0380C5F36FCB447645A93FE6E508A56F14404C3. Local Core-shaped responses do not prove live OIDC/Core or production AI."
     intentional_differences: []
   - id: F51
     feature: "Уточнение магазина меняет ранее импортированные подходящие записи"

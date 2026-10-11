@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 10:41 MSK, Europe/Moscow.
+Updated: 2026-10-11 11:05 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -18,8 +18,9 @@ Updated: 2026-10-11 10:41 MSK, Europe/Moscow.
 
 ## Current goal
 
-- F59 Android parity remains IN PROGRESS. Current registry: 44 partial, 12 missing, 2 approved N/A. F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
+- F59 Android parity remains IN PROGRESS. Current registry: 45 partial, 11 missing, 2 approved N/A. F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
 - F59.12 F49 Android duplicate outcomes and safe batch undo is locally GREEN; parity is PARTIAL pending live OIDC/Core, process-kill, and tenant-isolation E2E. Spec/plan: `.agent/specs/F49-android-import-dedup-undo.md` and `docs/superpowers/plans/2026-10-11-f49-android-import-dedup-undo.md`.
+- F59.13 F50 Android merchant classification is locally GREEN; parity is PARTIAL pending live OIDC/Core, deployed AI availability, and tenant-isolation E2E. Spec/plan: `.agent/specs/F50-android-merchant-classification.md` and `docs/superpowers/plans/2026-10-11-f50-android-merchant-classification.md`.
 - F59.2 F08 history/repeat/void locally GREEN: API 27 instrumentation 53/53; APK installed and launched; parity-contract tests 3/3. APK SHA-256: `2E7ABEE23A394665471435666333E03DF0F5D2EA5B00C0B2FA961A65342A9301`.
 - F59.2 F09 basic search/type filters observed RED then GREEN; API 27 full instrumentation 54/54. Updated debug APK SHA-256: `FB008F9E13114578347D653E602C158C3870886AF379263F8124931CBABCC937`; `MainActivity` is resumed on isolated API 27 emulator. Remaining: server-backed date/member filters, cursor paging, transaction editing, and live Core E2E.
 - F59.2 F03.1 first-time onboarding is locally GREEN and pushed in `1395decae6c50d337193fb6ec3810e6710484116`. F03 Android stays PARTIAL because repeat setup from profile is a later slice. Live OIDC/Core E2E, remaining parity, and F60/production gates remain.
@@ -2013,4 +2014,13 @@ Updated: 2026-10-11 10:41 MSK, Europe/Moscow.
 - Implementation: Android renders committed Core duplicate/created/reverted outcomes; stores only the latest import UUID per tenant; and offers writer-only explicit batch undo with confirmation, quoted revision, deterministic idempotency key, no body, no 401 retry, strict structured conflict parsing, and Core preview reconciliation. Guarded undo is capped at 20 seconds; AppAuth token persistence is off the UI thread.
 - GREEN: 45/45 F47/F48/F49 API/UI instrumentation on isolated Android 8.1/API 27; selected JVM policy/checkpoint/key suite 15/15; parity contracts 63/63; debug and AndroidTest APK builds pass. APK installed/launched on isolated emulator; SHA-256 `F7B58D2930D36254F783641AD00354944383A6F30A53E09D669BDD26128D6E9E`. `git diff --check` passes.
 - Status: F49 Android parity is PARTIAL pending live authenticated Core/OIDC undo, process-kill recovery, and real tenant-isolation E2E. Synthetic tests do not establish production hosting or real-account behavior.
-- Next: F50 Android merchant-category rules and Core-owned batch suggestions.
+- Next: F51 Android past-transaction merchant reclassification with separate Core preview and explicit Apply.
+
+## F59.13 F50 Android merchant classification — GREEN locally; PARTIAL pending live Core/OIDC — 2026-10-11
+
+- Plan/spec: `.agent/specs/F50-android-merchant-classification.md` and `docs/superpowers/plans/2026-10-11-f50-android-merchant-classification.md`. Android counterpart only; Core remains authoritative for AI batches/cache, category mappings, confidence, and top-six/RUB-300 clarification candidates. Historical reclassification remains F51.
+- TDD: three independent API, DTO, and Compose suites observed RED on missing Android routes/fields/hooks. GREEN failures caught and fixed: merged Compose semantics assumptions in the tests, strict confidence format follows `bank-import-preview.v1.schema.json`, and malformed clarification flags now fail parsing instead of disappearing. Review also corrected stale/ambiguous mutation recovery and English category labels.
+- Implementation: writer-only explicit classify action calls Core with quoted revision; Android displays returned hypothesis/provenance and Core-flagged clarification merchants; an explicit category choice uses Core's revision-guarded row endpoint and renders only Core's saved response. Viewer, excluded, income/refund, and no-merchant paths cannot save a mapping. Failed/ambiguous writes are never replayed; active same-session previews reconcile from Core.
+- GREEN: F47-F50 import API/UI instrumentation 57/57 on isolated Android 8.1/API 27 `emulator-5554`; debug and AndroidTest APK builds pass; parity contracts pass 63/63; APK installed/launched (PID 6256), SHA-256 `F2DF93FC648DC7D83088F441A0380C5F36FCB447645A93FE6E508A56F14404C3`. `git diff --check` passes. Contract validation follows registry update.
+- Status: F50 Android is PARTIAL pending live authenticated Android-to-Core OIDC classification, deployed AI availability, and real tenant-isolation E2E. Local synthetic Core responses do not verify deployment behavior.
+- Next: F51 Android past-transaction preview and separate explicit Apply; preserve manual edits and exact reviewed candidate versions.

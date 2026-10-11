@@ -49,6 +49,11 @@ data class FinanceBankImportRow(
     val duplicateOfTransactionId: String? = null,
     val outcome: String = "pending",
     val transactionId: String? = null,
+    val categoryCode: String? = null,
+    val categorySource: String = "unknown",
+    val suggestedCategoryCode: String? = null,
+    val categoryConfidence: String? = null,
+    val clarificationCandidate: Boolean = false,
 )
 
 data class FinanceBankImportUndoResult(
@@ -69,6 +74,10 @@ internal object FinanceBankImportModels {
     private val transactionTypes = setOf("expense", "income", "refund", "transfer")
     private val exclusionReasons = setOf("bank_fee", "external_transfer", "cash_withdrawal", "internal_transfer", "requires_review")
     private val outcomes = setOf("pending", "created", "duplicate", "excluded", "reverted")
+    private val merchantCategories = setOf("еда", "транспорт", "жилье", "досуг", "одежда", "здоровье",
+        "работа", "техника", "долги", "прочее")
+    private val categorySources = setOf("human", "mapping", "model", "unknown")
+    private val confidencePattern = Regex("(?:0\\.\\d{3}|1\\.000)")
     private val uuidPattern = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}")
 
     fun undoResult(json: JSONObject): FinanceBankImportUndoResult {
@@ -137,6 +146,14 @@ internal object FinanceBankImportModels {
                 .also { require(it == null || uuidPattern.matches(it)) { "Invalid duplicate transaction id" } }
             val transactionId = row.requiredNullableString("transactionId")
                 .also { require(it == null || uuidPattern.matches(it)) { "Invalid bank transaction id" } }
+            val categoryCode = row.nullableString("categoryCode")
+                .also { require(it == null || it in merchantCategories) { "Invalid bank import category" } }
+            val categorySource = row.nullableString("categorySource") ?: "unknown"
+            require(categorySource in categorySources) { "Invalid bank import category source" }
+            val suggestedCategoryCode = row.nullableString("suggestedCategoryCode")
+                .also { require(it == null || it in merchantCategories) { "Invalid suggested bank import category" } }
+            val categoryConfidence = row.nullableString("categoryConfidence")
+                .also { require(it == null || confidencePattern.matches(it)) { "Invalid bank import category confidence" } }
             FinanceBankImportRow(
                 operationDate = operationDate,
                 operationTime = operationTime,
@@ -156,6 +173,11 @@ internal object FinanceBankImportModels {
                 duplicateOfTransactionId = duplicateOfTransactionId,
                 outcome = outcome,
                 transactionId = transactionId,
+                categoryCode = categoryCode,
+                categorySource = categorySource,
+                suggestedCategoryCode = suggestedCategoryCode,
+                categoryConfidence = categoryConfidence,
+                clarificationCandidate = row.optionalBoolean("clarificationCandidate", false),
             )
         }
         val periodStart = json.getString("periodStart")
@@ -212,6 +234,13 @@ internal object FinanceBankImportModels {
     private fun JSONObject.requiredNullableString(name: String): String? {
         require(has(name)) { "Missing bank import field: $name" }
         return if (isNull(name)) null else getString(name)
+    }
+
+    private fun JSONObject.optionalBoolean(name: String, default: Boolean): Boolean {
+        if (!has(name)) return default
+        val value = opt(name)
+        require(value is Boolean) { "Invalid bank import boolean: $name" }
+        return value
     }
 
     private fun JSONObject.strictLong(name: String): Long {

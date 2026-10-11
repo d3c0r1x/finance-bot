@@ -132,6 +132,47 @@ class FinanceApi internal constructor(
         return FinanceBankImportModels.preview(JSONObject(body))
     }
 
+    fun classifyBankImport(
+        tenantId: String,
+        importId: String,
+        expectedRevision: Long,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceBankImportPreview {
+        require(isUuid(tenantId) && isUuid(importId)) { "Invalid bank import identifier" }
+        require(expectedRevision > 0L) { "Invalid bank import revision" }
+        val body = executeRequest(
+            "/api/v1/tenants/$tenantId/imports/$importId/classify", "POST",
+            ByteArray(0).toRequestBody("application/json".toMediaType()),
+            ifMatchVersion = expectedRevision,
+            retryUnauthorized = false,
+            expectedSessionGeneration = expectedSessionGeneration,
+        )
+        return FinanceBankImportModels.preview(JSONObject(body))
+    }
+
+    fun selectBankImportCategory(
+        tenantId: String,
+        importId: String,
+        rowId: String,
+        categoryCode: String,
+        expectedRevision: Long,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceBankImportPreview {
+        require(isUuid(tenantId) && isUuid(importId) && isUuid(rowId)) { "Invalid bank import identifier" }
+        require(expectedRevision > 0L) { "Invalid bank import revision" }
+        require(categoryCode in setOf("еда", "транспорт", "жилье", "досуг", "одежда", "здоровье",
+            "работа", "техника", "долги", "прочее")) { "Unsupported merchant category" }
+        val requestBody = JSONObject().put("categoryCode", categoryCode).toString()
+            .toRequestBody("application/json".toMediaType())
+        val body = executeRequest(
+            "/api/v1/tenants/$tenantId/imports/$importId/rows/$rowId/category", "PUT", requestBody,
+            ifMatchVersion = expectedRevision,
+            retryUnauthorized = false,
+            expectedSessionGeneration = expectedSessionGeneration,
+        )
+        return FinanceBankImportModels.preview(JSONObject(body))
+    }
+
     fun confirmBankImport(
         tenantId: String,
         importId: String,
