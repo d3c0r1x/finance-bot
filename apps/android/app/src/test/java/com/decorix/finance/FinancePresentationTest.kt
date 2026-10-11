@@ -9,6 +9,19 @@ class FinancePresentationTest {
         assertEquals("-12.30 RUB", formatMoney("-12.30", "en"))
     }
 
+    @Test fun formatsShoppingPurchaseCountsWithRussianDeclension() {
+        assertEquals("1 покупка", formatShoppingPurchaseCount(1, "ru"))
+        assertEquals("2 покупки", formatShoppingPurchaseCount(2, "ru"))
+        assertEquals("3 покупки", formatShoppingPurchaseCount(3, "ru"))
+        assertEquals("4 покупки", formatShoppingPurchaseCount(4, "ru"))
+        assertEquals("5 покупок", formatShoppingPurchaseCount(5, "ru"))
+        assertEquals("11 покупок", formatShoppingPurchaseCount(11, "ru"))
+        assertEquals("21 покупка", formatShoppingPurchaseCount(21, "ru"))
+        assertEquals("22 покупки", formatShoppingPurchaseCount(22, "ru"))
+        assertEquals("25 покупок", formatShoppingPurchaseCount(25, "ru"))
+        assertEquals("5 purchases", formatShoppingPurchaseCount(5, "en"))
+    }
+
     @Test fun translatesCoreCodesAndUsesSafeFallbackForFutureCodes() {
         assertEquals("Недостаточно истории", formatSemanticStatus("paceStatus", "insufficient_history", "ru"))
         assertEquals("Near limit", formatSemanticStatus("limitStatus", "near", "en"))

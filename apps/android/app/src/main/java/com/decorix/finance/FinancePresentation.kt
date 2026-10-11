@@ -18,6 +18,18 @@ internal fun formatMoney(value: String?, language: String, currency: String = "R
     return "${formatter.format(amount.setScale(2, RoundingMode.HALF_EVEN))} $symbol"
 }
 
+internal fun formatShoppingPurchaseCount(count: Int, language: String): String {
+    if (language != "ru") return "$count purchases"
+    val lastTwo = count % 100
+    val noun = when {
+        lastTwo in 11..14 -> "покупок"
+        count % 10 == 1 -> "покупка"
+        count % 10 in 2..4 -> "покупки"
+        else -> "покупок"
+    }
+    return "$count $noun"
+}
+
 internal fun formatSemanticStatus(kind: String, code: String, language: String): String {
     val russian = language == "ru"
     val labels = when (kind) {

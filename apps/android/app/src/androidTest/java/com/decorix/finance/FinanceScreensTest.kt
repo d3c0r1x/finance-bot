@@ -487,6 +487,67 @@ class FinanceScreensTest {
         compose.onNodeWithText("Not home inventory: suggestions use your confirmed receipt rhythm.").assertIsDisplayed()
     }
 
+    @Test fun shoppingPurchaseCountsUseCorrectRussianDeclension() {
+        val candidates = listOf(
+            shopping().candidates.single().copy(productName = "Товар один", productKey = "one", purchaseCount = 1),
+            shopping().candidates.single().copy(productName = "Товар два", productKey = "two", purchaseCount = 2),
+            shopping().candidates.single().copy(productName = "Товар пять", productKey = "five", purchaseCount = 5),
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            shoppingList = shopping().copy(candidates = candidates, estimatedListCost = "300.00")))
+
+        compose.onNodeWithText("Покупки").performScrollTo().performClick()
+        compose.onNodeWithText("Медиана: раз в 10 дн. · 1 покупка").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Медиана: раз в 10 дн. · 2 покупки").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(3)
+        compose.onNodeWithText("Медиана: раз в 10 дн. · 5 покупок").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun shoppingDueAndExactEstimatesAreLocalizedInRussianAndEnglish() {
+        val template = shopping().candidates.single()
+        val candidates = listOf(
+            template.copy(productName = "Рис", productKey = "rice", purchaseCount = 3,
+                estimatedCost = "12.34", daysUntilDue = -2),
+            template.copy(productName = "Чай", productKey = "tea", purchaseCount = 4,
+                estimatedCost = "56.78", daysUntilDue = 0),
+            template.copy(productName = "Кофе", productKey = "coffee", purchaseCount = 5,
+                estimatedCost = "90.88", daysUntilDue = 3),
+        )
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            shoppingList = shopping().copy(candidates = candidates, estimatedListCost = "160.00")))
+
+        compose.onNodeWithText("Покупки").performScrollTo().performClick()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(1)
+        compose.onNodeWithText("Просрочено на 2 дн.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Оценка: 12.34 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(2)
+        compose.onNodeWithText("Пора").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Оценка: 56.78 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(3)
+        compose.onNodeWithText("Через 3 дн.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Оценка: 90.88 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(4)
+        compose.onNodeWithText("Оценка списка: 160.00 ₽").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(5)
+        compose.onNodeWithText("Это подсказка по чекам, не учёт запасов.").performScrollTo().assertIsDisplayed()
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(1)
+        compose.onNodeWithText("2 days overdue").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Estimate: 12.34 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(2)
+        compose.onNodeWithText("Due now").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Estimate: 56.78 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(3)
+        compose.onNodeWithText("In 3 days").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Estimate: 90.88 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(4)
+        compose.onNodeWithText("Estimated list cost: 160.00 RUB").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("shopping-list").performScrollToIndex(5)
+        compose.onNodeWithText("Not home inventory: suggestions use your confirmed receipt rhythm.")
+            .performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun shoppingDecisionsExplainHiddenItemsAndCopyOnlyActiveCandidates() {
         var decision: Pair<String, String>? = null
         var copied = ""

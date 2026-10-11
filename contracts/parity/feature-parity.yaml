@@ -766,7 +766,11 @@ features:
       scenario: "Android counterpart for F35: Покупки по ритму, медиана интервалов, стоимость списка"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F35 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceShoppingApiTest.kt"
+        - "apps/android/app/src/test/java/com/decorix/finance/ShoppingResponsePolicyTest.kt"
+        - "apps/android/app/src/test/java/com/decorix/finance/FinancePresentationTest.kt"
+      gap: "Live authenticated Android-to-Core OIDC shopping flow remains unverified; synthetic API/UI coverage is GREEN."
     intentional_differences: []
   - id: F36
     feature: "«Уже купил», mute/unmute, блокировки, копирование закупки"

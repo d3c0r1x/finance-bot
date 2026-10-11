@@ -104,6 +104,7 @@ class MainActivity : ComponentActivity() {
     private val receiptRepeatWarningsGeneration = AtomicLong(0L)
     private val reportRequestGeneration = AtomicLong(0L)
     private val familyBudgetFoodRequestGeneration = AtomicLong(0L)
+    private val shoppingRequestGeneration = AtomicLong(0L)
     @Volatile private var receiptPollTask: ScheduledFuture<*>? = null
     private var ui by mutableStateOf(FinanceUiState())
     private var language by mutableStateOf("ru")
@@ -883,6 +884,7 @@ class MainActivity : ComponentActivity() {
             ui.receiptRepeatWarningsReceiptId, ui.receiptRepeatWarnings,
             loading = ui.receiptRepeatWarningsLoading)
         val generation = receiptDisputedItemsGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
         ui = ui.copy(receiptDisputedItemsReceiptId = receiptId,
             receiptDisputedItemsRequestedPage = page, receiptDisputedItemsLoading = true,
             receiptDisputedItemsError = null)
@@ -930,9 +932,29 @@ class MainActivity : ComponentActivity() {
             val refreshedDoNotBuy = if (mutationMayHaveApplied && refreshDoNotBuy) {
                 runCatching { api.doNotBuy(tenantId) }
             } else null
-            val refreshedShopping = if (mutationMayHaveApplied && refreshShopping) {
+            val shoppingRequest = if (mutationMayHaveApplied && refreshShopping) {
+                ShoppingResponsePolicy.beginRequest(shoppingRequestGeneration)
+            } else null
+            val refreshedShopping = if (shoppingRequest != null) {
                 runCatching { api.shoppingCandidates(tenantId) }
             } else null
+            fun publishShoppingRefresh() {
+                val response = refreshedShopping ?: return
+                val request = shoppingRequest ?: return
+                ShoppingResponsePolicy.applyIfCurrent(
+                    sessionGeneration = sessionGeneration,
+                    requestTenantId = tenantId,
+                    activeTenantId = { ui.tenants.firstOrNull()?.id },
+                    authenticated = { ui.authenticated },
+                    requestGeneration = request,
+                    currentRequestGeneration = { shoppingRequestGeneration.get() },
+                ) {
+                    response.fold(
+                        onSuccess = { shopping -> ui = ui.copy(shoppingList = shopping, shoppingError = null) },
+                        onFailure = { ui = ui.copy(shoppingError = "unavailable") },
+                    )
+                }
+            }
             result.onSuccess { snapshot ->
                 if (receiptDisputedItemsGeneration.get() == generation && ui.authenticated &&
                     ui.tenants.firstOrNull()?.id == tenantId && ui.receiptDraft?.id == receiptId) {
@@ -955,12 +977,8 @@ class MainActivity : ComponentActivity() {
                             refreshedDoNotBuy?.isSuccess == true -> null
                             else -> ui.doNotBuyError
                         },
-                        shoppingList = refreshedShopping?.getOrNull() ?: ui.shoppingList,
-                        shoppingError = when {
-                            refreshedShopping?.isFailure == true -> "unavailable"
-                            refreshedShopping?.isSuccess == true -> null
-                            else -> ui.shoppingError
-                        })
+                        )
+                    publishShoppingRefresh()
                 }
             }.onFailure { error ->
                 if (receiptDisputedItemsGeneration.get() == generation && ui.authenticated &&
@@ -992,12 +1010,8 @@ class MainActivity : ComponentActivity() {
                             refreshedDoNotBuy?.isSuccess == true -> null
                             else -> ui.doNotBuyError
                         },
-                        shoppingList = refreshedShopping?.getOrNull() ?: ui.shoppingList,
-                        shoppingError = when {
-                            refreshedShopping?.isFailure == true -> "unavailable"
-                            refreshedShopping?.isSuccess == true -> null
-                            else -> ui.shoppingError
-                        })
+                        )
+                    publishShoppingRefresh()
                 }
             }
         }
@@ -1726,8 +1740,9 @@ class MainActivity : ComponentActivity() {
                         pendingTransactionEditKey = null
                     }
                     val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
-                    if (!sameTenant) synchronized(productCatalogStateLock) {
-                        productCatalogGeneration.incrementAndGet()
+                    if (!sameTenant) {
+                        synchronized(productCatalogStateLock) { productCatalogGeneration.incrementAndGet() }
+                        ShoppingResponsePolicy.beginRequest(shoppingRequestGeneration)
                     }
                     ui = ui.copy(busy = false, tenants = snapshot.tenants,
                         transactions = snapshot.transactions, transactionNextCursor = snapshot.transactionNextCursor,
@@ -1751,6 +1766,9 @@ class MainActivity : ComponentActivity() {
                         productCatalogError = ui.productCatalogError.takeIf { sameTenant },
                         doNotBuyError = ui.doNotBuyError.takeIf { sameTenant },
                         doNotBuyLoading = ui.doNotBuyLoading && sameTenant,
+                        shoppingList = ui.shoppingList.takeIf { sameTenant },
+                        shoppingLoading = ui.shoppingLoading && sameTenant,
+                        shoppingError = ui.shoppingError.takeIf { sameTenant },
                         receiptDisputedItemsPage = ui.receiptDisputedItemsPage.takeIf { sameTenant },
                         receiptDisputedItemsReceiptId = ui.receiptDisputedItemsReceiptId.takeIf { sameTenant },
                         receiptDisputedItemsRequestedPage = ui.receiptDisputedItemsRequestedPage.takeIf { sameTenant },
@@ -1977,18 +1995,39 @@ class MainActivity : ComponentActivity() {
 
     private fun loadShoppingCandidates() {
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated) return
+        val requestGeneration = ShoppingResponsePolicy.beginRequest(shoppingRequestGeneration)
+        val sessionGeneration = ReceiptOperationGeneration.capture()
         ui = ui.copy(shoppingLoading = true, shoppingError = null)
         executor.execute {
+            if (!ReceiptOperationGeneration.isCurrent(sessionGeneration) ||
+                shoppingRequestGeneration.get() != requestGeneration) return@execute
             runCatching { api.shoppingCandidates(tenantId) }
                 .onSuccess { shopping ->
-                    if (ui.tenants.firstOrNull()?.id == tenantId) {
+                    ShoppingResponsePolicy.applyIfCurrent(
+                        sessionGeneration = sessionGeneration,
+                        requestTenantId = tenantId,
+                        activeTenantId = { ui.tenants.firstOrNull()?.id },
+                        authenticated = { ui.authenticated },
+                        requestGeneration = requestGeneration,
+                        currentRequestGeneration = { shoppingRequestGeneration.get() },
+                    ) {
                         ui = ui.copy(shoppingLoading = false, shoppingList = shopping, shoppingError = null)
                     }
                 }
                 .onFailure { error ->
-                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
-                    else if (ui.tenants.firstOrNull()?.id == tenantId) {
-                        ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
+                    ShoppingResponsePolicy.applyIfCurrent(
+                        sessionGeneration = sessionGeneration,
+                        requestTenantId = tenantId,
+                        activeTenantId = { ui.tenants.firstOrNull()?.id },
+                        authenticated = { ui.authenticated },
+                        requestGeneration = requestGeneration,
+                        currentRequestGeneration = { shoppingRequestGeneration.get() },
+                    ) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else {
+                            ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
+                        }
                     }
                 }
         }
@@ -2016,6 +2055,7 @@ class MainActivity : ComponentActivity() {
 
     private fun applyDoNotBuyDecision(productKey: String, action: String) {
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val sessionGeneration = ReceiptOperationGeneration.capture()
         ui = ui.copy(doNotBuyLoading = true, doNotBuyError = null)
         executor.execute {
             runCatching {
@@ -2025,10 +2065,31 @@ class MainActivity : ComponentActivity() {
                 if (ui.tenants.firstOrNull()?.id == tenantId) {
                     ui = ui.copy(doNotBuyLoading = false, doNotBuy = report,
                         productDecisions = decisions, doNotBuyError = null)
-                    if (ui.shoppingList != null) runCatching { api.shoppingCandidates(tenantId) }
-                        .onSuccess { shopping ->
-                            if (ui.tenants.firstOrNull()?.id == tenantId) ui = ui.copy(shoppingList = shopping)
-                        }
+                    if (ui.shoppingList != null && ReceiptOperationGeneration.isCurrent(sessionGeneration) &&
+                        ui.authenticated && ui.tenants.firstOrNull()?.id == tenantId) {
+                        val shoppingGeneration = ShoppingResponsePolicy.beginRequest(shoppingRequestGeneration)
+                        runCatching { api.shoppingCandidates(tenantId) }
+                            .onSuccess { shopping ->
+                                ShoppingResponsePolicy.applyIfCurrent(
+                                    sessionGeneration = sessionGeneration,
+                                    requestTenantId = tenantId,
+                                    activeTenantId = { ui.tenants.firstOrNull()?.id },
+                                    authenticated = { ui.authenticated },
+                                    requestGeneration = shoppingGeneration,
+                                    currentRequestGeneration = { shoppingRequestGeneration.get() },
+                                ) { ui = ui.copy(shoppingList = shopping, shoppingError = null) }
+                            }
+                            .onFailure {
+                                ShoppingResponsePolicy.applyIfCurrent(
+                                    sessionGeneration = sessionGeneration,
+                                    requestTenantId = tenantId,
+                                    activeTenantId = { ui.tenants.firstOrNull()?.id },
+                                    authenticated = { ui.authenticated },
+                                    requestGeneration = shoppingGeneration,
+                                    currentRequestGeneration = { shoppingRequestGeneration.get() },
+                                ) { ui = ui.copy(shoppingError = "unavailable") }
+                            }
+                    }
                 }
             }.onFailure { error ->
                 if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
@@ -2101,8 +2162,13 @@ class MainActivity : ComponentActivity() {
 
     private fun applyShoppingDecision(productKey: String, action: String) {
         val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        if (!ui.authenticated) return
+        val requestGeneration = ShoppingResponsePolicy.beginRequest(shoppingRequestGeneration)
+        val sessionGeneration = ReceiptOperationGeneration.capture()
         ui = ui.copy(shoppingLoading = true, shoppingError = null)
         executor.execute {
+            if (!ReceiptOperationGeneration.isCurrent(sessionGeneration) ||
+                shoppingRequestGeneration.get() != requestGeneration) return@execute
             runCatching {
                 when (action) {
                     "bought" -> api.markShoppingBought(tenantId, productKey)
@@ -2111,13 +2177,29 @@ class MainActivity : ComponentActivity() {
                     else -> error("Unknown shopping decision")
                 }
             }.onSuccess { shopping ->
-                if (ui.tenants.firstOrNull()?.id == tenantId) {
+                ShoppingResponsePolicy.applyIfCurrent(
+                    sessionGeneration = sessionGeneration,
+                    requestTenantId = tenantId,
+                    activeTenantId = { ui.tenants.firstOrNull()?.id },
+                    authenticated = { ui.authenticated },
+                    requestGeneration = requestGeneration,
+                    currentRequestGeneration = { shoppingRequestGeneration.get() },
+                ) {
                     ui = ui.copy(shoppingLoading = false, shoppingList = shopping, shoppingError = null)
                 }
             }.onFailure { error ->
-                if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
-                else if (ui.tenants.firstOrNull()?.id == tenantId) {
-                    ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
+                ShoppingResponsePolicy.applyIfCurrent(
+                    sessionGeneration = sessionGeneration,
+                    requestTenantId = tenantId,
+                    activeTenantId = { ui.tenants.firstOrNull()?.id },
+                    authenticated = { ui.authenticated },
+                    requestGeneration = requestGeneration,
+                    currentRequestGeneration = { shoppingRequestGeneration.get() },
+                ) {
+                    if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                    else {
+                        ui = ui.copy(shoppingLoading = false, shoppingError = error.message ?: "Request failed")
+                    }
                 }
             }
         }
@@ -5078,8 +5160,8 @@ private fun ShoppingScreen(modifier: Modifier, state: FinanceUiState, language: 
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(candidate.productName, style = MaterialTheme.typography.titleMedium)
                             Text(due)
-                            Text(if (russian) "Медиана: раз в ${candidate.medianIntervalDays} дн. · ${candidate.purchaseCount} покупки"
-                                else "Median: every ${candidate.medianIntervalDays} days · ${candidate.purchaseCount} purchases")
+                            Text(if (russian) "Медиана: раз в ${candidate.medianIntervalDays} дн. · ${formatShoppingPurchaseCount(candidate.purchaseCount, language)}"
+                                else "Median: every ${candidate.medianIntervalDays} days · ${formatShoppingPurchaseCount(candidate.purchaseCount, language)}")
                             Text(if (russian) "Оценка: ${candidate.estimatedCost} ₽" else "Estimate: ${candidate.estimatedCost} RUB")
                             Text(if (russian) "Последняя покупка: ${candidate.lastPurchasedAt.take(10)}"
                                 else "Last purchased: ${candidate.lastPurchasedAt.take(10)}")

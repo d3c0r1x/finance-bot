@@ -288,6 +288,35 @@ class FinanceModelsTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
+    fun rejectsShoppingCandidateBelowCoreThreePurchaseThreshold() {
+        FinanceModels.shoppingList(JSONObject(shoppingJson(purchaseCount = 2)))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsShoppingCandidatePastCoreDueHorizon() {
+        FinanceModels.shoppingList(JSONObject(shoppingJson(daysUntilDue = 4)))
+    }
+
+    @Test fun preservesCoreSuppliedDaysUntilDueIncludingStaleNegativeValue() {
+        val shopping = FinanceModels.shoppingList(JSONObject(shoppingJson(
+            daysUntilDue = -20,
+            medianIntervalDays = 10,
+        )))
+
+        assertEquals(-20, shopping.candidates.single().daysUntilDue)
+    }
+
+    private fun shoppingJson(purchaseCount: Int = 3, daysUntilDue: Int = 0,
+                             medianIntervalDays: Int = 10) = """
+        {"candidates":[{"productName":"Молоко 1 л","productKey":"milk","purchaseCount":$purchaseCount,
+          "medianIntervalDays":$medianIntervalDays,"usualUnitPrice":"100.000000","estimatedCost":"100.00",
+          "lastPurchasedAt":"2026-10-01T00:00:00Z","dueAt":"2026-10-09T00:00:00Z",
+          "daysUntilDue":$daysUntilDue}],
+         "estimatedListCost":"100.00","inventoryTracked":false,
+         "boughtCandidates":[],"mutedCandidates":[],"blockedCandidates":[]}
+    """.trimIndent()
+
+    @Test(expected = IllegalArgumentException::class)
     fun rejectsShoppingPayloadThatClaimsInventory() {
         FinanceModels.shoppingList(JSONObject("""
             {"candidates":[],"estimatedListCost":"0.00","inventoryTracked":true,
