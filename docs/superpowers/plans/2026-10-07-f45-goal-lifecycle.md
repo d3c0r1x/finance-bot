@@ -36,4 +36,4 @@
 - [x] Render Core `activeProgress` and every `history` row in the returned order; preserve nullable money/verdicts and show current candidates after completion without auto-accept.
 - [x] Invalidate only the matching tenant's cached goal overview after a successful, current-session receipt confirmation. Re-entering Goals fetches fresh Core progress; failed confirmation leaves cached state unchanged.
 - [x] Run F45 tests, F43/F42/report/model regression, contracts, unit policy tests, APK build/API 27 launch and `git diff --check`.
-- [ ] Record evidence and commit/push the Android slice. Keep live OIDC parity partial and E8 legacy import separate.
+- [x] Record evidence and commit/push the Android slice as `dee2325`. Keep live OIDC parity partial and E8 legacy import separate.

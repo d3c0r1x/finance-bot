@@ -1975,7 +1975,7 @@ Updated: 2026-10-11 08:08 MSK, Europe/Moscow.
 - Status: local Android F44 acceptance GREEN; parity remains PARTIAL because live authenticated Android-to-Core OIDC accept/cancel and real tenant isolation have not been verified. F44.4 checklist and feature-parity evidence are updated. No production backend behavior changed.
 - Commit/push: `65cb20e0f7256307a60fcb1c1341ef4c50e846d1` (`feat(F44): add Android goal candidates`) pushed; `git ls-remote` confirms `origin/feat/saas-rewrite` matches. `gh run list --commit 65cb20e` returned no runs. Next: F45 Android goal progress/history UI; keep legacy import rehearsals under their separate E8 gate.
 
-## F59.9 F45.5 Android progress, purchase note and history — GREEN; COMMIT_PENDING — 2026-10-11
+## F59.9 F45.5 Android progress, purchase note and history — GREEN; COMMITTED/PUSHED — 2026-10-11
 
 - Scope: render Core-owned active progress and all returned goal outcomes in the Goals tab; preserve Core order, exact values and nulls; keep candidates explicit; refresh matching goal cache only after a guarded successful receipt confirmation.
 - Tests first: policy unit test was RED on missing `shouldInvalidateGoalCache`; Compose tests were RED on missing progress/history headings and values. Coverage includes count progress with known spend in RU/EN, unknown sum with null verdict/no fabricated zero, returned completed + legacy outcome order, next candidate without implicit acceptance, and viewer read-only access. Independent reviewer found no production blocker and requested the Russian known-spend case; that added test passed 1/1.
@@ -1983,4 +1983,4 @@ Updated: 2026-10-11 08:08 MSK, Europe/Moscow.
 - GREEN: focused F45 Compose 5/5; combined F43/F42/reports/model/F44/F45 regression 178/178 on isolated Android 8.1/API 27 `emulator-5554`; additional RU count-spend Compose test 1/1; `GoalResponsePolicyTest` passed; contract suite 60/60 after registry update; debug + AndroidTest APK builds pass; debug app installed/launched (PID 18595), APK SHA-256 `E038319463CEFABDB75FB1BA12491376851D3386566817B3867330A89B22FF8C`; `git diff --check` clean. Synthetic/local verification only.
 - Parity: Android F45 becomes PARTIAL after commit, pending live authenticated Android-to-Core OIDC and real tenant-isolation verification. F45 legacy SQLite import/rehearsal remains separate E8 work; no production SQLite rehearsal was claimed.
 - Review: independent read-only review found no concrete implementation bug; added the missing RU count-progress assertion before final gates.
-- Commit/push: pending. Next: F46 Android outcome display/delivery parity; keep live and migration gates visible.
+- Commit/push: `dee23258d0ab0e2ba8dffb4a929105c6b547b123` (`feat(F45.5): show Android goal progress and history`) pushed to `origin/feat/saas-rewrite`; remote ref confirms the SHA. `gh run list --commit dee2325` returned no runs. Next: F46 Android outcome display/delivery parity; keep live and migration gates visible.
