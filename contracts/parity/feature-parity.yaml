@@ -611,7 +611,8 @@ features:
       scenario: "Android counterpart for F29: Прогноз погашения с процентами; `services/analytics.py`"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F29 acceptance condition or live Core integration."
+      evidence: "Compose tests with synthetic Core forecast state cover an 18-month horizon and localized basis in RU/EN, preserve zero and null horizons, and verify unknown server basis text uses a safe localized fallback."
+      gap: "Compose coverage uses synthetic state; MockWebServer forecast fixtures verify transport only and do not prove the live Core response-to-screen path, actual zero/null boundary mapping, or authenticated OIDC integration. Core/PostgreSQL tests remain authoritative for interest math and the 600-month boundary. Android localizes only the currently recognized Core basis sentence; other values intentionally fall back to an unavailable label."
     intentional_differences: []
   - id: F30
     feature: "Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"

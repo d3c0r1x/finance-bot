@@ -5436,7 +5436,7 @@ private fun DebtScreen(state: FinanceUiState, language: String,
             }
         } else Text(if (russian) "Просмотр только для чтения" else "Read-only access")
         if (state.debts.isEmpty()) Text(if (russian) "Долгов пока нет" else "No debts yet")
-        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(Modifier.weight(1f).testTag("debt-list"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(state.debts) { debt ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -5461,8 +5461,12 @@ private fun DebtScreen(state: FinanceUiState, language: String,
                             Text(if (russian) "Прогноз выплаты" else "Payoff forecast")
                         }
                         state.debtForecasts[debt.id]?.let { forecast ->
-                            Text(if (russian) "${forecast.monthsToPayoff?.let { "$it мес." } ?: "Срок не рассчитан"} · ${forecast.estimateBasis}"
-                            else "${forecast.monthsToPayoff?.let { "$it months" } ?: "No estimate"} · ${forecast.estimateBasis}")
+                            val months = if (russian) {
+                                forecast.monthsToPayoff?.let { "$it мес." } ?: "Срок не рассчитан"
+                            } else {
+                                forecast.monthsToPayoff?.let { "$it months" } ?: "No estimate"
+                            }
+                            Text("$months · ${formatDebtForecastBasis(forecast.estimateBasis, language)}")
                         }
                     }
                 }

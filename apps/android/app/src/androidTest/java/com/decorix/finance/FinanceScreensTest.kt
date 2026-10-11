@@ -150,6 +150,49 @@ class FinanceScreensTest {
         assertEquals("debt-1", forecastDebtId)
     }
 
+    @Test fun debtForecastShowsCoreHorizonAndLocalizedBasisInRussianAndEnglish() {
+        val coreDebt = debt()
+        val coreBasis = "Fixed minimum payment with monthly compound estimate; no interest is posted to ledger."
+        show(FinanceUiState(
+            authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(coreDebt),
+            debtForecasts = mapOf(coreDebt.id to DebtForecast(18, coreBasis)),
+        ))
+
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onNodeWithText("18 мес. · Прогноз по фиксированному минимальному платежу; проценты рассчитываются ежемесячно и не добавляются к остатку.")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("18 months · Estimate uses a fixed minimum payment with monthly interest; interest is not posted to the ledger.")
+            .performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun debtForecastPreservesCoreZeroForClosedDebtAndNullForUnclearableDebt() {
+        val closed = debt().copy(id = "debt-closed", currentBalance = "0.00", status = "closed")
+        val unclearable = debt().copy(id = "debt-open")
+        val basis = "Fixed minimum payment with monthly compound estimate; no interest is posted to ledger."
+        show(FinanceUiState(
+            authenticated = true, tenants = listOf(tenant("owner")), debts = listOf(closed, unclearable),
+            debtForecasts = mapOf(
+                closed.id to DebtForecast(0, basis),
+                unclearable.id to DebtForecast(null, basis),
+            ),
+        ))
+
+        compose.onNodeWithText("Долги").performScrollTo().performClick()
+        compose.onNodeWithText("0 мес. · Прогноз по фиксированному минимальному платежу; проценты рассчитываются ежемесячно и не добавляются к остатку.")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("debt-list").performScrollToIndex(1)
+        compose.onNodeWithText("Срок не рассчитан · Прогноз по фиксированному минимальному платежу; проценты рассчитываются ежемесячно и не добавляются к остатку.")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithTag("debt-list").performScrollToIndex(0)
+        compose.onNodeWithText("0 months · Estimate uses a fixed minimum payment with monthly interest; interest is not posted to the ledger.")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("debt-list").performScrollToIndex(1)
+        compose.onNodeWithText("No estimate · Estimate uses a fixed minimum payment with monthly interest; interest is not posted to the ledger.")
+            .performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun postedDebtPaymentCanBeVoidedAndPassesCoreTransactionToHandler() {
         var voided: FinanceTransaction? = null
         val payment = transaction().copy(

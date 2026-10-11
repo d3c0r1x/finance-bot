@@ -14,4 +14,18 @@ class FinancePresentationTest {
         assertEquals("Near limit", formatSemanticStatus("limitStatus", "near", "en"))
         assertEquals("Неизвестный статус", formatSemanticStatus("paceStatus", "future_code", "ru"))
     }
+
+    @Test fun localizesKnownDebtForecastBasisAndHidesUnknownServerText() {
+        val coreBasis = "Fixed minimum payment with monthly compound estimate; no interest is posted to ledger."
+        assertEquals(
+            "Прогноз по фиксированному минимальному платежу; проценты рассчитываются ежемесячно и не добавляются к остатку.",
+            formatDebtForecastBasis(coreBasis, "ru"),
+        )
+        assertEquals(
+            "Estimate uses a fixed minimum payment with monthly interest; interest is not posted to the ledger.",
+            formatDebtForecastBasis(coreBasis, "en"),
+        )
+        assertEquals("Основание прогноза недоступно", formatDebtForecastBasis("future server copy", "ru"))
+        assertEquals("Forecast basis unavailable", formatDebtForecastBasis("future server copy", "en"))
+    }
 }

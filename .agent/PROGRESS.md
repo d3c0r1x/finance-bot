@@ -1859,3 +1859,12 @@ Updated: 2026-10-11, Europe/Moscow.
 - Android `:app:assembleDebugAndroidTest` passes. F28 Android remains PARTIAL pending a live authenticated Android/Core reversal and refreshed-balance E2E. F27's full 220-test instrumentation, focused F27 8/8, JVM 35/35, and contracts 78/2 remain the prior verified regression baseline.
 - Commit: `32a88b8` (`test(F28): verify Android debt payment reversal`). This post-commit record is separate; push after recording it. Preserve unrelated worktree files.
 - Next: continue F59 on the next approved Android parity gap.
+
+## F59.3 F29 Android forecast presentation — GREEN; COMMIT_PENDING — 2026-10-11 03:07 MSK
+
+- Scope: localize Core's debt payoff forecast basis in Android while preserving the exact server month count. A closed debt's `0` remains zero; a null horizon remains unavailable. Android adds no interest or payoff calculations.
+- Tests first: synthetic Compose tests were RED on the raw English basis in Russian for both positive and zero-month forecasts. After localization, the zero-month assertion passed and exposed lazy-list behavior: the null-horizon debt was the second item and needed explicit list scrolling. Added a stable debt-list test tag and verified RU/EN horizon/basis display. JVM tests also verify the recognized Core sentence and safe localized fallback for unrecognized server copy.
+- Implementation maps only the exact current Core basis sentence; unknown future copy is hidden behind a localized unavailable label. Added localized expected formatter output and visible forecast basis in the debt screen.
+- GREEN: full direct API 27 instrumentation on isolated `emulator-5554` 227/227; Android JVM tests 36/36; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` pass; contracts 78 passed/2 skipped; `git diff --check` clean. Debug APK SHA-256 `85305FDD55D54E24841E46EC1EA76C1940ACEB70672769C1587CC03C82D0BF81`.
+- F29 Android remains PARTIAL: current Compose tests use synthetic DTOs, and MockWebServer transport fixtures do not prove live Core response-to-screen mapping, actual zero/null boundary behavior, or authenticated OIDC. Core/PostgreSQL tests remain the evidence for interest math and the 600-month boundary. Android only recognizes the currently defined English basis sentence; other basis text displays a neutral unavailable label.
+- No user-owned files were staged. Next: continue F59 with F30 Android parity.

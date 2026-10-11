@@ -38,6 +38,19 @@ internal fun formatSemanticStatus(kind: String, code: String, language: String):
     return labels[code] ?: if (russian) "Неизвестный статус" else "Unknown status"
 }
 
+internal fun formatDebtForecastBasis(basis: String, language: String): String {
+    val russian = language == "ru"
+    return when (basis) {
+        "Fixed minimum payment with monthly compound estimate; no interest is posted to ledger." ->
+            if (russian) {
+                "Прогноз по фиксированному минимальному платежу; проценты рассчитываются ежемесячно и не добавляются к остатку."
+            } else {
+                "Estimate uses a fixed minimum payment with monthly interest; interest is not posted to the ledger."
+            }
+        else -> if (russian) "Основание прогноза недоступно" else "Forecast basis unavailable"
+    }
+}
+
 internal fun formatRollingFoodStatus(status: RollingFoodStatus, language: String, currency: String = "RUB"): String {
     val russian = language == "ru"
     val label = if (russian) "Еда за 7 дней" else "Food over 7 days"
