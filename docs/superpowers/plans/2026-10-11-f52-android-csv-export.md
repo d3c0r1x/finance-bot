@@ -28,7 +28,7 @@
 2. Assert no polling is performed for ready/failed/expired jobs and no repeated ready GET is used to refresh a link. Assert the only ready refresh is caused by the user's explicit file-action tap.
 3. Implement a lifecycle-bound polling policy. Core audits every status GET and audits a URL issuance for each ready response; stop automatically at terminal state and bound all active polling. Do not hide polling behind a global process worker.
 
-**Follow-up evidence (partial):** `FinanceExportsSection` accepts an injectable suspend delay for deterministic Compose coverage. The focused test proves 12 automatic refresh callbacks receive a 5,000 ms delay request and that manual refresh remains available afterward (1/1 on API 27). This does not model elapsed wall time or prove cancellation on background/session/tenant changes; keep those acceptance items open.
+**Follow-up evidence (partial):** `FinanceExportsSection` accepts an injectable suspend delay for deterministic Compose coverage. Tests prove 12 automatic refresh callbacks request a 5,000 ms delay, manual refresh remains available afterward, and disposing the export screen cancels a suspended poll without making a request (2/2 focused; all F52 model/API/screen tests 29/29 on API 27). This does not model elapsed wall time or prove cancellation on app background/session/tenant changes; keep those acceptance items open.
 
 ## Task 5 — Safe signed download tests (RED first)
 

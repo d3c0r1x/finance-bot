@@ -16,10 +16,13 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(AndroidJUnit4::class)
 class FinanceExportsScreensTest {
@@ -157,6 +160,38 @@ class FinanceExportsScreensTest {
         compose.onNodeWithText("Обновить статус").performScrollTo().performClick()
         assertEquals(13, refreshes.size)
         assertEquals(EXPORT_ID, refreshes.last())
+    }
+
+    @Test fun leavingExportScreenCancelsPendingAutomaticStatusWait() {
+        val visible = mutableStateOf(true)
+        val waitStarted = AtomicBoolean(false)
+        val waitCancelled = AtomicBoolean(false)
+        val refreshes = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                if (visible.value) FinanceExportsSection(
+                    role = "owner", language = "ru", timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = job("queued"), busy = false, error = null,
+                    onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                    pollDelay = {
+                        suspendCancellableCoroutine { continuation ->
+                            waitStarted.set(true)
+                            continuation.invokeOnCancellation { waitCancelled.set(true) }
+                        }
+                    },
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        assertTrue(waitStarted.get())
+        assertEquals(emptyList<String>(), refreshes)
+
+        compose.runOnIdle { visible.value = false }
+        compose.waitForIdle()
+
+        assertTrue(waitCancelled.get())
+        assertEquals(emptyList<String>(), refreshes)
     }
 
     @Test fun readyEmptyExportOpensOnlyTheReturnedSignedUrlAfterTap() {

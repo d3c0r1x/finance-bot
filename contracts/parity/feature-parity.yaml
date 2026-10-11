@@ -1194,6 +1194,7 @@ features:
       evidence:
         - "F52 Android model/API/screen tests pass 27/27; combined F47-F52 Android regression passes 99/99 on isolated Android 8.1/API 27 emulator-5554. Android JVM suite passes 69/69; debug and AndroidTest APKs build; parity/contract tests pass 66/66. Fresh debug APK SHA-256 38FF5CB9DB43626C7E679056EFCA2A084915D3DB5A3438B43CA6805F18FDD063 installed and MainActivity launched on emulator-5554. Live OIDC/Core/worker/S3/browser transfer not run."
         - "Follow-up local Compose test passes 1/1 and the complete F52 model/API/screen set passes 28/28 on emulator-5554. An injected delay verifies exactly twelve automatic status calls each scheduled at 5000 ms and confirms manual refresh remains available after the bounded window. This does not prove wall-clock cadence or lifecycle cancellation."
+        - "Follow-up cancellation Compose test passes; all F52 model/API/screen tests pass 29/29 on emulator-5554. Disposing the export screen cancels the suspended poll and sends no status request. Background/session/tenant-switch cancellation and elapsed wall-clock timing remain unverified."
     intentional_differences: []
   - id: F53
     feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"

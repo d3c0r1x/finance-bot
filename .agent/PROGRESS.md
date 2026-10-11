@@ -2054,3 +2054,10 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Emulator safety: test installs and execution explicitly targeted `emulator-5554`; `emulator-5558` was listed but not modified or run.
 - Commit/push: `ada6208` (`test(F52): verify Android export polling window`) pushed; `git ls-remote` confirmed `origin/feat/saas-rewrite` at `ada6208e9b9907f22e42e2bbca1f451706fa618a`.
 - Next: test polling cancellation and the explicit fresh-link handoff, or record live deployment gates before F53 Android; do not mark full F52 parity complete from this local test.
+
+## F59.17 F52 screen-exit polling cancellation — GREEN locally; PARTIAL — 2026-10-11
+
+- Added a cancellable fake wait to the Compose export screen test. Leaving the screen cancels its pending poll delay and produces no status GET. Focused cancellation test 1/1; complete F52 model/API/screen instrumentation set 29/29 on isolated Android 8.1/API 27 `emulator-5554`.
+- The production path continues to use cancellable `kotlinx.coroutines.delay` inside `LaunchedEffect`; no production behavior changed in this follow-up.
+- Remaining: app-background/session/tenant-switch poll cancellation, real wall-clock cadence, fresh-link refresh and external-intent safety, RU/EN completeness, and live Core/OIDC/worker/S3/downloaded-byte proof.
+- Next: finish F52 explicit download handoff tests, then implement the approved F53 Android member-list-to-transactions navigation slice.
