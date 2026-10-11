@@ -136,6 +136,29 @@ class FinanceExportsScreensTest {
         compose.onAllNodesWithTag("download-export").assertCountEquals(0)
     }
 
+    @Test fun activeExportUsesTwelveFiveSecondPollsThenKeepsManualRefreshAvailable() {
+        val waits = mutableListOf<Long>()
+        val refreshes = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                FinanceExportsSection(
+                    role = "owner", language = "ru", timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = job("processing"), busy = false, error = null,
+                    onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                    pollDelay = { millis -> waits += millis },
+                )
+            }
+        }
+
+        compose.waitForIdle()
+
+        assertEquals(List(12) { 5_000L }, waits)
+        assertEquals(List(12) { EXPORT_ID }, refreshes)
+        compose.onNodeWithText("Обновить статус").performScrollTo().performClick()
+        assertEquals(13, refreshes.size)
+        assertEquals(EXPORT_ID, refreshes.last())
+    }
+
     @Test fun readyEmptyExportOpensOnlyTheReturnedSignedUrlAfterTap() {
         val opened = mutableListOf<String>()
         compose.setContent {

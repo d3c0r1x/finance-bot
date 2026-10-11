@@ -2045,3 +2045,11 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Emulator note: one delegated `connectedDebugAndroidTest` RED attempt selected both connected AVDs, including `emulator-5558`; after discovery all installs and test executions were pinned explicitly to `emulator-5554`. No further commands targeted `emulator-5558`.
 - Commit: `af2db45` (`feat(F52): add Android CSV export flow`); test-first baseline commit: `7a74cea`.
 - Next: complete F52 Android's remaining targeted lifecycle/download evidence or record required live checks as deployment gates before proceeding to F53 Android.
+
+## F59.16 F52 polling-window test follow-up — GREEN locally; PARTIAL — 2026-10-11
+
+- TDD: added a Compose acceptance test for the real `FinanceExportsSection` loop. It initially failed to compile because no delay injection seam existed (missing `pollDelay` parameter). Added a defaulted suspend delay hook that uses the same production 5-second coroutine delay; focused emulator test then passed.
+- Coverage: exactly 12 automatic refresh callbacks request a 5,000 ms delay each; after that window, the active job still offers a manual one-shot status refresh. Focused test 1/1; all F52 model/API/screen instrumentation tests 28/28 on isolated Android 8.1/API 27 `emulator-5554`; debug and AndroidTest APKs build.
+- Limits: this test checks the scheduled delay argument, not elapsed wall-clock cadence. Screen/background/session/tenant cancellation, fresh-link-to-external-intent orchestration, bearer isolation at handoff, complete RU/EN matrix, live Core/OIDC/worker/S3 and downloaded-byte verification remain open. F52 Android is still PARTIAL.
+- Emulator safety: test installs and execution explicitly targeted `emulator-5554`; `emulator-5558` was listed but not modified or run.
+- Next: test polling cancellation and the explicit fresh-link handoff, or record live deployment gates before F53 Android; do not mark full F52 parity complete from this local test.

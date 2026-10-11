@@ -48,6 +48,7 @@ internal fun FinanceExportsSection(
     onRefresh: (String) -> Unit,
     onDownload: (String) -> Unit,
     modifier: Modifier = Modifier,
+    pollDelay: suspend (Long) -> Unit = { delay(it) },
 ) {
     val russian = language == "ru"
     val manager = role == "owner" || role == "admin"
@@ -87,7 +88,7 @@ internal fun FinanceExportsSection(
 
     LaunchedEffect(job?.id, job?.status, screenResumed) {
         while (FinanceExportPollingPolicy.shouldPoll(job?.status, polls.intValue, screenResumed)) {
-            delay(FinanceExportPollingPolicy.INTERVAL_MILLIS)
+            pollDelay(FinanceExportPollingPolicy.INTERVAL_MILLIS)
             if (FinanceExportPollingPolicy.shouldPoll(job?.status, polls.intValue, screenResumed)) {
                 polls.intValue += 1
                 job?.id?.let(onRefresh)
