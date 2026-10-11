@@ -296,6 +296,91 @@ data class FinanceAdviceAnalyticsReport(
     val recalculation: FinanceAdviceRecalculation,
 )
 
+data class FinanceGoalOverview(
+    val unit: String,
+    val inputWatermark: String,
+    val candidates: List<FinanceGoalCandidate>,
+    val groups: List<FinanceGoalCandidate>,
+    val skipped: List<FinanceGoalSkipped>,
+    val active: FinanceMemberGoal?,
+    val activeProgress: FinanceGoalProgress?,
+    val history: List<FinanceGoalOutcome>,
+)
+
+data class FinanceGoalCandidate(
+    val key: String,
+    val productKey: String?,
+    val name: String,
+    val unit: String,
+    val monthlyRate: String,
+    val countTarget: Int,
+    val monthlySpend: String?,
+    val monthlyLimit: String?,
+    val estimatedReduction: String?,
+    val purchaseCount: Int,
+    val evidenceCount: Int,
+    val memberProductKeys: List<String>?,
+)
+
+data class FinanceGoalSkipped(
+    val productKey: String,
+    val name: String,
+    val monthlySpend: String?,
+    val reasonCode: String,
+)
+
+data class FinanceMemberGoal(
+    val id: String,
+    val key: String,
+    val scope: String,
+    val name: String,
+    val unit: String,
+    val monthlyRate: String,
+    val countTarget: Int,
+    val monthlySpend: String?,
+    val monthlyLimit: String?,
+    val evidenceCount: Int,
+    val inputWatermark: String,
+    val acceptedAt: String,
+    val endsAt: String,
+    val status: String,
+    val version: Long,
+)
+
+data class FinanceGoalUnitResponse(val unit: String)
+
+data class FinanceGoalProgress(
+    val algorithmVersion: String,
+    val inputWatermark: String,
+    val unit: String,
+    val bought: Int,
+    val spent: String?,
+    val amountsUnknown: Boolean,
+    val over: Boolean?,
+    val met: Boolean?,
+    val finished: Boolean,
+    val daysLeft: Int,
+    val windowStart: String,
+    val windowEnd: String,
+)
+
+data class FinanceGoalOutcome(
+    val id: String,
+    val goalId: String?,
+    val key: String,
+    val name: String,
+    val scope: String,
+    val unit: String,
+    val countTarget: Int,
+    val monthlyLimit: String?,
+    val bought: Int,
+    val spent: String?,
+    val met: Boolean?,
+    val acceptedAt: String,
+    val completedAt: String,
+    val origin: String,
+)
+
 data class FinanceAdviceSavings(
     val available: Boolean,
     val reasonCode: String,
@@ -699,6 +784,214 @@ data class TransactionDraftEdit(
 )
 
 internal object FinanceModels {
+    fun goalOverview(json: JSONObject): FinanceGoalOverview {
+        requireGoalFields(json, setOf("unit", "active", "inputWatermark", "candidates", "groups", "skipped",
+            "activeProgress", "history"))
+        val unit = goalUnit(json.get("unit"))
+        val watermark = goalWatermark(json.get("inputWatermark"))
+        val candidates = goalRows(json.getJSONArray("candidates"), groups = false)
+        val groups = goalRows(json.getJSONArray("groups"), groups = true)
+        val skippedJson = json.getJSONArray("skipped")
+        require(skippedJson.length() <= 3) { "Too many skipped goal candidates" }
+        val skipped = (0 until skippedJson.length()).map { index ->
+            val item = skippedJson.getJSONObject(index)
+            requireGoalFields(item, setOf("productKey", "name", "monthlySpend", "reasonCode"))
+            val productKey = goalString(item, "productKey")
+            val name = goalName(item, "name")
+            val spend = goalDecimal(item, "monthlySpend")
+            val reason = goalString(item, "reasonCode")
+            require(goalProductKey(productKey) && reason in setOf("minimum_savings", "missing_amounts")
+                && (reason == "minimum_savings" && spend != null || reason == "missing_amounts" && spend == null)) {
+                "Invalid skipped goal candidate"
+            }
+            FinanceGoalSkipped(productKey, name, spend, reason)
+        }
+        val active = requiredNullableObject(json, "active")?.let(::memberGoal)
+        val progress = requiredNullableObject(json, "activeProgress")?.let(::goalProgress)
+        require((active == null) == (progress == null)) { "Goal progress must match active goal" }
+        if (active != null) {
+            require(progress?.unit == active.unit && active.status == "active") {
+                "Active goal progress does not match accepted terms"
+            }
+        }
+        val historyJson = json.getJSONArray("history")
+        require(historyJson.length() <= 48) { "Too many goal outcomes" }
+        val history = (0 until historyJson.length()).map { index -> goalOutcome(historyJson.getJSONObject(index)) }
+        return FinanceGoalOverview(unit, watermark, candidates, groups, skipped, active, progress, history)
+    }
+
+    fun goalUnitResponse(json: JSONObject): FinanceGoalUnitResponse {
+        requireGoalFields(json, setOf("unit"))
+        return FinanceGoalUnitResponse(goalUnit(json.get("unit")))
+    }
+
+    fun memberGoal(json: JSONObject): FinanceMemberGoal {
+        requireGoalFields(json, setOf("id", "key", "scope", "name", "unit", "monthlyRate", "countTarget",
+            "monthlySpend", "monthlyLimit", "evidenceCount", "inputWatermark", "acceptedAt", "endsAt", "status", "version"))
+        val id = goalUuid(json, "id")
+        val key = goalString(json, "key")
+        val scope = goalString(json, "scope")
+        val name = goalName(json, "name")
+        val unit = goalUnit(json.get("unit"))
+        val rate = goalDecimal(json, "monthlyRate", required = true)!!
+        val countTarget = exactInt(json, "countTarget")
+        val spend = goalDecimal(json, "monthlySpend")
+        val limit = goalDecimal(json, "monthlyLimit")
+        val evidenceCount = exactInt(json, "evidenceCount")
+        val watermark = goalWatermark(json.get("inputWatermark"))
+        val acceptedAt = goalInstant(json, "acceptedAt")
+        val endsAt = goalInstant(json, "endsAt")
+        val status = goalString(json, "status")
+        val version = exactLong(json, "version")
+        require(goalKey(key) && scope in setOf("product", "group") && countTarget >= 0 && evidenceCount >= 1
+            && version > 0 && Instant.parse(endsAt).isAfter(Instant.parse(acceptedAt))
+            && countTarget >= 0
+            && status in setOf("active", "cancelled", "completed")) { "Invalid member goal" }
+        return FinanceMemberGoal(id, key, scope, name, unit, rate, countTarget, spend, limit,
+            evidenceCount, watermark, acceptedAt, endsAt, status, version)
+    }
+
+    private fun goalRows(rows: JSONArray, groups: Boolean): List<FinanceGoalCandidate> {
+        require(rows.length() <= if (groups) 2 else 3) { "Too many goal candidates" }
+        val keys = mutableSetOf<String>()
+        return (0 until rows.length()).map { index ->
+            val row = rows.getJSONObject(index)
+            requireGoalFields(row, setOf("key", "productKey", "name", "unit", "monthlyRate", "countTarget",
+                "monthlySpend", "monthlyLimit", "estimatedReduction", "purchaseCount", "evidenceCount"),
+                optional = setOf("memberProductKeys"))
+            val key = goalString(row, "key")
+            val productKey = requiredNullableString(row, "productKey")
+            val name = goalName(row, "name")
+            val unit = goalUnit(row.get("unit"))
+            val rate = goalDecimal(row, "monthlyRate", required = true)!!
+            val countTarget = exactInt(row, "countTarget")
+            val spend = goalDecimal(row, "monthlySpend")
+            val limit = goalDecimal(row, "monthlyLimit")
+            val reduction = goalDecimal(row, "estimatedReduction")
+            val purchaseCount = exactInt(row, "purchaseCount")
+            val evidenceCount = exactInt(row, "evidenceCount")
+            val membersJson = row.opt("memberProductKeys")
+            val members = if (membersJson == null || membersJson === JSONObject.NULL) null else {
+                val array = membersJson as? JSONArray ?: throw IllegalArgumentException("Invalid goal member keys")
+                require(array.length() <= 50_000) { "Too many goal member keys" }
+                (0 until array.length()).map { memberIndex ->
+                    val member = array.get(memberIndex) as? String
+                        ?: throw IllegalArgumentException("Invalid goal member key")
+                    require(goalProductKey(member)) { "Invalid goal member key" }
+                    member
+                }.also { require(it.distinct().size == it.size) { "Duplicate goal member key" } }
+            }
+            require(goalKey(key) && keys.add(key) && name.isNotBlank() && name.length <= 200
+                && purchaseCount in 2..50_000 && evidenceCount in 1..50_000
+                && (if (groups) productKey == null && !members.isNullOrEmpty()
+                    else productKey != null && goalProductKey(productKey) && members == null)) { "Invalid goal candidate" }
+            FinanceGoalCandidate(key, productKey, name, unit, rate, countTarget, spend, limit, reduction,
+                purchaseCount, evidenceCount, members)
+        }
+    }
+
+    private fun goalProgress(json: JSONObject): FinanceGoalProgress {
+        requireGoalFields(json, setOf("algorithmVersion", "inputWatermark", "unit", "bought", "spent",
+            "amountsUnknown", "over", "met", "finished", "daysLeft", "windowStart", "windowEnd"))
+        val algorithm = goalString(json, "algorithmVersion")
+        val watermark = goalWatermark(json.get("inputWatermark"))
+        val unit = goalUnit(json.get("unit"))
+        val bought = exactInt(json, "bought")
+        val spent = goalDecimal(json, "spent")
+        val unknown = requiredBoolean(json, "amountsUnknown")
+        val over = goalNullableBoolean(json, "over")
+        val met = goalNullableBoolean(json, "met")
+        val finished = requiredBoolean(json, "finished")
+        val daysLeft = exactInt(json, "daysLeft")
+        val start = goalInstant(json, "windowStart")
+        val end = goalInstant(json, "windowEnd")
+        require(algorithm == "goal-progress-f45.v1" && bought in 0..50_000 && daysLeft in 0..30
+            && Instant.parse(end).isAfter(Instant.parse(start))
+            && (unit != "sum" || unknown || spent != null)
+            && (!unknown || spent == null)
+            && (spent == null || spent.length <= 18)) { "Invalid goal progress" }
+        return FinanceGoalProgress(algorithm, watermark, unit, bought, spent, unknown, over, met,
+            finished, daysLeft, start, end)
+    }
+
+    private fun goalOutcome(json: JSONObject): FinanceGoalOutcome {
+        requireGoalFields(json, setOf("id", "goalId", "key", "name", "scope", "unit", "countTarget",
+            "monthlyLimit", "bought", "spent", "met", "acceptedAt", "completedAt", "origin"))
+        val id = goalUuid(json, "id")
+        val goalId = requiredNullableString(json, "goalId")?.also { require(isCanonicalUuid(it)) { "Invalid goal outcome goal ID" } }
+        val key = goalString(json, "key")
+        val name = goalName(json, "name")
+        val scope = goalString(json, "scope")
+        val unit = goalUnit(json.get("unit"))
+        val countTarget = exactInt(json, "countTarget")
+        val limit = goalDecimal(json, "monthlyLimit")
+        val bought = exactInt(json, "bought")
+        val spent = goalDecimal(json, "spent")
+        val met = goalNullableBoolean(json, "met")
+        val acceptedAt = goalInstant(json, "acceptedAt")
+        val completedAt = goalInstant(json, "completedAt")
+        val origin = goalString(json, "origin")
+        require(goalKey(key) && scope in setOf("product", "group") && countTarget >= 0 && bought in 0..50_000
+            && origin in setOf("legacy", "completed") && Instant.parse(completedAt) >= Instant.parse(acceptedAt)
+            && (limit == null || limit.length <= 18) && (spent == null || spent.length <= 18)
+            ) { "Invalid goal outcome" }
+        return FinanceGoalOutcome(id, goalId, key, name, scope, unit, countTarget, limit, bought, spent,
+            met, acceptedAt, completedAt, origin)
+    }
+
+    private fun goalUnit(raw: Any): String = (raw as? String)?.also {
+        require(it == "count" || it == "sum") { "Invalid goal unit" }
+    } ?: throw IllegalArgumentException("Invalid goal unit")
+
+    private fun goalUuid(json: JSONObject, field: String): String = goalString(json, field).also {
+        require(isCanonicalUuid(it)) { "Invalid goal UUID: $field" }
+    }
+
+    private fun goalWatermark(raw: Any): String = (raw as? String)?.also {
+        require(it.matches(Regex("^[1-9]\\d{0,19}$"))) { "Invalid goal input watermark" }
+    } ?: throw IllegalArgumentException("Invalid goal input watermark")
+
+    private fun goalDecimal(json: JSONObject, field: String, required: Boolean = false): String? {
+        val raw = requiredNullableString(json, field)
+        if (raw == null) {
+            require(!required) { "Missing goal decimal: $field" }
+            return null
+        }
+        val pattern = Regex("^\\d+\\.\\d{2}$")
+        require(pattern.matches(raw) && raw.toBigDecimalOrNull() != null) { "Invalid goal decimal: $field" }
+        return raw
+    }
+
+    private fun goalInstant(json: JSONObject, field: String): String = goalString(json, field).also {
+        require(runCatching { Instant.parse(it) }.isSuccess) { "Invalid goal instant: $field" }
+    }
+
+    private fun goalNullableBoolean(json: JSONObject, field: String): Boolean? {
+        require(json.has(field)) { "Missing nullable field: $field" }
+        if (json.isNull(field)) return null
+        return json.get(field) as? Boolean ?: throw IllegalArgumentException("Invalid goal boolean: $field")
+    }
+
+    private fun goalString(json: JSONObject, field: String): String = json.get(field) as? String
+        ?: throw IllegalArgumentException("Invalid goal string: $field")
+
+    private fun goalName(json: JSONObject, field: String): String = goalString(json, field).also {
+        require(it.isNotBlank() && it.length <= 200) { "Invalid goal name" }
+    }
+
+    private fun goalKey(value: String): Boolean = value.length in 1..256 && value == value.trim()
+        && value.matches(Regex("^[a-zа-я0-9:_ -]+$"))
+
+    private fun goalProductKey(value: String): Boolean = value.length in 1..256
+        && value.matches(Regex("^[a-zа-я0-9]+$"))
+
+    private fun requireGoalFields(json: JSONObject, expected: Set<String>, optional: Set<String> = emptySet()) {
+        val actual = json.keys().asSequence().toSet()
+        require(actual.containsAll(expected) && actual.all { it in expected || it in optional }) {
+            "Invalid goal fields"
+        }
+    }
+
     fun productCatalog(json: JSONObject, requestedQuery: String): FinanceProductCatalog {
         val responseFields = setOf("mode", "query", "products")
         require(json.keys().asSequence().toSet() == responseFields) { "Invalid product catalog fields" }

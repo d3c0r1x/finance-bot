@@ -475,6 +475,42 @@ class FinanceApi internal constructor(
         )))
     }
 
+    fun getGoals(tenantId: String): FinanceGoalOverview {
+        require(isUuid(tenantId)) { "Invalid goal tenant identity" }
+        return FinanceModels.goalOverview(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/goals", "GET",
+        )))
+    }
+
+    fun updateGoalUnit(tenantId: String, unit: String): FinanceGoalUnitResponse {
+        require(isUuid(tenantId)) { "Invalid goal tenant identity" }
+        require(unit == "count" || unit == "sum") { "Invalid goal unit" }
+        val body = JSONObject().put("unit", unit).toString()
+        return FinanceModels.goalUnitResponse(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/goals/unit", "PUT", body, retryUnauthorized = false,
+        )))
+    }
+
+    fun acceptGoal(tenantId: String, candidateKey: String, inputWatermark: String): FinanceMemberGoal {
+        require(isUuid(tenantId)) { "Invalid goal tenant identity" }
+        require(candidateKey.length in 1..256 && candidateKey == candidateKey.trim()
+            && candidateKey.matches(Regex("^[a-zа-я0-9:_ -]+$"))) {
+            "Invalid goal candidate key"
+        }
+        require(inputWatermark.matches(Regex("^[1-9]\\d{0,19}$"))) { "Invalid goal input watermark" }
+        val body = JSONObject().put("candidateKey", candidateKey).put("inputWatermark", inputWatermark).toString()
+        return FinanceModels.memberGoal(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/goals", "POST", body, retryUnauthorized = false,
+        )))
+    }
+
+    fun cancelGoal(tenantId: String, goalId: String): FinanceMemberGoal {
+        require(isUuid(tenantId) && isUuid(goalId)) { "Invalid goal identity" }
+        return FinanceModels.memberGoal(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/goals/$goalId/cancel", "POST", "{}", retryUnauthorized = false,
+        )))
+    }
+
     fun recurringProjection(tenantId: String): FinanceRecurringProjection = FinanceModels.recurringProjection(JSONObject(
         execute("/api/v1/tenants/$tenantId/analytics/recurring", "GET"),
     ))

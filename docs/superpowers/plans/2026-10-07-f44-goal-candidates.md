@@ -26,3 +26,12 @@
 - [x] Show unknown money as an em dash, explain missing amounts, and refresh after a stale-watermark response; add RU/EN text and mobile layout.
 - [x] Run all Web tests (72/72), production TypeScript/Vite build, full Core/PostgreSQL regression and `git diff --check`.
 - [x] Commit F44.3 separately and record parity/progress evidence. F44.1–F44.3 gates pass; F44 is complete. F45 lifecycle/history and F46 outcome delivery remain separate.
+
+## F44.4 Android member goal candidates
+
+- [x] Add authenticated API and Compose behavior tests first; observe RED for missing Android goal DTOs, endpoints, and screen.
+- [x] Parse the complete Core goals overview, including nullable exact money, skipped candidates, accepted terms, and reserved F45 progress/history fields; reject malformed contract data. Independently reviewed DTO validation and added RED tests for exact two-decimal values, OpenAPI evidence minimums, and 50,000 counter limits.
+- [x] Add a separate Android Goals surface for writer/viewer roles. Let writers change future proposal unit, explicitly accept with the displayed candidate key and watermark, and explicitly cancel; keep accepted terms immutable and server-owned.
+- [x] Keep candidate calculation and 30-day terms in Core. On stale 409 refresh and explain; never silently accept a changed candidate. Preserve null amounts and skipped reasons.
+- [x] Run focused Android API/screen tests, F43/F42/report/model regression, contract checks, APK build and API 27 isolated emulator launch, then `git diff --check`.
+- [x] Record local evidence; Android F44 stays PARTIAL until live authenticated Android-to-Core OIDC verification. Commit and push only project-owned F44 files after GREEN.

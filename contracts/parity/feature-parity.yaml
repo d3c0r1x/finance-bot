@@ -989,13 +989,21 @@ features:
       - services/core/src/test/java/com/decorix/finance/core/api/GoalServiceTest.java
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - apps/web/src/GoalsPanel.test.tsx
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceGoalsApiTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceGoalsScreensTest.kt
+      - apps/android/app/src/test/java/com/decorix/finance/GoalResponsePolicyTest.kt
       - tools/contracts/test_contracts.py
     evidence:
-      - "F44.1 Go candidates, nullable amount handling and authenticated internal API pass Go/contract gates; F44.2 adds member-scoped preference, durable accepted goal, Core API/BFF and 50,000 combined payload bound with PostgreSQL/Core/contract gates; F44.3 adds RU/EN Web candidates and active-goal UI with writer/viewer actions (72 tests, production build and Core regression). F44.1–F44.3 are locally green and pushed; GitHub workflows did not start. Android counterpart remains separately missing."
+      - "F44.1 Go candidates, nullable amount handling and authenticated internal API pass Go/contract gates; F44.2 adds member-scoped preference, durable accepted goal, Core API/BFF and 50,000 combined payload bound with PostgreSQL/Core/contract gates; F44.3 adds RU/EN Web candidates and active-goal UI with writer/viewer actions (72 tests, production build and Core regression). F44.1–F44.3 are locally green and pushed; GitHub workflows did not start."
+      - "F44.4 Android adds typed Core goals routes/DTOs and a RU/EN Goals tab with writer-only unit update, explicit accept/cancel and immutable server terms. Late responses are rejected across auth session, tenant, request and screen boundaries; stale 409 refreshes without silently changing the selected candidate. Tests were RED before implementation for missing API/models/screen and stale response policy; independent contract review then produced 5 failing validation tests before parser fixes. GREEN: F44 API/UI 22/22 and combined F43/F42/report/model/F44 regression 173/173 on isolated Android 8.1/API 27; GoalResponsePolicy JVM test 1/1; contracts 60/60; debug and AndroidTest APK builds, isolated APK launch, and git diff --check pass. APK SHA-256 704CC97DD15E94A39D1831B44B9076B57D9F747982034B6757407432C4D17915. Live authenticated Android-to-Core OIDC is not yet verified."
     android:
-      status: missing
+      status: partial
       scenario: "Android counterpart for F44: Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
-      gap: "No Android user screen or equivalent flow is verified for F44 yet."
+      tests:
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceGoalsApiTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceGoalsScreensTest.kt"
+        - "apps/android/app/src/test/java/com/decorix/finance/GoalResponsePolicyTest.kt"
+      gap: "Synthetic Android 8.1/API 27 API/UI tests pass. Live authenticated Android-to-Core OIDC accept/cancel and real tenant-isolation remain unverified."
     intentional_differences: []
   - id: F45
     feature: "Ход цели, заметка при покупке, завершение, история, следующий кандидат"

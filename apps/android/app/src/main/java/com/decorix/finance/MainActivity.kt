@@ -104,6 +104,8 @@ class MainActivity : ComponentActivity() {
     private val receiptRepeatWarningsGeneration = AtomicLong(0L)
     private val reportRequestGeneration = AtomicLong(0L)
     private val adviceAnalyticsGeneration = AtomicLong(0L)
+    private val goalRequestGeneration = AtomicLong(0L)
+    @Volatile private var goalsScreenActive = false
     private val receiptRecalculationGeneration = AtomicLong(0L)
     private val familyBudgetFoodRequestGeneration = AtomicLong(0L)
     private val shoppingRequestGeneration = AtomicLong(0L)
@@ -162,6 +164,12 @@ class MainActivity : ComponentActivity() {
                         onAdviceAnalyticsRequest = ::requestAdviceAnalytics,
                         onAdviceAnalyticsPoll = ::pollAdviceAnalytics,
                         onAdviceAnalyticsStopPolling = ::stopAdviceAnalyticsPolling,
+                        onGoalsScreenExit = ::leaveGoalsScreen,
+                        onGoalsRefresh = ::loadGoals,
+                        onGoalSelectedUnit = ::selectGoalUnit,
+                        onGoalSaveUnit = ::saveGoalUnit,
+                        onGoalAccept = ::acceptGoal,
+                        onGoalCancel = ::cancelGoal,
                         onRecalculationPreview = ::previewReceiptRecalculation,
                         onRecalculationApply = ::applyReceiptRecalculation,
                         onRecalculationHistory = ::loadReceiptRecalculationHistory,
@@ -804,6 +812,8 @@ class MainActivity : ComponentActivity() {
                     failure.authSessionGeneration != api.authSessionGeneration) return@synchronized
                 productCatalogGeneration.incrementAndGet()
                 receiptRecalculationGeneration.incrementAndGet()
+                goalRequestGeneration.incrementAndGet()
+                goalsScreenActive = false
                 ui = FinanceUiState(error = "Sign in again")
             }
         }
@@ -1754,6 +1764,7 @@ class MainActivity : ComponentActivity() {
                     val sameTenant = ui.tenants.firstOrNull()?.id == snapshot.tenants.firstOrNull()?.id
                     if (!sameTenant) {
                         receiptRecalculationGeneration.incrementAndGet()
+                        goalRequestGeneration.incrementAndGet()
                         synchronized(productCatalogStateLock) { productCatalogGeneration.incrementAndGet() }
                         ShoppingResponsePolicy.beginRequest(shoppingRequestGeneration)
                     }
@@ -1788,6 +1799,11 @@ class MainActivity : ComponentActivity() {
                         receiptRecalculationDetail = ui.receiptRecalculationDetail.takeIf { sameTenant },
                         receiptRecalculationBusy = ui.receiptRecalculationBusy && sameTenant,
                         receiptRecalculationError = ui.receiptRecalculationError.takeIf { sameTenant },
+                        goalOverview = ui.goalOverview.takeIf { sameTenant },
+                        goalTenantId = ui.goalTenantId.takeIf { sameTenant },
+                        goalSelectedUnit = ui.goalSelectedUnit.takeIf { sameTenant } ?: "count",
+                        goalBusy = ui.goalBusy && sameTenant,
+                        goalError = ui.goalError.takeIf { sameTenant },
                         receiptDisputedItemsPage = ui.receiptDisputedItemsPage.takeIf { sameTenant },
                         receiptDisputedItemsReceiptId = ui.receiptDisputedItemsReceiptId.takeIf { sameTenant },
                         receiptDisputedItemsRequestedPage = ui.receiptDisputedItemsRequestedPage.takeIf { sameTenant },
@@ -2070,6 +2086,152 @@ class MainActivity : ComponentActivity() {
         error is ApiFailure && error.status in 400..499 -> "request_failed"
         else -> "unavailable"
     }
+
+    private fun selectGoalUnit(unit: String) {
+        if (unit !in setOf("count", "sum")) return
+        ui = ui.copy(goalSelectedUnit = unit)
+    }
+
+    private fun loadGoals() {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!ui.authenticated) return
+        goalsScreenActive = true
+        val tenantId = tenant.id
+        val requestGeneration = goalRequestGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(goalBusy = true, goalError = null,
+            goalOverview = ui.goalOverview.takeIf { ui.goalTenantId == tenantId })
+        executor.execute {
+            runCatching { api.getGoals(tenantId) }
+                .onSuccess { overview ->
+                    if (isCurrentGoalRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        ui = ui.copy(goalOverview = overview, goalTenantId = tenantId,
+                            goalSelectedUnit = overview.unit, goalBusy = false, goalError = null)
+                    }
+                }
+                .onFailure { error ->
+                    if (isCurrentGoalRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else ui = ui.copy(goalBusy = false, goalError = goalErrorCode(error))
+                    }
+                }
+        }
+    }
+
+    private fun saveGoalUnit(unit: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        if (!canWriteGoals(tenant.role) || unit !in setOf("count", "sum") || ui.goalBusy) return
+        goalsScreenActive = true
+        runGoalMutation(tenant.id) {
+            api.updateGoalUnit(tenant.id, unit)
+            api.getGoals(tenant.id)
+        }
+    }
+
+    private fun acceptGoal(candidateKey: String, inputWatermark: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val overview = ui.goalOverview?.takeIf { ui.goalTenantId == tenant.id } ?: return
+        if (!canWriteGoals(tenant.role) || ui.goalBusy || overview.active != null) return
+        if (overview.inputWatermark != inputWatermark ||
+            overview.candidates.none { it.key == candidateKey } && overview.groups.none { it.key == candidateKey }) {
+            refreshGoalsWithError(tenant.id, "stale_candidate")
+            return
+        }
+        goalsScreenActive = true
+        runGoalMutation(tenant.id, staleCandidateOnConflict = true) {
+            api.acceptGoal(tenant.id, candidateKey, inputWatermark)
+            api.getGoals(tenant.id)
+        }
+    }
+
+    private fun cancelGoal(goalId: String) {
+        val tenant = ui.tenants.firstOrNull() ?: return
+        val activeGoal = ui.goalOverview?.takeIf { ui.goalTenantId == tenant.id }?.active ?: return
+        if (!canWriteGoals(tenant.role) || ui.goalBusy || activeGoal.id != goalId) return
+        goalsScreenActive = true
+        runGoalMutation(tenant.id) {
+            api.cancelGoal(tenant.id, goalId)
+            api.getGoals(tenant.id)
+        }
+    }
+
+    private fun runGoalMutation(
+        tenantId: String,
+        staleCandidateOnConflict: Boolean = false,
+        action: () -> FinanceGoalOverview,
+    ) {
+        val requestGeneration = goalRequestGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(goalBusy = true, goalError = null)
+        executor.execute {
+            runCatching(action)
+                .onSuccess { overview ->
+                    if (isCurrentGoalRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        ui = ui.copy(goalOverview = overview, goalTenantId = tenantId,
+                            goalSelectedUnit = overview.unit, goalBusy = false, goalError = null)
+                    }
+                }
+                .onFailure { error ->
+                    if (!isCurrentGoalRequest(tenantId, requestGeneration, sessionGeneration)) return@onFailure
+                    if (error is ApiFailure && error.status == 401) {
+                        expireAuthenticatedSession(error)
+                    } else if (staleCandidateOnConflict && error is ApiFailure && error.status == 409) {
+                        refreshGoalsWithError(tenantId, "stale_candidate")
+                    } else {
+                        ui = ui.copy(goalBusy = false, goalError = goalErrorCode(error))
+                    }
+                }
+        }
+    }
+
+    private fun refreshGoalsWithError(tenantId: String, errorCode: String) {
+        if (ui.tenants.firstOrNull()?.id != tenantId || !ui.authenticated) return
+        goalsScreenActive = true
+        val requestGeneration = goalRequestGeneration.incrementAndGet()
+        val sessionGeneration = ReceiptOperationGeneration.capture()
+        ui = ui.copy(goalBusy = true, goalError = errorCode)
+        executor.execute {
+            runCatching { api.getGoals(tenantId) }
+                .onSuccess { overview ->
+                    if (isCurrentGoalRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        ui = ui.copy(goalOverview = overview, goalTenantId = tenantId,
+                            goalSelectedUnit = overview.unit, goalBusy = false, goalError = errorCode)
+                    }
+                }
+                .onFailure { error ->
+                    if (isCurrentGoalRequest(tenantId, requestGeneration, sessionGeneration)) {
+                        if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
+                        else ui = ui.copy(goalBusy = false, goalError = errorCode)
+                    }
+                }
+        }
+    }
+
+    private fun leaveGoalsScreen() {
+        goalsScreenActive = false
+        goalRequestGeneration.incrementAndGet()
+        if (ui.goalBusy) ui = ui.copy(goalBusy = false)
+    }
+
+    private fun isCurrentGoalRequest(tenantId: String, requestGeneration: Long, sessionGeneration: Long): Boolean =
+        GoalResponsePolicy.canApply(
+            authenticated = ui.authenticated,
+            requestTenantId = tenantId,
+            activeTenantId = ui.tenants.firstOrNull()?.id,
+            capturedSessionGeneration = sessionGeneration,
+            currentSessionGeneration = ReceiptOperationGeneration.capture(),
+            requestGeneration = requestGeneration,
+            currentGeneration = goalRequestGeneration.get(),
+            screenActive = goalsScreenActive,
+        )
+
+    private fun goalErrorCode(error: Throwable): String = when ((error as? ApiFailure)?.status) {
+        403 -> "forbidden"
+        413 -> "too_many_items"
+        else -> "unavailable"
+    }
+
+    private fun canWriteGoals(role: String): Boolean = role in setOf("owner", "admin", "member")
 
     private fun previewReceiptRecalculation() {
         val tenantId = activeTenantId()
@@ -2466,6 +2628,8 @@ class MainActivity : ComponentActivity() {
 
     private fun logout() {
         receiptRecalculationGeneration.incrementAndGet()
+        goalRequestGeneration.incrementAndGet()
+        goalsScreenActive = false
         adviceAnalyticsGeneration.incrementAndGet()
         adviceAnalyticsPollTask?.cancel(false)
         adviceAnalyticsPollTask = null
@@ -2528,6 +2692,11 @@ data class FinanceUiState(
     val debtForecasts: Map<String, DebtForecast> = emptyMap(),
     val dashboardSummary: DashboardSummary? = null,
     val report: FinanceReport? = null,
+    val goalOverview: FinanceGoalOverview? = null,
+    val goalTenantId: String? = null,
+    val goalSelectedUnit: String = "count",
+    val goalBusy: Boolean = false,
+    val goalError: String? = null,
     val adviceAnalyticsJob: FinanceAdviceAnalyticsJob? = null,
     val adviceAnalyticsBusy: Boolean = false,
     val adviceAnalyticsError: String? = null,
@@ -2900,7 +3069,13 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onAdviceAnalyticsLoad: () -> Unit = {},
                           onAdviceAnalyticsRequest: () -> Unit = {},
                           onAdviceAnalyticsPoll: () -> Unit = {},
-                          onAdviceAnalyticsStopPolling: () -> Unit = {}) {
+                          onAdviceAnalyticsStopPolling: () -> Unit = {},
+                          onGoalsScreenExit: () -> Unit = {},
+                          onGoalsRefresh: () -> Unit = {},
+                          onGoalSelectedUnit: (String) -> Unit = {},
+                          onGoalSaveUnit: (String) -> Unit = {},
+                          onGoalAccept: (String, String) -> Unit = { _, _ -> },
+                          onGoalCancel: (String) -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -2937,6 +3112,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     LaunchedEffect(activeScreen, state.tenants.firstOrNull()?.id) {
         if (activeScreen == "reports" && state.tenants.isNotEmpty()) onAdviceAnalyticsLoad()
         else onAdviceAnalyticsStopPolling()
+        if (activeScreen == "goals" && state.tenants.isNotEmpty()) onGoalsRefresh()
+        else onGoalsScreenExit()
     }
     LaunchedEffect(state.tenants.firstOrNull()?.id, state.budgetProposal?.id, state.busy,
         state.memberProfile?.displayName, state.memberProfile?.plannedIncome, state.memberProfile?.onboardingState,
@@ -3155,8 +3332,9 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products").forEach { screen ->
+                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products").forEach { screen ->
                         TextButton(onClick = {
+                            if (activeScreen == "goals" && screen != "goals") onGoalsScreenExit()
                             activeScreen = screen
                             val catalogTenantId = state.tenants.firstOrNull()?.id
                             if (screen == "products" && catalogTenantId != null &&
@@ -3183,6 +3361,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 "recurring" -> if (russian) "Регулярные" else "Recurring"
                                 "budgets" -> if (russian) "Бюджеты" else "Budgets"
                                 "debts" -> if (russian) "Долги" else "Debts"
+                                "goals" -> if (russian) "Цели" else "Goals"
                                 "reports" -> if (russian) "Отчёты" else "Reports"
                                 "profile" -> if (russian) "Профиль" else "Profile"
                                 else -> if (russian) "Операции" else "Transactions"
@@ -3252,6 +3431,17 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                     "budgets" -> BudgetScreen(Modifier.weight(1f), state, language, onBudgetUpdate, onBudgetReset,
                         onBudgetProposal, onBudgetApply, onFamilyBudgetFoodStatusLoad)
                     "debts" -> DebtScreen(state, language, onDebtCreate, onDebtPay, onDebtAdjust, onDebtForecast)
+                    "goals" -> GoalsSection(
+                        role = role.orEmpty(), language = language,
+                        overview = state.goalOverview?.takeIf { state.goalTenantId == state.tenants.firstOrNull()?.id },
+                        busy = state.goalBusy, error = state.goalError,
+                        selectedUnit = state.goalSelectedUnit,
+                        onSelectedUnit = onGoalSelectedUnit,
+                        onRefresh = onGoalsRefresh,
+                        onSaveUnit = onGoalSaveUnit,
+                        onAccept = onGoalAccept,
+                        onCancel = onGoalCancel,
+                    )
                     "reports" -> ReportScreen(state, language, onReportLoad,
                         onRecalculationPreview, onRecalculationApply,
                         onRecalculationHistory, onRecalculationDetail,
