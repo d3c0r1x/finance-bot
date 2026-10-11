@@ -634,7 +634,9 @@ features:
       scenario: "Android counterpart for F30: Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F30 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+      evidence: "Android tests verify month/week/90-day/custom personal and family report route/query mapping, exact custom boundaries, disabled reversed date ranges, and RU/EN rendering of Core weekend-share values while omitting null."
+      gap: "These checks use synthetic Compose state and MockWebServer fixtures; live authenticated Android-to-Core period/scope E2E and parity against real database boundary fixtures remain unverified."
     intentional_differences: []
   - id: F31
     feature: "Графики категорий, лимитов, дней, цен, необязательного"

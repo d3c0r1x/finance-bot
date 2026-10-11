@@ -1162,6 +1162,35 @@ class FinanceReceiptApiTest {
         assertEquals("-14000.50", report.monthlyBudgetRemaining)
     }
 
+    @Test fun reportPeriodsAndCustomDateBoundsMapToCoreRoutesAndQueries() {
+        val cases = listOf(
+            listOf("month", "personal", "2026-10", "", "", "/api/v1/tenants/tenant-17/reports/period?period=month&month=2026-10&scope=personal"),
+            listOf("week", "personal", "2026-10", "", "", "/api/v1/tenants/tenant-17/reports/period?period=week&scope=personal"),
+            listOf("90d", "personal", "2026-10", "", "", "/api/v1/tenants/tenant-17/reports/period?period=90d&scope=personal"),
+            listOf("custom", "personal", "2026-10", "2026-09-15", "2026-10-05",
+                "/api/v1/tenants/tenant-17/reports/period?period=custom&from=2026-09-15&to=2026-10-05&scope=personal"),
+            listOf("custom", "family", "2026-10", "2026-09-15", "2026-10-05",
+                "/api/v1/tenants/tenant-17/reports/family?period=custom&from=2026-09-15&to=2026-10-05"),
+        )
+        cases.forEach { case ->
+            val json = if (case[1] == "family") familyReportJson()
+                else familyReportJson().replace("\"scope\":\"family\"", "\"scope\":\"personal\"")
+            server.enqueue(MockResponse().setBody(json))
+        }
+        val api = api()
+        api.saveTokens("report-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        cases.forEach { case ->
+            val (period, scope, month, from, to) = case
+            val expectedPath = case[5]
+            val report = api.report("tenant-17", period, scope, month, from, to)
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("GET", request.method)
+            assertEquals(expectedPath, request.path)
+            assertEquals(scope, report.scope)
+        }
+    }
+
     @Test fun laterTenantCreateRecoversCommittedTenantBeforePostingAgain() {
         val listRequests = AtomicInteger()
         val createRequests = AtomicInteger()

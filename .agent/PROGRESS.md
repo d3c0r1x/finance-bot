@@ -1868,3 +1868,11 @@ Updated: 2026-10-11, Europe/Moscow.
 - GREEN: full direct API 27 instrumentation on isolated `emulator-5554` 227/227; Android JVM tests 36/36; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` pass; contracts 78 passed/2 skipped; `git diff --check` clean. Debug APK SHA-256 `85305FDD55D54E24841E46EC1EA76C1940ACEB70672769C1587CC03C82D0BF81`.
 - F29 Android remains PARTIAL: current Compose tests use synthetic DTOs, and MockWebServer transport fixtures do not prove live Core response-to-screen mapping, actual zero/null boundary behavior, or authenticated OIDC. Core/PostgreSQL tests remain the evidence for interest math and the 600-month boundary. Android only recognizes the currently defined English basis sentence; other basis text displays a neutral unavailable label.
 - No user-owned files were staged. Next: continue F59 with F30 Android parity.
+
+## F59.3 F30 Android reports — TEST COVERAGE GREEN; COMMIT_PENDING — 2026-10-11 03:15 MSK
+
+- Scope: close concrete Android report evidence gaps without moving date, period, tenant or financial rules out of Core. F30's Java/PostgreSQL, Telegram and Web implementation remains unchanged.
+- Added Compose checks that custom personal reports pass exact inclusive `from`/`to` dates, reversed custom ranges disable submission, and Core weekend-spend share renders exactly in RU/EN while null remains absent. Added MockWebServer route/query coverage for month, week, 90d, custom personal and custom family reports, including exact custom boundaries.
+- GREEN: Android 8.1/API 27 full instrumentation 231/231 on isolated `emulator-5554`; Android JVM 36/36; Android debug and AndroidTest APK builds pass; contracts 78 passed/2 skipped; `git diff --check` clean. The updated tests also passed independently: Compose 78/78 and report API 45/45.
+- F30 Android remains PARTIAL: tests use synthetic UI state and MockWebServer fixtures; live authenticated Android-to-Core period/scope E2E and parity against real database boundary fixtures remain unverified.
+- Test-only change: no production behavior changed. Next: continue F59 with F31 Android chart/export parity.

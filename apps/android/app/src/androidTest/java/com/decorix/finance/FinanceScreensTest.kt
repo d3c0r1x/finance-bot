@@ -1218,6 +1218,49 @@ class FinanceScreensTest {
             "${java.time.YearMonth.now().atDay(1)}", "${java.time.LocalDate.now()}"), requested)
     }
 
+    @Test fun customReportUsesEnteredInclusiveDatesAndRejectsReversedRange() {
+        var requested: List<String>? = null
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),
+            onReportLoad = { period, scope, month, from, to -> requested = listOf(period, scope, month, from, to) })
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithText("Месяц ▾").performClick()
+        compose.onNodeWithText("Неделя ▾").performClick()
+        compose.onNodeWithText("90 дней ▾").performClick()
+        compose.onNodeWithText("С даты, ГГГГ-ММ-ДД").performTextReplacement("2026-09-15")
+        compose.onNodeWithText("По дату, ГГГГ-ММ-ДД").performTextReplacement("2026-10-05")
+        compose.onNodeWithText("Показать отчёт").performClick()
+
+        assertEquals(listOf("custom", "personal", "${java.time.YearMonth.now()}", "2026-09-15", "2026-10-05"), requested)
+    }
+
+    @Test fun reversedCustomReportRangeDisablesSubmission() {
+        var requested: List<String>? = null
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),
+            onReportLoad = { period, scope, month, from, to -> requested = listOf(period, scope, month, from, to) })
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithText("Месяц ▾").performClick()
+        compose.onNodeWithText("Неделя ▾").performClick()
+        compose.onNodeWithText("90 дней ▾").performClick()
+        compose.onNodeWithText("С даты, ГГГГ-ММ-ДД").performTextReplacement("2026-10-20")
+        compose.onNodeWithText("По дату, ГГГГ-ММ-ДД").performTextReplacement("2026-10-01")
+
+        compose.onNodeWithText("Показать отчёт").assertIsNotEnabled()
+        assertEquals(null, requested)
+    }
+
+    @Test fun reportWeekendShareShowsCoreValueInRussianAndEnglishAndOmitsNull() {
+        val ui = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            report = report().copy(weekendSharePercent = null)))
+        show(ui.value, stateHolder = ui)
+        compose.onNodeWithText("Отчёты").performScrollTo().performClick()
+        compose.onNodeWithText("Доля расходов в выходные:").assertDoesNotExist()
+        ui.value = ui.value.copy(report = report().copy(weekendSharePercent = 37))
+        compose.waitForIdle()
+        compose.onNodeWithText("Доля расходов в выходные: 37%").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Weekend expense share: 37%").performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun reloadingDisplayedFamilyReportKeepsFamilyBudgetScope() {
         var requestedScope: String? = null
         val familyReport = report().copy(monthlyBudgetLimit = "50000.00", monthlyBudgetRemaining = "-14000.50")
