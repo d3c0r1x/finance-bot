@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
+Updated: 2026-10-11 13:29 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -18,7 +18,7 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 
 ## Current goal
 
-- F59 Android parity remains IN PROGRESS. Current registry: 46 partial, 10 missing, 2 approved N/A. F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
+- F59 Android parity remains IN PROGRESS. Recounted current registry: 51 partial, 3 missing, 3 justified N/A, 1 implemented (58 mappings total). F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
 - F59.12 F49 Android duplicate outcomes and safe batch undo is locally GREEN; parity is PARTIAL pending live OIDC/Core, process-kill, and tenant-isolation E2E. Spec/plan: `.agent/specs/F49-android-import-dedup-undo.md` and `docs/superpowers/plans/2026-10-11-f49-android-import-dedup-undo.md`.
 - F59.13 F50 Android merchant classification is locally GREEN; parity is PARTIAL pending live OIDC/Core, deployed AI availability, and tenant-isolation E2E. Spec/plan: `.agent/specs/F50-android-merchant-classification.md` and `docs/superpowers/plans/2026-10-11-f50-android-merchant-classification.md`.
 - F59.14 F51 Android historical merchant reclassification is locally GREEN; parity is PARTIAL pending live OIDC/Core and tenant-isolation E2E. Spec/plan: `.agent/specs/F51-android-merchant-reclassification.md` and `docs/superpowers/plans/2026-10-11-f51-android-merchant-reclassification.md`.
@@ -2090,6 +2090,25 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - GREEN: focused Android money test 7/7; F53 owner/viewer navigation tests 1/1 each on isolated API-27 `emulator-5554`; parity contract suite 63/63; `git diff --check` clean. Do not claim live Core, remote CI, or production-service verification.
 - Commits: `251b30c` (`test(F57): cover Android money formatting edges`) and `6c006d9` (verification record) pushed; remote branch was verified at `6c006d9` before subsequent F52 work. `gh run list --commit 251b30c` returned no workflow.
 - Next: continue V1 with the next F59 Android gap after checking plan and current progress; keep F52/F53/F54 live deployment gates explicit.
+
+## F59.23 F53 Android selected route — GREEN locally; PARTIAL — 2026-10-11
+
+- TDD RED: added selected-state and member-navigation assertions before UI changes; focused emulator test failed because route buttons had no stable tag or selected semantics.
+- Implementation: the current `activeScreen` now drives both the existing route TextButton's selected accessibility state and subtle selected colors. Member navigation still uses the existing exact member ID/filter callback and now asserts the selected Transactions route and visible member filter.
+- GREEN: full `FinanceScreensTest` 89/89 on Android 8.1/API 27 `emulator-5554`; Android JVM suite passes; debug and AndroidTest APKs assemble; `tests/test_f59_android_parity.py` 3/3; `tools/contracts/test_contracts.py` 63/63; `git diff --check` clean.
+- Registry correction found during regression: Android F57 status must be `implemented` (allowed parity vocabulary) while the global F57 feature remains `complete`. Recounted F01-F58 Android mappings: 51 partial, 3 missing, 3 justified N/A, 1 implemented. The F59 evidence and current summary now match the file.
+- Limits: F53 Android stays PARTIAL for refresh semantics and live Core/OIDC proof. The UI test uses synthetic member data and does not prove production authorization.
+- Plan: `docs/superpowers/plans/2026-10-11-f53-android-member-navigation.md`.
+- Commit/push: `d8d02e9` (`feat(F53): highlight active Android navigation route`) pushed; remote `feat/saas-rewrite` verified at `d8d02e92b1665385181f8ca4263dd90fde4f4eec`.
+- Next: continue next F59 gap; M2 runtime/public-HTTPS/auth remains a separate blocking release gate.
+
+## M2.1 Runtime recheck — BLOCKED, no system or network changes — 2026-10-11
+
+- Recheck: PowerShell `Get-Command docker,podman,cloudflared,wsl,java` found only WSL executable, but `wsl --list --quiet` reports no installed distro. `Get-NetTCPConnection -State Listen` found no listeners on app/API, Postgres, Kafka, ClickHouse, Keycloak or S3 ports. Docker/Podman/Keycloak binaries/services and a production Compose/Wrangler stack are absent. Unity's bundled JDK exists but is not on PATH. Tailscale service exists, but user selected public HTTPS and Tailscale is not the delivery method.
+- Cloudflare screenshot/repository setup: GitHub-linked Worker build alone does not run Java Core/Postgres/Keycloak; current checkout has no Wrangler runtime config. No DNS, firewall, router, OS feature or service settings were changed.
+- Decision from user: public HTTPS required; do not fall back to Tailscale or claim the Worker build is a running finance backend. Keep public ingress closed until the authenticated, durable Core runtime is proven.
+- Plan: `docs/specs/PERSONAL_MVP_PLAN.md` refreshed with this audit, the current Cloudflare limitation, and the user's public-HTTPS choice.
+- Blocker: no persistent supported runtime is currently available on this host. Next: continue independent V1 goals while evaluating a safe runtime path; before exposing finance services, prove database durability, Keycloak/OIDC, and tenant authorization locally.
 
 ## F59.21 F52 fresh export download safety — GREEN locally; PARTIAL — 2026-10-11
 

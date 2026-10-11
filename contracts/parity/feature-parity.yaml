@@ -1212,9 +1212,10 @@ features:
       scenario: "Android counterpart for F53: Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Android local Compose proof covers role-gated member-to-transaction navigation and existing self-profile/filter behavior. Active navigation, refresh semantics and live Android OIDC/Core authorization remain unverified."
+      gap: "Android local Compose proof now includes selected-route semantics/styling and member-filter presentation. Refresh semantics and live Android OIDC/Core authorization remain unverified."
       evidence:
         - "FinanceScreensTest passes 87/87 on isolated Android 8.1/API 27 emulator-5554, including owner/admin member-navigation, viewer visibility, existing member-filter and own-profile checks. The existing Core-supplied transactionMembers list and filter callback are reused. No live Core/OIDC authorization is claimed."
+        - "Follow-up FinanceScreensTest passes 89/89 on emulator-5554: Overview is initially selected, selection follows the visible route, and member navigation marks Transactions selected while retaining the member filter label and exact callback ID. Active state is exposed with selected semantics and a distinct Material color treatment. Refresh semantics and live Core/OIDC remain unverified."
     intentional_differences: []
   - id: F54
     feature: "Статус Ollama/Vision/Tesseract; `services/health.py`"
@@ -1287,7 +1288,7 @@ features:
     evidence:
       - "Python presentation/contracts/report/Telegram suites: 199 passed; Web: 95 tests plus production build passed. Android F57 RU/EN money and semantic-code presentation passed isolated API-27 instrumentation (50 tests), debug and AndroidTest APK builds, and installed launch; `FinancePresentationTest` now has 7 passing tests including 30-digit grouping, HALF_EVEN edges and malformed-input fallback. Contract DTO enums remain unchanged; fixtures are synthetic."
     android:
-      status: complete
+      status: implemented
       scenario: "Android formats decimal-string money in RU/EN and localizes Core semantic status codes on dashboard, report, budget and budget alerts, with safe unknown-code fallback."
       tests:
         - "apps/android/app/src/test/java/com/decorix/finance/FinancePresentationTest.kt"
@@ -1315,7 +1316,7 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
-      - "Inventory maps all F01-F58: 40 partial, 16 missing, 2 justified platform-specific N/A. Android F31-F34 and receipt flows have local test evidence, but feature parity and live authenticated Core/OIDC E2E remain incomplete."
+      - "Current registry maps all F01-F58: 51 partial, 3 missing, 3 justified platform-specific N/A, and 1 implemented. Android local evidence covers F31-F34, receipt flows, member navigation and selected-route indication; full parity and live authenticated Core/OIDC E2E remain incomplete."
       - "Real OIDC login, live Java/Core operation, and PostgreSQL tenant-isolation E2E remain required before F59 completion."
     intentional_differences: []
   - id: F60
