@@ -784,6 +784,8 @@ data class TransactionDraftEdit(
 )
 
 internal object FinanceModels {
+    fun intelligenceHealth(json: JSONObject): FinanceHealthStatus = FinanceHealthModels.parse(json)
+
     fun goalOverview(json: JSONObject): FinanceGoalOverview {
         requireGoalFields(json, setOf("unit", "active", "inputWatermark", "candidates", "groups", "skipped",
             "activeProgress", "history"))

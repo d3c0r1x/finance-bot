@@ -128,6 +128,7 @@ class MainActivity : ComponentActivity() {
     private val exportCreateGeneration = AtomicLong(0L)
     private val exportStatusGeneration = AtomicLong(0L)
     private val exportDownloadGeneration = AtomicLong(0L)
+    private val healthRequestGeneration = AtomicLong(0L)
     @Volatile private var exportScreenActive = false
     @Volatile private var pendingExportDownload: PendingExportDownload? = null
     @Volatile private var pendingExportCompletion: PendingExportCompletion? = null
@@ -257,7 +258,8 @@ class MainActivity : ComponentActivity() {
                         onExportRefresh = ::loadExportStatus,
                         onExportDownload = ::requestExportDownload,
                         onExportScreenEnter = ::enterExportScreen,
-                        onExportScreenExit = ::leaveExportScreen)
+                        onExportScreenExit = ::leaveExportScreen,
+                        onHealthRefresh = ::loadHealthStatus)
                 }
             }
         }
@@ -2276,6 +2278,29 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadTenants() = runApi(restoreReceiptCheckpoint = true) { workspaceData() }
+
+    private fun loadHealthStatus() {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val sessionGeneration = api.authSessionGeneration
+        val requestGeneration = healthRequestGeneration.incrementAndGet()
+        ui = ui.copy(healthLoading = true, healthError = null)
+        executor.execute {
+            val result = runCatching { api.healthStatus(tenantId, sessionGeneration) }
+            runOnUiThread {
+                if (requestGeneration != healthRequestGeneration.get() ||
+                    api.authSessionGeneration != sessionGeneration ||
+                    ui.tenants.firstOrNull()?.id != tenantId || !api.hasSession()) return@runOnUiThread
+                result.onSuccess { status ->
+                    ui = ui.copy(healthStatus = status, healthTenantId = tenantId,
+                        healthLoading = false, healthError = null)
+                }.onFailure { failure ->
+                    if (failure is ApiFailure && failure.status == 401) expireAuthenticatedSession(failure)
+                    else ui = ui.copy(healthStatus = null, healthTenantId = tenantId,
+                        healthLoading = false, healthError = "unavailable")
+                }
+            }
+        }
+    }
     private fun createTenantAndRefresh(name: String, memberName: String, plannedIncome: String?) = runApi {
         api.createTenant(name, memberName, plannedIncome)
         workspaceData()
@@ -3591,6 +3616,10 @@ data class FinanceUiState(
     val exportBusy: Boolean = false,
     val exportError: String? = null,
     val exportCreateRetryRequiresConfirmation: Boolean = false,
+    val healthStatus: FinanceHealthStatus? = null,
+    val healthTenantId: String? = null,
+    val healthLoading: Boolean = false,
+    val healthError: String? = null,
     val transactionEditSavedToken: String? = null,
     val receiptJob: FinanceReceiptProcessingJob? = null,
     val bankImportPreview: FinanceBankImportPreview? = null,
@@ -3952,7 +3981,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onExportRefresh: (String) -> Unit = {},
                           onExportDownload: (String) -> Unit = {},
                           onExportScreenEnter: () -> Unit = {},
-                          onExportScreenExit: () -> Unit = {}) {
+                          onExportScreenExit: () -> Unit = {},
+                          onHealthRefresh: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
     var memberName by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -3987,7 +4017,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     val canManageFamilyTransactions = role == "owner" || role == "admin"
     val navigationScreens = buildList {
         addAll(listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts",
-            "reports", "profile", "inflation", "recurring", "nobuy", "products", "imports", "exports"))
+            "reports", "profile", "inflation", "recurring", "nobuy", "products", "imports", "exports", "health"))
         if (canManageFamilyTransactions) add("members")
     }
     val currentUserId = state.transactionMembers.singleOrNull()?.userId
@@ -4222,6 +4252,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             if (activeScreen == "exports" && screen != "exports") onExportScreenExit()
                             if (activeScreen != "exports" && screen == "exports") onExportScreenEnter()
                             activeScreen = screen
+                            if (screen == "health" && (state.healthTenantId != state.tenants.firstOrNull()?.id ||
+                                    state.healthStatus == null && !state.healthLoading)) onHealthRefresh()
                             val catalogTenantId = state.tenants.firstOrNull()?.id
                             if (screen == "products" && catalogTenantId != null &&
                                 (state.productCatalogTenantId != catalogTenantId ||
@@ -4243,6 +4275,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 "receipts" -> if (russian) "Чеки" else "Receipts"
                                 "imports" -> if (russian) "Выписки" else "Statements"
                                 "exports" -> if (russian) "Экспорт" else "Export"
+                                "health" -> if (russian) "Сервисы" else "Services"
                                 "products" -> if (russian) "Товары" else "Products"
                                 "shopping" -> if (russian) "Покупки" else "Shopping"
                                 "nobuy" -> if (russian) "Не брать" else "Do not buy"
@@ -4260,6 +4293,14 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
+                    "health" -> FinanceHealthSection(
+                        status = state.healthStatus.takeIf { state.healthTenantId == state.tenants.firstOrNull()?.id },
+                        loading = state.healthLoading,
+                        error = state.healthError,
+                        language = language,
+                        modifier = Modifier.weight(1f),
+                        onRefresh = onHealthRefresh,
+                    )
                     "members" -> if (canManageFamilyTransactions) {
                         FinanceMembersSection(state.transactionMembers, language, Modifier.weight(1f)) { member ->
                             transactionMemberId = member.userId

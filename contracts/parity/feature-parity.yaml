@@ -1228,9 +1228,16 @@ features:
     evidence:
       - "F54 capability checks use a private bounded endpoint, membership-protected BFF, sanitized diagnostics and RU/EN Web status. F55 additionally prevents remote inventory enumeration. Runtime availability of external providers remains deployment-only proof."
     android:
-      status: missing
-      scenario: "Android counterpart for F54: Статус Ollama/Vision/Tesseract; `services/health.py`"
-      gap: "No Android user screen or equivalent flow is verified for F54 yet."
+      status: partial
+      scenario: "Android reads the Core tenant health BFF and presents only sanitized availability for local AI, receipt vision and receipt OCR in RU/EN, with manual refresh and safe retry."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceHealthModelsTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceHealthApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceHealthScreensTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+      gap: "Live authenticated Android-to-Core OIDC and real tenant-membership authorization are not verified; provider runtime status remains deployment evidence."
+      evidence:
+        - "Health model/API/screen tests pass 13/13 and FinanceScreensTest passes 88/88 on isolated Android 8.1/API 27 emulator-5554. Mock data proves strict sanitization and local presentation only, not real provider status."
     intentional_differences: []
   - id: F55
     feature: "Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"

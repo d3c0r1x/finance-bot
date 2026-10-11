@@ -1773,6 +1773,19 @@ class FinanceScreensTest {
         compose.onAllNodesWithText("Участники").assertCountEquals(0)
     }
 
+    @Test fun authenticatedMemberCanOpenServiceStatusAndRetry() {
+        var healthLoads = 0
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("member"))),
+            onHealthRefresh = { healthLoads++ })
+
+        compose.onNodeWithText("Сервисы").performScrollTo().performClick()
+        compose.onNodeWithText("Состояние сервисов").assertIsDisplayed()
+        compose.onNodeWithText("Состояние ещё не загружено").assertIsDisplayed()
+        compose.onNodeWithText("Повторить").performClick()
+
+        assertEquals(2, healthLoads)
+    }
+
     @Test fun reversedTransactionDateRangeShowsLocalizedErrorAndDoesNotApply() {
         var applied: List<String>? = null
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),
@@ -1869,7 +1882,8 @@ class FinanceScreensTest {
                      onDebtCreate: (String, String, String?, String) -> Unit = { _, _, _, _ -> },
                      onDebtPay: (String, String, Long) -> Unit = { _, _, _ -> },
                      onDebtAdjust: (String, String, Long) -> Unit = { _, _, _ -> },
-                     onDebtForecast: (String) -> Unit = {}) {
+                     onDebtForecast: (String) -> Unit = {},
+                     onHealthRefresh: () -> Unit = {}) {
         val language = mutableStateOf("ru")
         val contentKey = Any()
         compose.setContent {
@@ -1902,6 +1916,7 @@ class FinanceScreensTest {
                 onVoidTransaction = { transaction -> onTransactionMutation(); onVoidTransaction(transaction) },
                 onTransactionFilter = onTransactionFilter, onTransactionLoadMore = onTransactionLoadMore,
                 onUpdateTransaction = { edit -> onTransactionMutation(); onUpdateTransaction(edit) },
+                onHealthRefresh = onHealthRefresh,
             )
             }
         }

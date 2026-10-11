@@ -81,6 +81,16 @@ class FinanceApi internal constructor(
     fun members(tenantId: String): List<FinanceTenantMember> =
         FinanceModels.tenantMembers(org.json.JSONArray(execute("/api/v1/tenants/$tenantId/members", "GET")))
 
+    internal fun healthStatus(
+        tenantId: String,
+        expectedSessionGeneration: Long? = null,
+    ): FinanceHealthStatus {
+        require(isUuid(tenantId)) { "Invalid tenant identifier" }
+        val body = executeRequest("/bff/tenants/$tenantId/health", "GET", null,
+            expectedSessionGeneration = expectedSessionGeneration)
+        return FinanceModels.intelligenceHealth(JSONObject(body))
+    }
+
     internal fun createExport(
         tenantId: String,
         request: FinanceExportRequest,
