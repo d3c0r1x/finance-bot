@@ -1,6 +1,6 @@
 # F53 Web panel parity — execution plan
 
-**Status: COMPLETE locally; full Web tests and production build GREEN. Commit pending.**
+**Status: COMPLETE locally and pushed as `5adeccf`; full Web tests and production build GREEN. No GitHub Actions run was returned for that commit.**
 
 **Global source:** `PLAN.md` F53 and panel UI inventory (`panel_ui/window.py`, `panel_ui/users.py`, `panel_ui/transactions.py`).
 

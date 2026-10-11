@@ -1200,15 +1200,20 @@ features:
     feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
     target: "W routes/components; J единое API"
     acceptance: "Восемь вкладок имеют эквиваленты; refresh/F5, переход к тратам пользователя, правка профиля"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - apps/web/src/MembersPanel.test.tsx
+      - apps/web/src/App.test.tsx
+    evidence:
+      - "Global F53 Web acceptance completed in E4.92 and pushed as 5adeccf: authorized member page, own-profile editing link, manager-to-member transactions, route state, shared refresh and F5. Web 87 tests and production build passed; no GitHub Actions run was returned."
     android:
       status: partial
       scenario: "Android counterpart for F53: Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F53 acceptance condition or live Core integration."
+      gap: "Android local Compose proof covers role-gated member-to-transaction navigation and existing self-profile/filter behavior. Active navigation, refresh semantics and live Android OIDC/Core authorization remain unverified."
+      evidence:
+        - "FinanceScreensTest passes 87/87 on isolated Android 8.1/API 27 emulator-5554, including owner/admin member-navigation, viewer visibility, existing member-filter and own-profile checks. The existing Core-supplied transactionMembers list and filter callback are reused. No live Core/OIDC authorization is claimed."
     intentional_differences: []
   - id: F54
     feature: "Статус Ollama/Vision/Tesseract; `services/health.py`"

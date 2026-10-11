@@ -1753,6 +1753,26 @@ class FinanceScreensTest {
         assertEquals(listOf("зарп", "expense", "2026-10-01", "2026-10-31", "member-42"), applied)
     }
 
+    @Test fun managerCanOpenMemberTransactionsFromMembersScreen() {
+        val selectedScopes = mutableListOf<String>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactionMembers = listOf(FinanceTenantMember("member-42", "Taylor Display", "member"))),
+            onTransactionFilter = { _, _, _, _, memberId -> selectedScopes += memberId })
+
+        compose.onNodeWithText("Участники").performScrollTo().performClick()
+        compose.onNodeWithTag("member-navigation-member-42").performScrollTo().performClick()
+
+        compose.onNodeWithTag("transaction-history").assertIsDisplayed()
+        assertEquals(listOf("member-42"), selectedScopes)
+    }
+
+    @Test fun viewerCannotOpenFamilyMembersScreen() {
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
+            transactionMembers = listOf(FinanceTenantMember("viewer-42", "Viewer Display", "member"))))
+
+        compose.onAllNodesWithText("Участники").assertCountEquals(0)
+    }
+
     @Test fun reversedTransactionDateRangeShowsLocalizedErrorAndDoesNotApply() {
         var applied: List<String>? = null
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner"))),

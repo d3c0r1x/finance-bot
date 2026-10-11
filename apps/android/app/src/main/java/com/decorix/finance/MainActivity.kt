@@ -3985,6 +3985,11 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
     val canWriteTransactions = state.tenants.firstOrNull()?.role != "viewer"
     val role = state.tenants.firstOrNull()?.role
     val canManageFamilyTransactions = role == "owner" || role == "admin"
+    val navigationScreens = buildList {
+        addAll(listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts",
+            "reports", "profile", "inflation", "recurring", "nobuy", "products", "imports", "exports"))
+        if (canManageFamilyTransactions) add("members")
+    }
     val currentUserId = state.transactionMembers.singleOrNull()?.userId
     LaunchedEffect(activeScreen, state.tenants.firstOrNull()?.id) {
         if (activeScreen == "reports" && state.tenants.isNotEmpty()) onAdviceAnalyticsLoad()
@@ -4209,7 +4214,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 } else {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    listOf("overview", "transactions", "receipts", "shopping", "budgets", "goals", "debts", "reports", "profile", "inflation", "recurring", "nobuy", "products", "imports", "exports").forEach { screen ->
+                    navigationScreens.forEach { screen ->
                         TextButton(onClick = {
                             if (activeScreen == "goals" && screen != "goals") onGoalsScreenExit()
                             if (activeScreen == "imports" && screen != "imports") onBankImportScreenExit()
@@ -4234,6 +4239,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         }) {
                             Text(when (screen) {
                                 "overview" -> if (russian) "Обзор" else "Overview"
+                                "members" -> if (russian) "Участники" else "Members"
                                 "receipts" -> if (russian) "Чеки" else "Receipts"
                                 "imports" -> if (russian) "Выписки" else "Statements"
                                 "exports" -> if (russian) "Экспорт" else "Export"
@@ -4254,6 +4260,14 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                 }
                 when (activeScreen) {
                     "overview" -> DashboardScreen(state, language)
+                    "members" -> if (canManageFamilyTransactions) {
+                        FinanceMembersSection(state.transactionMembers, language, Modifier.weight(1f)) { member ->
+                            transactionMemberId = member.userId
+                            activeScreen = "transactions"
+                            onTransactionFilter(transactionSearch, transactionTypeFilter,
+                                transactionFrom, transactionTo, member.userId)
+                        }
+                    } else DashboardScreen(state, language)
                     "exports" -> FinanceExportsSection(
                         role = state.tenants.firstOrNull()?.role.orEmpty(),
                         language = language,

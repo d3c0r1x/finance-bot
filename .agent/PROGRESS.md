@@ -1537,7 +1537,7 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Test-first RED: new member panel tests failed because the component was missing; App tests failed because member navigation, active route, and shared refresh controls were absent.
 - Added the authorized members page, localized role labels, own-profile link, manager-filtered transaction link, and scope-safe member transaction query. Restored a global refresh action and F5 query invalidation, route-aware navigation, and responsive member cards.
 - A full regression caught duplicate accessible names between the global refresh and existing error retry buttons; clarified the global action label. Final GREEN: Web 13 files / 87 tests, TypeScript/Vite production build, `git diff --check`.
-- F53 plan: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`. Commit/push pending.
+- F53 plan: `docs/superpowers/plans/2026-10-07-f53-web-panel-parity.md`. Commit/push `5adeccf`; no GitHub Actions run was returned.
 
 ## E4.95 F55 local model selection and cloud boundaries — 2026-10-07 08:23 MSK
 
@@ -2061,3 +2061,12 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - The production path continues to use cancellable `kotlinx.coroutines.delay` inside `LaunchedEffect`; no production behavior changed in this follow-up.
 - Remaining: app-background/session/tenant-switch poll cancellation, real wall-clock cadence, fresh-link refresh and external-intent safety, RU/EN completeness, and live Core/OIDC/worker/S3/downloaded-byte proof.
 - Next: finish F52 explicit download handoff tests, then implement the approved F53 Android member-list-to-transactions navigation slice.
+
+## F59.18 F53 Android member-to-transactions navigation — GREEN locally; PARTIAL — 2026-10-11
+
+- Approval and scope: approved Android screen «Участники» for owner/admin using the already-loaded Core-authorized member list; tap opens operations scoped to that member. No API or Core authorization behavior changed. Plan: `docs/superpowers/plans/2026-10-11-f53-android-member-navigation.md`.
+- TDD: manager navigation test first failed because the Android destination did not exist; viewer visibility test protects against widening the UI. Added a role-gated navigation tab and member cards that set the existing transaction filter and open the transaction screen.
+- Regression: first full FinanceScreensTest run exposed 7 failures because inserting the tab near the front shifted existing horizontal navigation targets. Moved the new tab to the end; the entire class then passed 87/87. This preserves existing tab hit areas.
+- GREEN: focused F53 navigation/profile/filter tests 5/5; full `FinanceScreensTest` 87/87; F52 model/API/screen regression 29/29; Android JVM suite passes; parity/contract tests 66 passed. Debug and AndroidTest APKs build; current run explicitly targeted only `emulator-5554` (Android 8.1/API 27). `git diff --check` clean.
+- Parity: global F53 Web is COMPLETE (`5adeccf`, 87 Web tests + production build); registry corrected to reflect that and still marks Android partial. Android local member navigation/profile/filter coverage is green; Android active-route indication, refresh semantics and live OIDC/Core authorization remain unverified.
+- Next: independent review, commit/push this slice, then continue the next Android parity gap. F52 external-download handoff/live storage checks remain deployment gaps.
