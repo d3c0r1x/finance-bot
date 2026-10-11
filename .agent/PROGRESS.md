@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-11 13:29 MSK, Europe/Moscow.
+Updated: 2026-10-11 13:36 MSK, Europe/Moscow.
 
 ## Global plan
 
@@ -18,7 +18,7 @@ Updated: 2026-10-11 13:29 MSK, Europe/Moscow.
 
 ## Current goal
 
-- F59 Android parity remains IN PROGRESS. Recounted current registry: 51 partial, 3 missing, 3 justified N/A, 1 implemented (58 mappings total). F13 and F31-F34 Android local acceptance is GREEN; those slices remain partial pending live authenticated OIDC/Core E2E.
+- F59 Android parity remains IN PROGRESS. Current registry: 52 partial, 0 missing, 5 justified N/A, 1 implemented (58 mappings total). F11 has synthetic Android provenance/fallback acceptance; live authenticated OIDC/Core remains open.
 - F59.12 F49 Android duplicate outcomes and safe batch undo is locally GREEN; parity is PARTIAL pending live OIDC/Core, process-kill, and tenant-isolation E2E. Spec/plan: `.agent/specs/F49-android-import-dedup-undo.md` and `docs/superpowers/plans/2026-10-11-f49-android-import-dedup-undo.md`.
 - F59.13 F50 Android merchant classification is locally GREEN; parity is PARTIAL pending live OIDC/Core, deployed AI availability, and tenant-isolation E2E. Spec/plan: `.agent/specs/F50-android-merchant-classification.md` and `docs/superpowers/plans/2026-10-11-f50-android-merchant-classification.md`.
 - F59.14 F51 Android historical merchant reclassification is locally GREEN; parity is PARTIAL pending live OIDC/Core and tenant-isolation E2E. Spec/plan: `.agent/specs/F51-android-merchant-reclassification.md` and `docs/superpowers/plans/2026-10-11-f51-android-merchant-reclassification.md`.
@@ -2109,6 +2109,16 @@ Updated: 2026-10-11 13:29 MSK, Europe/Moscow.
 - Decision from user: public HTTPS required; do not fall back to Tailscale or claim the Worker build is a running finance backend. Keep public ingress closed until the authenticated, durable Core runtime is proven.
 - Plan: `docs/specs/PERSONAL_MVP_PLAN.md` refreshed with this audit, the current Cloudflare limitation, and the user's public-HTTPS choice.
 - Blocker: no persistent supported runtime is currently available on this host. Next: continue independent V1 goals while evaluating a safe runtime path; before exposing finance services, prove database durability, Keycloak/OIDC, and tenant authorization locally.
+
+## F59.24 F11/F12/F55 Android parity correction — GREEN locally; COMMIT_PENDING — 2026-10-11
+
+- TDD RED: added a registry regression test for F11's Android screen/API evidence and live-auth gap, plus approved server/operator N/A for F12 and F55. `tests/test_f59_android_parity.py` initially failed because F11 was still marked `missing` (1 failed, 3 passed).
+- F11 evidence: Android API instrumentation already checks OCR/Vision provider, model and prompt parsing. Added Compose assertions that actual Vision provenance is rendered in RU/EN, is labelled unverified, and causes no transaction create/confirm action. Fallback localization already has RU/EN coverage.
+- F12/F55 mapping: F12 is server-side Python OCR processing consumed through F11/F13; F55 is operator/deployment provider configuration. Both now have explicit plan authority and reasons; Android does not duplicate OCR or expose provider credentials/settings.
+- GREEN: `.venv\\Scripts\\python.exe -m pytest tests/test_f59_android_parity.py tools/contracts/test_contracts.py -q -p no:cacheprovider` — 67 passed. Focused `FinanceReceiptScreensTest` on isolated Android 8.1/API 27 `emulator-5554` — 78/78, including new F11 provenance test. `git diff --check` passed.
+- Recount: F01-F58 Android mappings now 52 partial, 0 missing, 5 justified N/A, 1 implemented. F11 remains partial pending live authenticated Android-to-Core OIDC, membership roles and configured provider execution. No product implementation or user data changed.
+- Commit state: COMMIT_PENDING; only `.agent/PROGRESS.md`, `contracts/parity/feature-parity.yaml`, `tests/test_f59_android_parity.py`, and `FinanceReceiptScreensTest.kt` belong to this slice. User-owned untracked paths remain excluded.
+- Next: commit/push this parity correction; then select next genuine F59 Android gap while keeping live Core/OIDC and M2 runtime gates open.
 
 ## F59.21 F52 fresh export download safety — GREEN locally; PARTIAL — 2026-10-11
 

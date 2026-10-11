@@ -220,9 +220,14 @@ features:
     evidence:
       - "The ordered Ollama Vision pool accepts at most three allowlisted tags, retains the model that answered, and fails over within the configured execution policy. A process-wide single-slot scheduler bounds Ollama residency; timeout, cancellation and slot release are tested. The adapter normalizes EXIF, strips metadata, bounds image size, validates exact JSON and retries one invalid response with a fixed repair prompt. Core preserves typed Vision-to-local-OCR and OCR-to-Vision fallback reasons; PostgreSQL tests prove either reader can produce only an unposted review draft. RU/EN Web shows model provenance/failover. Full Core/PostgreSQL check passes 183 tests (0 failures, 2 container-gated skips), Python/contracts 219 passed/3 skipped, Web 34/34 and production build. No local Ollama endpoint/model is configured, so live model quality remains unverified and F11 stays in progress."
     android:
-      status: missing
-      scenario: "Android counterpart for F11: Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
-      gap: "No Android user screen or equivalent flow is verified for F11 yet."
+      status: partial
+      scenario: "Android uploads a receipt and reviews Core-produced OCR/Vision readings, actual Vision model provenance and localized fallback reasons; readings remain unverified until explicit receipt review."
+      tests:
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+      gap: "Synthetic Android tests cover returned Vision provider/model/prompt and localized fallbacks. Live authenticated Android-to-Core OIDC, member roles and configured model execution remain unverified."
+      evidence:
+        - "Android API tests preserve the actual Vision provider, model version and prompt version from Core. RU/EN Compose acceptance displays those values as unverified, shows localized Vision/OCR fallback reasons and proves reading alone creates no transaction. Synthetic data only; live Android-to-Core OIDC remains open."
     intentional_differences: []
   - id: F12
     feature: "Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
@@ -236,9 +241,10 @@ features:
     evidence:
       - "Local Tesseract uses bounded Pillow/OpenCV crop, grayscale, upscale, Otsu threshold, deskew and denoise variants; at most two variants run concurrently and results remain in declared order. The best reading is selected by text confidence and repeated numeric columns; boxes map back to source-image coordinates. Split decimal/thousands tokens are repaired only when geometry is close. Missing item values are reread from a crop in the inferred total column with a numeric whitelist. Synthetic ordinary and narrow receipts, a 4-degree tilted receipt, column clustering, split numbers, targeted reread and stable parallel order are tested. The installed local Tesseract passed ordinary and tilted-narrow synthetic OCR."
     android:
-      status: missing
-      scenario: "Android counterpart for F12: Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
-      gap: "No Android user screen or equivalent flow is verified for F12 yet."
+      status: not_applicable
+      scenario: "Android sends receipt photos to Core and reviews its OCR result through the F11/F13 flows; OCR image processing stays in the server worker."
+      approved_by: "PLAN.md F12 server ownership; CONTINUATION.md §B shared Java API and user-flow parity"
+      reason: "Tesseract/OpenCV variants, coordinate mapping and rereads are internal Python OCR-worker steps, not mobile user actions. Android consumes the Core-produced reading through F11 and reconciliation through F13; duplicating OCR on-device would create a second processing path."
     intentional_differences: []
   - id: F13
     feature: "Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
@@ -1255,9 +1261,10 @@ features:
     evidence:
       - "Configured local model then exact installed preferences; embeddings excluded; inventory is bounded/cached and never enumerated remotely, including health. Missing local text model returns safe unavailable while Tesseract and manual finance flows stay independent. Cloud requires explicit policy and uses its configured model only. Operator setup is documented in docs/AI_MODELS.md; no live cloud inference or model-quality claim was tested."
     android:
-      status: missing
-      scenario: "Android counterpart for F55: Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"
-      gap: "No Android user screen or equivalent flow is verified for F55 yet."
+      status: not_applicable
+      scenario: "Android uses Core capabilities; provider policy and model inventory remain operator configuration."
+      approved_by: "PLAN.md F55 deployment ownership; CONTINUATION.md §B keeps /ops on Web"
+      reason: "Cloud opt-in, provider credentials and model management are deployment/operator controls, not end-user actions. Android exposes safe capability availability through F54 and never receives provider credentials or model inventory."
     intentional_differences: []
   - id: F56
     feature: "Проверки receipt inventory, synthetic/private samples, CI"
@@ -1316,7 +1323,7 @@ features:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
-      - "Current registry maps all F01-F58: 51 partial, 3 missing, 3 justified platform-specific N/A, and 1 implemented. Android local evidence covers F31-F34, receipt flows, member navigation and selected-route indication; full parity and live authenticated Core/OIDC E2E remain incomplete."
+      - "Current registry maps all F01-F58: 52 partial, 0 missing, 5 justified platform-specific N/A, and 1 implemented. Android local evidence covers F11 receipt Vision provenance/fallback display, F31-F34, member navigation and selected-route indication; full parity and live authenticated Core/OIDC E2E remain incomplete."
       - "Real OIDC login, live Java/Core operation, and PostgreSQL tenant-isolation E2E remain required before F59 completion."
     intentional_differences: []
   - id: F60

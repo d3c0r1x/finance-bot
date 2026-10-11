@@ -54,3 +54,20 @@ def test_all_android_mappings_are_accounted_for_in_f59_acceptance():
     evidence = " ".join(features["F59"].get("evidence") or [])
     assert "feature-by-feature" not in evidence.lower(), "F59 must replace stale summary-only evidence"
     assert len([features[f"F{number:02}"] for number in range(1, 59)]) == 58
+
+
+def test_receipt_provider_and_server_only_flows_have_accurate_android_mapping():
+    features = {feature["id"]: feature for feature in _features()}
+    vision = features["F11"]["android"]
+    ocr_pipeline = features["F12"]["android"]
+    provider_configuration = features["F55"]["android"]
+
+    assert vision["status"] == "partial"
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt" in vision["tests"]
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt" in vision["tests"]
+    assert "live" in vision["gap"].lower()
+
+    assert ocr_pipeline["status"] == "not_applicable"
+    assert "OCR" in ocr_pipeline["reason"]
+    assert provider_configuration["status"] == "not_applicable"
+    assert "operator" in provider_configuration["reason"].lower()

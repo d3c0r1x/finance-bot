@@ -1661,6 +1661,29 @@ class FinanceReceiptScreensTest {
         assertEquals("unknown", draft.categorySource)
     }
 
+    @Test fun visionReadingShowsActualProviderVersionsAndStaysUnverifiedInRussianAndEnglish() {
+        val mutations = mutableListOf<String>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receiptDraft(), receiptReading = receiptReading()),
+            onCreate = { type, amount, _ -> mutations += "$type:$amount" },
+            onReceiptConfirm = { id, _, _ -> mutations += "confirm:$id" })
+
+        compose.onNodeWithText("Источник Vision: synthetic-vision · synthetic-vision-v1 · vision-prompt-v1")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Непроверенное чтение Vision").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Эти значения не подтверждены и не заменяют данные чека.")
+            .performScrollTo().assertIsDisplayed()
+        assertTrue("Showing a Vision reading must not create or confirm a transaction", mutations.isEmpty())
+
+        compose.onNodeWithText("EN").performClick()
+        compose.onNodeWithText("Vision source: synthetic-vision · synthetic-vision-v1 · vision-prompt-v1")
+            .performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Unverified Vision reading").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("These values are unverified and do not replace receipt fields.")
+            .performScrollTo().assertIsDisplayed()
+        assertTrue("Changing language must not create or confirm a transaction", mutations.isEmpty())
+    }
+
     @Test fun receiptFallbackReasonsUseLocalizedMessagesWithoutMachineCodes() {
         val reading = receiptReading().copy(
             visionFallbackReason = "VISION_UNAVAILABLE",
