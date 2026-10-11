@@ -1274,16 +1274,23 @@ features:
     feature: "Русское форматирование, escaping Telegram, шрифты, текстовый fallback"
     target: "P/W presentation libraries; J semantic DTO"
     acceptance: "Кириллица, Markdown-символы, суммы/склонения, длинные строки, разные ОС"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - tests/test_presentation_formatting.py
+      - tools/contracts/test_contracts.py
+      - services/python/presentation/tests
+      - services/python/telegram_gateway/tests
+      - apps/web/src/formatting.test.ts
+      - apps/android/app/src/test/java/com/decorix/finance/FinancePresentationTest.kt
+      - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
+    evidence:
+      - "Python presentation/contracts/report/Telegram suites: 199 passed; Web: 95 tests plus production build passed. Android F57 RU/EN money and semantic-code presentation passed isolated API-27 instrumentation (50 tests), debug and AndroidTest APK builds, and installed launch; `FinancePresentationTest` now has 7 passing tests including 30-digit grouping, HALF_EVEN edges and malformed-input fallback. Contract DTO enums remain unchanged; fixtures are synthetic."
     android:
-      status: partial
-      scenario: "Android counterpart for F57: Русское форматирование, escaping Telegram, шрифты, текстовый fallback"
+      status: complete
+      scenario: "Android formats decimal-string money in RU/EN and localizes Core semantic status codes on dashboard, report, budget and budget alerts, with safe unknown-code fallback."
       tests:
         - "apps/android/app/src/test/java/com/decorix/finance/FinancePresentationTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F57 acceptance condition or live Core integration."
     intentional_differences: []
   - id: F58
     feature: "Конфигурация/секреты/Windows launch scripts/документация/MIT"

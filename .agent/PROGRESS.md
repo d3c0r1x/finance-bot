@@ -2081,3 +2081,11 @@ Updated: 2026-10-11 11:29 MSK, Europe/Moscow.
 - Further GREEN: complete Android JVM suite 69/69; parity/contracts `66 passed`; debug and AndroidTest APKs assemble. Debug APK SHA-256 `C3CD34A59113251EBA0B763B0975BE9C0ADB4C97F3A86FC88929AFD9C5FF102A` installed and launched on `emulator-5554` (process observed).
 - Review: independent read-only review found no implementation blocker. Errors are normalized, stale requests are discarded across session/tenant changes, and Core enforces membership on the route.
 - Commits: `9a1422427bad2e1a582524068567e6cc7db62d23` (`feat(F54): add Android capability status screen`) and `fff63122b7d906c3c93805e04512d6ed92aacaa8` (verification record) pushed; remote branch was verified at `fff6312`. `gh run list --commit 9a142242` returned no workflow run. Preserve live OIDC/provider verification as open gates.
+
+## F59.20 F53 approval confirmation and F57 Android acceptance — GREEN locally; 2026-10-11
+
+- F53: user confirmed «Участники → их операции». Existing owner navigation opens operations filtered by the selected member; viewer cannot open the family screen. Both focused API-27 emulator tests passed individually on `emulator-5554` (1/1 each); no API/access changes.
+- F57 test-first follow-up: added synthetic Android cases for a 30-digit decimal with exact RU/EN grouping, HALF_EVEN positive/negative boundaries, and malformed/over-contract inputs. The focused suite passed immediately: 7/7 (`FinancePresentationTest`). No production change was needed because the existing formatter already satisfies these cases.
+- Reconciled `contracts/parity/feature-parity.yaml`: F57 was already GREEN per the approved offline acceptance, but registry still said planned and described live Core as part of Android F57. It now records global and Android F57 complete; live Android OIDC/Core remains under F59 integration/deployment gates.
+- GREEN: focused Android money test 7/7; F53 owner/viewer navigation tests 1/1 each on isolated API-27 `emulator-5554`; parity contract suite 63/63; `git diff --check` clean. Do not claim live Core, remote CI, or production-service verification.
+- Next: continue V1 with the next F59 Android gap after checking plan and current progress; keep F52/F53/F54 live deployment gates explicit.

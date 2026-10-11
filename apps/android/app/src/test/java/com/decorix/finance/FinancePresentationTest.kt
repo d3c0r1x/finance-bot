@@ -9,6 +9,26 @@ class FinancePresentationTest {
         assertEquals("-12.30 RUB", formatMoney("-12.30", "en"))
     }
 
+    @Test fun formatsLargeDecimalStringsWithoutLosingPrecisionOrGrouping() {
+        val largeAmount = "123456789012345678901234567890.12"
+        assertEquals("123 456 789 012 345 678 901 234 567 890,12 ₽", formatMoney(largeAmount, "ru"))
+        assertEquals("123,456,789,012,345,678,901,234,567,890.12 RUB", formatMoney(largeAmount, "en"))
+    }
+
+    @Test fun roundsDecimalStringsHalfEvenAndRejectsMalformedValues() {
+        assertEquals("1,00 ₽", formatMoney("1.005", "ru"))
+        assertEquals("1,02 ₽", formatMoney("1.015", "ru"))
+        assertEquals("-1.02 RUB", formatMoney("-1.015", "en"))
+
+        listOf(
+            null, "", " 12.00", "1e3", "NaN", "Infinity", "+1.00",
+            "1.1234567890123", "1234567890123456789012345678901",
+        ).forEach { malformed ->
+            assertEquals("invalid ru value: $malformed", "—", formatMoney(malformed, "ru"))
+            assertEquals("invalid en value: $malformed", "—", formatMoney(malformed, "en"))
+        }
+    }
+
     @Test fun formatsShoppingPurchaseCountsWithRussianDeclension() {
         assertEquals("1 покупка", formatShoppingPurchaseCount(1, "ru"))
         assertEquals("2 покупки", formatShoppingPurchaseCount(2, "ru"))
