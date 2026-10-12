@@ -2245,7 +2245,7 @@ Updated: 2026-10-12, Europe/Moscow.
 - Commit/push: `32c09016abd4da6939b630f9447327b84f395065` (`fix(F49): show restored Android undo state`) pushed; `git ls-remote` confirmed the same remote SHA.
 - Next: assess the approved F08 Android process-death retry-recovery gap. Keep durable owner/tenant binding and explicit user retry as hard safety requirements.
 
-## F59.33 F08 Android durable repeat/void retry — IMPLEMENTED / LOCALLY VERIFIED; PARTIAL
+## F59.33 F08 Android durable repeat/void retry — COMMITTED/PUSHED; PARTIAL
 
 - Authority: V1 `PLAN.md` F08 plus user's explicit 2026-10-12 approval for encrypted local retry recovery. Plan: `docs/superpowers/plans/2026-10-12-f08-android-durable-retry.md`.
 - Design: persist immutable repeat/void request checkpoints under Android Keystore AES-GCM, bound to Core's authenticated `userId` and tenant. Capture in-process generation at tap. Only an explicit history action may retry. Preserve checkpoints on corrupt storage, ambiguous POST, failed ACK/refresh, or identity change; clear only after same-identity authoritative refresh.
@@ -2254,5 +2254,5 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN/regression: repository unit tests pass; full Android JVM suite passes; final F08 API-27 set passed 108/108 and the post-review retry/edit recovery screen suite passed 5/5 on `emulator-5554` (Android 8.1/API 27). Contract/Python regression passed 323, skipped 1. Debug and AndroidTest APKs assembled during connected instrumentation. Installed debug app launched with no `FATAL EXCEPTION`; `git diff --check` clean before final staging.
 - Review: independent read-only reviewer confirmed the four recovery issues were closed. Its final version-change finding was fixed test-first; the focused Compose test passed.
 - Limits: encrypted store recreation was tested, but an actual OS force-stop/relaunch, live OIDC/Core, and real tenant-isolation E2E remain unverified. F08 Android remains PARTIAL for those external acceptance gates.
-- Commit pending: stage only F08 Android implementation/tests, parity registry, bounded plan, and this progress record; exclude user-owned untracked files and local tooling caches.
+- Commit/push: `4e2511d6a1fe315434d307c41ab9fdabf6a1e0d8` (`fix(android): persist safe mutation retries`) pushed to `feat/saas-rewrite`; `git ls-remote` confirmed the same SHA. User-owned untracked files and local tooling caches were excluded.
 - Next: commit/push scoped F08 work, verify remote SHA, then continue remaining V1 plan work.
