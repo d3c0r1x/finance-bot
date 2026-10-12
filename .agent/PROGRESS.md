@@ -2326,3 +2326,14 @@ Updated: 2026-10-12, Europe/Moscow.
 - Review: independent read-only review found no policy wiring blocker. The pure policy test does not simulate delayed MainActivity HTTP completion; it verifies the decision used by both callbacks. Live OIDC/Core and production export delivery remain untested.
 - Limits: F52 Android remains PARTIAL; preserve the separate delayed-HTTP integration, live OIDC/Core, worker/S3, resolver, browser-transfer, downloaded-byte, and wall-clock cadence gates.
 - Commit/push: `c5943ea` (`fix(F52): guard stale Android export completions`) pushed to `origin/feat/saas-rewrite`; progress record is committed separately.
+
+## F60.3 Vertex shared golden evaluation — GREEN; COMMIT_PENDING — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F60, `docs/specs/CONTINUATION.md` §C and A05–A06; bounded plan `docs/superpowers/plans/2026-10-12-f60-3-vertex-shared-evaluation.md`.
+- TDD RED: explicit candidate tests first failed as expected (`2 failed, 2 passed, 10 deselected`). Reviewer-driven mock-transport guard then failed before implementation; provenance response/config canaries and ordinary-provider provenance assertions also failed before their fixes. Invalid model configuration is covered by a fail-closed test.
+- Implementation: evaluator accepts explicit Vertex candidate selection only under `cloud-opt-in`. It requires exact `httpx.MockTransport`, validates configured model ID, clones provider with synthetic token, and does not call configured token supplier. Vertex remains disabled; normal `ProviderRouter` still rejects it. `local-only` blocks before token/transport. Vertex response provenance is ignored; report uses a model-ID SHA-256 fingerprint and trusted `PROMPT_VERSION`. Other providers retain model/prompt linkage as strict-identifier SHA-256 fingerprints. Usage/cost stay unknown; no prompt/context/output/token text enters report.
+- GREEN: focused eval/gateway `50/50`; full intelligence `152 passed, 1 skipped`; contracts `63/63`; `compileall` and `git diff --check` pass. Two prior full-suite attempts hit intermittent existing loopback `WinError 10053`; isolated app suite passed `29/29`; final full suite passed.
+- Review: independent read-only review approved final diff; no remaining finding. Synthetic golden, fake token and `MockTransport` only; no cloud credentials or live request.
+- Limits: F60 remains partial. Real model/holdout quality, usage/cost, cloud consent/configuration, credentials, quotas/safety controls, canary, rollback and production activation remain separate gates. Vertex stays off.
+- Files: `services/python/intelligence/evaluation.py`, `services/python/intelligence/tests/test_evaluation.py`, `contracts/parity/feature-parity.yaml`, and bounded plan. User-owned untracked paths remain excluded.
+- Status: COMMIT_PENDING. Next: stage only these F60.3 files plus this progress entry; commit feature, then record SHA/COMPLETE in separate progress commit and push both.

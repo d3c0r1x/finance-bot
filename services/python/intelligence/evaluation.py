@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -22,6 +23,7 @@ from services.python.intelligence.gateway import (
     PolicyDenied,
     ProviderRouter,
     UnsupportedCapability,
+    VertexAIProvider,
 )
 
 
@@ -99,12 +101,14 @@ def evaluate_providers(
     minimum_pass_rate: float = 1.0,
     timeout_seconds: float = 30.0,
     provider_api_keys: dict[int, str] | None = None,
+    candidate_provider_names: set[str] | frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Run one common dataset; reports contain only case IDs and failure classes."""
     if not 0 < minimum_pass_rate <= 1 or not 0 < timeout_seconds <= 600:
         raise ValueError("AI evaluation gate settings are invalid")
     results = []
     provider_api_keys = provider_api_keys or {}
+    candidate_provider_names = candidate_provider_names or frozenset()
     for provider in providers:
         provider_cases = []
         latency_samples = []
@@ -114,18 +118,47 @@ def evaluate_providers(
             if case.task_kind not in getattr(provider, "supported_tasks", frozenset()):
                 continue
             required = TASK_SCHEMAS[case.task_kind][2]
-            try:
-                ProviderRouter([provider]).select(required, execution_policy, case.task_kind)
-            except PolicyDenied:
-                provider_cases.append(_case_result(case, "blocked", "policy_denied"))
-                continue
-            except UnsupportedCapability:
-                provider_cases.append(_case_result(case, "failed", "unsupported_capability"))
-                continue
+            selected_vertex_candidate = (
+                isinstance(provider, VertexAIProvider)
+                and provider.name in candidate_provider_names
+            )
+            if selected_vertex_candidate:
+                if execution_policy != "cloud-opt-in":
+                    provider_cases.append(_case_result(case, "blocked", "policy_denied"))
+                    continue
+                if type(provider.transport) is not httpx.MockTransport:
+                    provider_cases.append(_case_result(case, "blocked", "evaluation_transport_required"))
+                    continue
+                try:
+                    configured_model = VertexAIProvider._path_component(provider.model_id, "model ID")
+                except (TypeError, ValueError):
+                    provider_cases.append(_case_result(case, "failed", "invalid_configuration"))
+                    continue
+                from services.python.intelligence.transaction_drafts import PROMPT_VERSION
+
+                model_fingerprint = hashlib.sha256(configured_model.encode("utf-8")).hexdigest()[:16]
+                model_versions.add(f"vertex-sha256:{model_fingerprint}")
+                prompt_versions.add(PROMPT_VERSION)
+                execution_provider = replace(
+                    provider,
+                    access_token_supplier=lambda: "synthetic-evaluation-token",
+                )
+            else:
+                try:
+                    ProviderRouter([provider]).select(required, execution_policy, case.task_kind)
+                except PolicyDenied:
+                    provider_cases.append(_case_result(case, "blocked", "policy_denied"))
+                    continue
+                except UnsupportedCapability:
+                    provider_cases.append(_case_result(case, "failed", "unsupported_capability"))
+                    continue
+                execution_provider = provider
             started = perf_counter()
             try:
-                actual = asyncio.run(provider.execute(case.task_kind, case.context, timeout_seconds,
-                                                      provider_api_keys.get(id(provider), "")))
+                actual = asyncio.run(execution_provider.execute(
+                    case.task_kind, case.context, timeout_seconds,
+                    provider_api_keys.get(id(provider), ""),
+                ))
             except (TimeoutError, httpx.TimeoutException):
                 provider_cases.append(_case_result(case, "failed", "timeout"))
                 continue
@@ -134,11 +167,13 @@ def evaluate_providers(
                 continue
             latency_ms = max(0, round((perf_counter() - started) * 1000))
             latency_samples.append(latency_ms)
-            if isinstance(actual, dict):
-                if isinstance(actual.get("modelVersion"), str):
-                    model_versions.add(actual["modelVersion"][:128])
-                if isinstance(actual.get("promptVersion"), str):
-                    prompt_versions.add(actual["promptVersion"][:128])
+            if not selected_vertex_candidate and isinstance(actual, dict):
+                model_fingerprint = _provenance_fingerprint(actual.get("modelVersion"), "model")
+                prompt_fingerprint = _provenance_fingerprint(actual.get("promptVersion"), "prompt")
+                if model_fingerprint:
+                    model_versions.add(model_fingerprint)
+                if prompt_fingerprint:
+                    prompt_versions.add(prompt_fingerprint)
             try:
                 passed = _matches_golden(case, actual)
             except (InvalidOperation, TypeError, ValueError, KeyError):
@@ -210,6 +245,14 @@ def _matches_golden(case: GoldenCase, actual: Any) -> bool:
             {"merchant": item["merchant"], "categoryCode": item["categoryCode"]} for item in normalized
         ] == expected
     raise ValueError("AI evaluation task is unsupported")
+
+
+def _provenance_fingerprint(value: Any, kind: str) -> str | None:
+    """Keep provider version linkage without copying provider-controlled text into reports."""
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}", value):
+        return None
+    fingerprint = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    return f"{kind}-sha256:{fingerprint}"
 
 
 def _deep_equal(expected: Any, actual: Any) -> bool:
