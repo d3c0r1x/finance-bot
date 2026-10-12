@@ -2383,4 +2383,6 @@ Updated: 2026-10-12, Europe/Moscow.
 - Regression: API-27 F52 model/API/screen/flow instrumentation 50/50; Android JVM 92/92 with 0 failures/errors/skips; parity plus contracts 73/73; debug and AndroidTest APK assembly pass; `git diff --check` clean.
 - Review: independent final review approved; test start time is captured at delay entry, the five-second minimum is strict, and the 12-second ceiling allows emulator scheduling margin.
 - Feature commit: `d80e129fff280d71ffd8630804665aa0466cfc7a` (`test(F52): verify elapsed Android poll interval`); contains only the F52 timing test, parity evidence/regression, and this progress record.
-- Current status: COMMIT_PENDING; feature commit succeeded. Push branch and verify remote SHA, then mark COMPLETE.
+- GitHub: feature commit `d80e129fff280d71ffd8630804665aa0466cfc7a` and progress commit `fed73963f5c2b0bfdc6cb9da3e4603adc12bd40d` pushed. `git ls-remote` confirmed `origin/feat/saas-rewrite` at `fed73963f5c2b0bfdc6cb9da3e4603adc12bd40d` before this final status update.
+- Current status: COMPLETE. Local F52 elapsed-polling evidence is committed and delivered; live server and browser-transfer gates remain open.
+- Next: continue the next independently verifiable V1 acceptance gap; keep live Core/OIDC and export-storage gates blocked until runtime exists.
