@@ -2255,4 +2255,4 @@ Updated: 2026-10-12, Europe/Moscow.
 - Review: independent read-only reviewer confirmed the four recovery issues were closed. Its final version-change finding was fixed test-first; the focused Compose test passed.
 - Limits: encrypted store recreation was tested, but an actual OS force-stop/relaunch, live OIDC/Core, and real tenant-isolation E2E remain unverified. F08 Android remains PARTIAL for those external acceptance gates.
 - Commit/push: `4e2511d6a1fe315434d307c41ab9fdabf6a1e0d8` (`fix(android): persist safe mutation retries`) pushed to `feat/saas-rewrite`; `git ls-remote` confirmed the same SHA. User-owned untracked files and local tooling caches were excluded.
-- Next: commit/push scoped F08 work, verify remote SHA, then continue remaining V1 plan work.
+- Next: continue remaining V1 plan work; keep force-stop and live integration acceptance gates visible.
