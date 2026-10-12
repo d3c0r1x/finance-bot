@@ -2263,7 +2263,7 @@ Updated: 2026-10-12, Europe/Moscow.
 - TDD RED: new `tests/test_f58_parity_registry.py` failed because F58 was still marked `planned` with no test/evidence references despite `.agent/PROGRESS.md` recording F58 complete.
 - Change: registry now marks F58 `complete`, links existing runtime and formatting tests plus the new registry assertion, and records the exact local checks. It explicitly states Docker is unavailable and PLAN.md does not yet provide Compose profiles; no Compose runtime is claimed. F56 row was reviewed and preserved unchanged.
 - GREEN: focused contract, F58 runtime, presentation formatting, and registry checks passed 77/77; `git diff --check` clean.
-- Scope: no product behavior changed. Commit pending: stage only the F58 parity row, its focused regression test, and this progress record.
+- Scope: no product behavior changed. Commit/push: `aafd8cd525f2af59082cad0b51b4ee97d6535920` (`fix(parity): mark F58 locally complete`) pushed; subsequent remote verification confirmed branch synchronization.
 - Next: continue the next independently executable V1 task; preserve live Android/Core/OIDC and production runtime gates as incomplete until exercised.
 
 ## F59.35 F10 Android parity evidence cleanup — GREEN; PARTIAL live gate
@@ -2272,5 +2272,5 @@ Updated: 2026-10-12, Europe/Moscow.
 - TDD RED: added a regression to `tests/test_f59_android_parity.py`; it failed because F10 still said receipt item editing, duplicate decisions, and confirmation were future work in F15-F18.
 - Change: F10 Android gap now accurately records local upload/progress/draft and later receipt-review coverage, with live authenticated Android-to-Core/OIDC upload as the remaining gate. Added API-27 F10.1 evidence for upload, token-refresh replay, bounded polling and no transaction side effect.
 - GREEN: `tests/test_f59_android_parity.py` plus `tools/contracts/test_contracts.py` passed 68/68; `git diff --check` clean. Previously recorded F10.1 instrumentation remains 94/94 on isolated API-27 emulator; live OIDC/Core is still unverified.
-- Commit pending: stage only F10 Android parity metadata, this focused regression, and the progress record.
+- Commit/push: `8d931d8e414b2dfd675dab7a6a87d727ae1c4c9c` (`fix(parity): correct F10 Android gap`) pushed to `feat/saas-rewrite`; `git ls-remote` confirmed the same SHA. User-owned untracked files and local tooling caches remained excluded.
 - Next: continue an independently executable V1 slice; keep live Android/Core/OIDC and production runtime gates open.
