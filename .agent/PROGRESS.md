@@ -1,10 +1,10 @@
 # Execution progress
 
-Updated: 2026-10-11 13:54 MSK, Europe/Moscow.
+Updated: 2026-10-12, Europe/Moscow.
 
 ## Global plan
 
-- Plan: `PLAN.md`, SHA-256 `D6D5163AB1AB1B2C76501430435663C24E9E853F293371789681410A19D03FA9`; original specification from the planning chat.
+- Plan: `PLAN.md`, SHA-256 `8A52BC8C8B36869447E260DDE5376B299979DEA358F41D489016E92F167E9030`; original specification from the planning chat. Public-access paragraph reconciled on 2026-10-12 with the user's explicit public HTTPS choice and rejection of Tailscale.
 - Mandatory supplement: `docs/specs/CONTINUATION.md`, version 1.1.
 - Approval: user requested continuation of the approved rewrite, Android and
   future provider abstraction in the referenced chats; current user explicitly
@@ -37,6 +37,10 @@ Updated: 2026-10-11 13:54 MSK, Europe/Moscow.
 - E4.109 F15.3 Android explicit receipt-total synchronization is GREEN and pushed in `7498080269fa176d41b615bd3fe7aa93fd1aadb0`: exact totals, writer-only explicit action, quoted version guard, Core-authoritative positive/complete validation, localized 409/412 recovery, viewer read-only, no transaction creation. Full API 27 instrumentation 130/130, JVM 15/15; debug APK installed and launched on isolated API 27 emulator. No GitHub workflow run was found for this commit.
 - F15.5 Android receipt-item delete design is resolved against the approved `PLAN.md` F15 scope: explicit confirmation, Core's version-guarded DELETE, and unchanged cash total. The older “await input” note is superseded; implementation and local evidence are recorded below.
 - F03.2 Android repeat setup from profile is locally GREEN; implementation commit `018084d` is pushed and remote branch is verified at `f390ab4`. F03 Android remains partial pending authenticated Core/OIDC end-to-end proof. F15 and F59 remain partial; production/OIDC E2E and full F01–F60 parity remain.
+
+## Plan corrections
+
+- 2026-10-12 — Before: `PLAN.md` recommended Tailscale Funnel. After: public HTTPS is required and Tailscale is explicitly rejected; no ingress provider is treated as configured. Necessity: the approved global plan contradicted the user's later explicit delivery choice. Evidence: conversation decisions on public HTTPS/no Tailscale and `docs/specs/PERSONAL_MVP_PLAN.md` M2/M3. Alternatives checked: continue Funnel (conflicts with user's choice) or leave contradictory docs (misleads implementation); neither is valid. RED: the approved plan specified Funnel while the current personal MVP plan explicitly excluded it. GREEN: `.venv\\Scripts\\python.exe -m pytest tools\\contracts\\test_contracts.py` — 63 passed; `git diff --check` clean; `PLAN.md` hash is recorded above. No DNS, firewall, router or system settings changed. Commit pending.
 
 ## Goals
 
