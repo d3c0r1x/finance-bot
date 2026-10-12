@@ -349,7 +349,7 @@ public class TelegramActionService {
         int limit = request.limit() == null ? 8 : request.limit();
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "transaction.read");
-            return transactions.recent(actor.tenantId(), actor.keycloakSubject(), limit);
+            return transactions.recent(actor.tenantId(), actor.userId(), limit);
         });
     }
 

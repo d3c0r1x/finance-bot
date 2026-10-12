@@ -97,6 +97,46 @@ class TelegramNativeIdentityPostgresTest {
         assertEquals("Synthetic friend", new MemberProfileService(jdbc, tx).get(tenantId, subject).displayName());
     }
 
+    @Test
+    void changedConfiguredAndroidSubjectRevokesAnExistingTelegramContext() {
+        long id = syntheticId();
+        String originalSubject = "synthetic-android-" + UUID.randomUUID();
+        TelegramAccessPolicy originalPolicy = new TelegramAccessPolicy(Long.toString(id), id + "=" + originalSubject);
+        TelegramActorContextService original = service(originalPolicy);
+        UUID tenantId = original.listTenants(id, "Synthetic friend").tenants().get(0).tenantId();
+        new TenantService(jdbc, tx, originalPolicy).list(originalSubject, true);
+        var context = original.issue(new TelegramActorContextApi.IssueRequest(id, tenantId));
+        assertEquals(originalSubject, original.require(context.token(), null).keycloakSubject());
+
+        String replacementSubject = "synthetic-android-" + UUID.randomUUID();
+        TelegramActorContextService changed = service(new TelegramAccessPolicy(
+                Long.toString(id), id + "=" + replacementSubject));
+        assertThrows(ResponseStatusException.class, () -> changed.require(context.token(), null));
+    }
+
+    @Test
+    void nativeTelegramReadsOnlyItsOwnRecentTransactionsByCanonicalUserId() {
+        long id = syntheticId();
+        TelegramActorContextService contexts = service(new TelegramAccessPolicy(Long.toString(id), ""));
+        UUID tenantId = contexts.listTenants(id, "Synthetic friend").tenants().get(0).tenantId();
+        String token = contexts.issue(new TelegramActorContextApi.IssueRequest(id, tenantId)).token();
+        UUID userId = contexts.require(token, "transaction.read").userId();
+        UUID transactionId = UUID.randomUUID();
+        tx.executeWithoutResult(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            jdbc.update("""
+                    INSERT INTO transactions
+                      (id, tenant_id, owner_subject, owner_user_id, type, amount, currency,
+                       category_code, source, occurred_at)
+                    VALUES (?, ?, ?, ?, 'expense', 123.45, 'RUB', 'food', 'telegram', now())
+                    """, transactionId, tenantId, "telegram:" + id, userId);
+        });
+        TransactionService service = new TransactionService(jdbc, tx, null, null, null, null);
+        assertEquals(transactionId, service.recent(tenantId, userId, 8).get(0).id());
+        assertThrows(ResponseStatusException.class,
+                () -> service.recent(tenantId, UUID.randomUUID(), 8));
+    }
+
     private static long syntheticId() {
         return 1000000000L + Math.floorMod(UUID.randomUUID().getMostSignificantBits(), 1000000000L);
     }

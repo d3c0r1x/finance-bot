@@ -158,9 +158,10 @@ public class TelegramActorContextService {
                     context.tenantId(), Long.toString(context.telegramUserId()), context.userId());
             if (identities.isEmpty()) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Telegram membership is inactive");
             ActorIdentity identity = identities.get(0);
-            if (configuredSubject == null && identity.keycloakSubject() != null) {
+            if (identity.keycloakSubject() != null
+                    && !identity.keycloakSubject().equals(configuredSubject)) {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                        "Telegram account mapping is no longer configured");
+                        "Telegram account mapping no longer matches the linked Android identity");
             }
             Set<String> permissions;
             try {

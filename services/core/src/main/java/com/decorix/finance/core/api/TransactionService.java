@@ -445,6 +445,30 @@ public class TransactionService {
         });
     }
 
+    /** Telegram actor contexts supply a resolved canonical user, including accounts without Keycloak. */
+    public List<TransactionResponse> recent(UUID tenantId, UUID userId, int limit) {
+        if (limit < 1 || limit > 20) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "History limit must be from 1 to 20");
+        }
+        return transaction.execute(status -> {
+            setTenantContext(tenantId);
+            Integer active = jdbc.queryForObject("""
+                    SELECT count(*) FROM memberships membership
+                    JOIN users ON users.id = membership.user_id AND users.status = 'active'
+                    WHERE membership.tenant_id = ? AND membership.user_id = ? AND membership.status = 'active'
+                    """, Integer.class, tenantId, userId);
+            if (active == null || active == 0) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+            }
+            return jdbc.query("""
+                    SELECT id, tenant_id, type, amount::text, currency, category_code, subcategory_code,
+                           description, source, occurred_at, account_id, status, version, created_at
+                    FROM transactions WHERE tenant_id = ? AND owner_user_id = ? AND status = 'posted'
+                    ORDER BY created_at DESC, id DESC LIMIT ?
+                    """, TRANSACTION_MAPPER, tenantId, userId, limit);
+        });
+    }
+
     /** Undo only the latest posted operation visible to this member; retries replay the original result. */
     public TransactionResponse voidLatest(UUID tenantId, String subject, UUID id, String key, long expectedVersion) {
         if (id == null || expectedVersion < 1 || key == null || key.length() < 16 || key.length() > 128) {
