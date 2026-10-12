@@ -35,6 +35,6 @@
 - **Contract regression:** `.venv\Scripts\python.exe -m pytest tools\contracts\test_contracts.py -q -p no:cacheprovider` — `63 passed`.
 - **Syntax/diff:** `.venv\Scripts\python.exe -m compileall -q services\python\intelligence` and `git diff --check` pass.
 - **Independent review:** final read-only reviewer found no remaining issue; confirmed transport and credential boundaries, provider provenance preservation/redaction, and unchanged disabled routing.
-- **Status:** code and regression gates GREEN. Feature commit `5d035b00340c251808d7dafc49bceec9507d9ca8` exists; push and final progress record are pending. Production routing, provider enabled state, CLI, dependencies, live credentials, and real network behavior were not changed or exercised.
+- **Status:** code and regression gates GREEN. Feature commit `5d035b00340c251808d7dafc49bceec9507d9ca8` and progress commit `868fd972fa282324f87607a3a46f85c5bf597a92` were pushed; remote verification confirmed that SHA before the final progress-only update. Production routing, provider enabled state, CLI, dependencies, live credentials, and real network behavior were not changed or exercised.
 
 **Limits:** mocked golden evaluation proves adapter integration and report safety only. Real model quality/holdout, measured usage/cost/latency, cloud-consent/configuration, credentials, quotas/safety controls, canary, and rollback remain separate F60 gates. Vertex stays off.
