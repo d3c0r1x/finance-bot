@@ -3476,13 +3476,8 @@ class MainActivity : ComponentActivity() {
         executor.execute {
             runCatching { api.exportStatus(tenant.id, exportId, sessionGeneration) }
                 .onSuccess { job ->
-                    if (FinanceExportStatusPolicy.isCurrent(
-                            request, exportStatusGeneration.get(),
-                            ui.tenants.firstOrNull()?.id?.let { FinanceExportStatusIdentity(it, api.authSessionGeneration) },
-                            exportScreenActive,
-                        ) &&
-                        api.authSessionGeneration == sessionGeneration && ui.authenticated &&
-                        ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
+                    val completion = exportStatusCompletion(request, exportId, job.status, job.downloadUrl)
+                    if (completion.publishStatus) {
                         exportBusyKind = null
                         val visibleJob = if (exportScreenActive &&
                             lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) job
@@ -3502,7 +3497,7 @@ class MainActivity : ComponentActivity() {
                             val freshUrl = FinanceExportDownloadPolicy.freshUrlIfCurrent(
                                 downloadAttempt, context, job.status, job.downloadUrl,
                             )
-                            if (freshUrl != null) {
+                            if (completion.openDownload && freshUrl != null) {
                                 openExportDownload(freshUrl)
                             } else if (FinanceExportDownloadPolicy.isCurrent(downloadAttempt, context)) {
                                 Toast.makeText(this, if (language == "ru") "Ссылка больше недоступна. Обновите статус." else
@@ -3510,17 +3505,12 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        clearStaleExportStatusState(request, downloadAttempt)
+                        clearStaleExportStatusState(request, exportId, downloadAttempt)
                     }
                 }
                 .onFailure { error ->
-                    if (FinanceExportStatusPolicy.isCurrent(
-                            request, exportStatusGeneration.get(),
-                            ui.tenants.firstOrNull()?.id?.let { FinanceExportStatusIdentity(it, api.authSessionGeneration) },
-                            exportScreenActive,
-                        ) &&
-                        api.authSessionGeneration == sessionGeneration && ui.authenticated &&
-                        ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
+                    val completion = exportStatusCompletion(request, exportId, null, null)
+                    if (completion.publishStatus) {
                         exportBusyKind = null
                         if (error is ApiFailure && error.status == 401) expireAuthenticatedSession(error)
                         else ui = ui.copy(exportBusy = false, exportError = financeExportErrorCode(error))
@@ -3528,20 +3518,42 @@ class MainActivity : ComponentActivity() {
                             pendingExportDownload = null
                         }
                     } else {
-                        clearStaleExportStatusState(request, downloadAttempt)
+                        clearStaleExportStatusState(request, exportId, downloadAttempt)
                     }
                 }
         }
     }
 
+    private fun exportStatusCompletion(
+        request: FinanceExportStatusRequest,
+        requestedExportId: String,
+        responseStatus: String?,
+        responseDownloadUrl: String?,
+    ): FinanceExportStatusCompletion = FinanceExportStatusPolicy.completion(
+        request = request,
+        currentGeneration = exportStatusGeneration.get(),
+        currentIdentity = ui.tenants.firstOrNull()?.id?.let {
+            FinanceExportStatusIdentity(it, api.authSessionGeneration)
+        },
+        screenActive = exportScreenActive,
+        authenticated = ui.authenticated,
+        currentExportId = ui.exportJob?.id,
+        requestedExportId = requestedExportId,
+        currentSessionGeneration = api.authSessionGeneration,
+        busyKind = exportBusyKind,
+        responseStatus = responseStatus,
+        responseDownloadUrl = responseDownloadUrl,
+    )
+
     private fun clearStaleExportStatusState(
         request: FinanceExportStatusRequest,
+        requestedExportId: String,
         downloadAttempt: FinanceExportDownloadAttempt?,
     ) {
         if (downloadAttempt != null && pendingExportDownload == downloadAttempt) {
             pendingExportDownload = null
         }
-        if (FinanceExportStatusPolicy.ownsStatusBusy(request, exportStatusGeneration.get(), exportBusyKind)) {
+        if (exportStatusCompletion(request, requestedExportId, null, null).clearBusy) {
             exportBusyKind = null
             ui = ui.copy(exportBusy = false)
         }

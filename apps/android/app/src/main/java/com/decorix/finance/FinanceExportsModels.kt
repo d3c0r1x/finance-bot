@@ -69,6 +69,12 @@ internal data class FinanceExportStatusRequest(
     val identity: FinanceExportStatusIdentity,
 )
 
+internal data class FinanceExportStatusCompletion(
+    val publishStatus: Boolean,
+    val openDownload: Boolean,
+    val clearBusy: Boolean,
+)
+
 internal object FinanceExportStatusPolicy {
     fun isCurrent(
         request: FinanceExportStatusRequest,
@@ -80,6 +86,29 @@ internal object FinanceExportStatusPolicy {
 
     fun ownsStatusBusy(request: FinanceExportStatusRequest, currentGeneration: Long, busyKind: String?): Boolean =
         request.generation == currentGeneration && busyKind == "status"
+
+    fun completion(
+        request: FinanceExportStatusRequest,
+        currentGeneration: Long,
+        currentIdentity: FinanceExportStatusIdentity?,
+        screenActive: Boolean,
+        authenticated: Boolean,
+        currentExportId: String?,
+        requestedExportId: String,
+        currentSessionGeneration: Long,
+        busyKind: String?,
+        responseStatus: String?,
+        responseDownloadUrl: String?,
+    ): FinanceExportStatusCompletion {
+        val publishStatus = isCurrent(request, currentGeneration, currentIdentity, screenActive) &&
+            authenticated && request.identity.sessionGeneration == currentSessionGeneration &&
+            currentIdentity?.tenantId == request.identity.tenantId && currentExportId == requestedExportId
+        return FinanceExportStatusCompletion(
+            publishStatus = publishStatus,
+            openDownload = publishStatus && responseStatus == "ready" && responseDownloadUrl != null,
+            clearBusy = ownsStatusBusy(request, currentGeneration, busyKind),
+        )
+    }
 }
 
 internal object FinanceExportDownloadPolicy {
