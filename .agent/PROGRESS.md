@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-12, Europe/Moscow; verified at `37bc524b8e4e9269819935822035bfd4f9539186`.
+Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850ee68fe787e`.
 
 ## Global plan
 
@@ -19,7 +19,7 @@ Updated: 2026-10-12, Europe/Moscow; verified at `37bc524b8e4e9269819935822035bfd
 ## Current goal
 
 - F59 Android parity remains IN PROGRESS. Current registry: 52 partial, 0 missing, 5 justified N/A, 1 implemented (58 mappings total). F11 has synthetic Android provenance/fallback acceptance; live authenticated OIDC/Core remains open.
-- Next execution priority: M2 Core runtime bootstrap, beginning with a RED acceptance suite for the plan's repeatable `core` Compose profile; Docker/WSL remain unavailable, so local runtime proof is NOT_RUN. Preserve user constraints: no unsafe system/network changes, public HTTPS required, no Tailscale.
+- M2.1 Core/PostgreSQL/Keycloak Compose bootstrap is CODE COMPLETE and locally GREEN; actual Compose build/start, readiness, persistence/restart, and auto-start are NOT_RUN because Docker/Podman are unavailable. Preserve user constraints: no unsafe system/network changes, public HTTPS required, no Tailscale.
 - F59.12 F49 Android duplicate outcomes and safe batch undo is locally GREEN; parity is PARTIAL pending live OIDC/Core, process-kill, and tenant-isolation E2E. Spec/plan: `.agent/specs/F49-android-import-dedup-undo.md` and `docs/superpowers/plans/2026-10-11-f49-android-import-dedup-undo.md`.
 - F59.13 F50 Android merchant classification is locally GREEN; parity is PARTIAL pending live OIDC/Core, deployed AI availability, and tenant-isolation E2E. Spec/plan: `.agent/specs/F50-android-merchant-classification.md` and `docs/superpowers/plans/2026-10-11-f50-android-merchant-classification.md`.
 - F59.14 F51 Android historical merchant reclassification is locally GREEN; parity is PARTIAL pending live OIDC/Core and tenant-isolation E2E. Spec/plan: `.agent/specs/F51-android-merchant-reclassification.md` and `docs/superpowers/plans/2026-10-11-f51-android-merchant-reclassification.md`.
@@ -2409,3 +2409,14 @@ Updated: 2026-10-12, Europe/Moscow; verified at `37bc524b8e4e9269819935822035bfd
 - Limits: this verifies ciphertext preservation and refusal to replace an unreadable checkpoint, not decryption recovery after permanent key loss. F08 Android remains PARTIAL for live Core/OIDC idempotency and production tenant-isolation E2E.
 - Status: COMPLETE locally; COMMITTED/PUSHED as `37bc524b8e4e9269819935822035bfd4f9539186`; remote SHA verified by `git ls-remote`.
 - Next: create the RED acceptance suite for the first repeatable `core` runtime/bootstrap slice; keep actual Docker startup, database durability and public HTTPS as NOT_RUN until the runtime is available.
+
+## M2.1 Core, PostgreSQL and local Keycloak bootstrap — CODE COMPLETE; runtime NOT RUN — 2026-10-12
+
+- Authority: `docs/specs/PERSONAL_MVP_PLAN.md` M2, `PLAN.md` §17, selected Keycloak + OIDC, and the user requirement that local services stay private until public HTTPS/auth are verified.
+- TDD RED: extended `tests/test_compose_core_bootstrap.py` first for a least-privilege Core/migrator split, Keycloak realm import/persistence and healthy-service dependency. Observed 3 focused failures because migration credentials and Keycloak service/dependency were absent.
+- Change: added loopback-only PostgreSQL/Core/Keycloak Compose profile, persistent Postgres/receipt/Keycloak volumes, restart policies and readiness checks. Core uses `finance_app`; Flyway has `finance_migrator` credentials. PostgreSQL grants runtime CRUD and default table/sequence privileges to `finance_app`, while `finance_migrator` owns the database/schema. Passwords reach psql via `\\getenv`, not command-line arguments. Database name is fixed as `finance` to keep init SQL and JDBC aligned. Keycloak 26.7.5 imports existing `ops/keycloak/realm-finance.json`; realm includes public Android PKCE and confidential Web clients, open registration, email verification and reset policy. The Core issuer and Keycloak hostname agree for the internal Compose network. A Java health probe is compiled into the Keycloak image, avoiding reliance on `curl`, which the official image removes. No SMTP sender was added.
+- GREEN: `.venv\Scripts\python.exe -m pytest -p no:cacheprovider -q tests/test_compose_core_bootstrap.py` — 6 passed; Gradle `:services:core:test :services:core:bootJar` — 292 tests, 0 failures/errors and successful Core JAR build; Java 11-compatible Keycloak health probe compiles; shell syntax, Compose YAML parse, realm JSON parse and `git diff --check` passed.
+- Review findings addressed: the first draft made `finance_app` DB owner (RLS risk); assigned DB/schema ownership to the separate non-superuser migrator instead. Review also found issuer mismatch and configurable Web client values conflicting with the imported realm; the dev profile now pins matching issuer/hostname, client ID and checked-in development secret. A later review found Keycloak's runtime compiler could be absent; the Java probe is now compiled into a small derived image. The canonical issuer is internal and inaccessible to the host/Android clients; this profile still cannot support browser/mobile login and awaits the public HTTPS M3 setup.
+- Runtime limits: `docker`/`podman` commands are absent. Compose interpolation, image availability/build, Keycloak import/health, PostgreSQL SQL execution, migrations under separate role, Core readiness, restart persistence and OS autostart have NOT been exercised. The profile binds ports only to `127.0.0.1`; its issuer is internal `http://keycloak:8080` for container bootstrap, so Android/browser local login and public HTTPS are not claimed complete. Production email delivery remains blocked until a sender is provisioned. Do not expose this profile publicly.
+- Implementation/plan commit: `2e30ffa796eddce5c93e7b48b1d850ee68fe787e` (`feat(runtime): bootstrap local Core and Keycloak profile`). This progress update will be committed separately; unrelated user-owned untracked paths remain excluded.
+- Next: complete independent review and focused checks, then commit this bounded bootstrap slice with all runtime gates explicitly partial. Once a supported container runtime exists, run clean-start/readiness/migration/restart/persistence and OIDC checks before M3.
