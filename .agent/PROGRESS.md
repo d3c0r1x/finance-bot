@@ -40,7 +40,7 @@ Updated: 2026-10-12, Europe/Moscow.
 
 ## Plan corrections
 
-- 2026-10-12 — Before: `PLAN.md` recommended Tailscale Funnel. After: public HTTPS is required and Tailscale is explicitly rejected; no ingress provider is treated as configured. Necessity: the approved global plan contradicted the user's later explicit delivery choice. Evidence: conversation decisions on public HTTPS/no Tailscale and `docs/specs/PERSONAL_MVP_PLAN.md` M2/M3. Alternatives checked: continue Funnel (conflicts with user's choice) or leave contradictory docs (misleads implementation); neither is valid. RED: the approved plan specified Funnel while the current personal MVP plan explicitly excluded it. GREEN: `.venv\\Scripts\\python.exe -m pytest tools\\contracts\\test_contracts.py` — 63 passed; `git diff --check` clean; `PLAN.md` hash is recorded above. No DNS, firewall, router or system settings changed. Commit pending.
+- 2026-10-12 — Before: `PLAN.md` recommended Tailscale Funnel. After: public HTTPS is required and Tailscale is explicitly rejected; no ingress provider is treated as configured. Necessity: the approved global plan contradicted the user's later explicit delivery choice. Evidence: conversation decisions on public HTTPS/no Tailscale and `docs/specs/PERSONAL_MVP_PLAN.md` M2/M3. Alternatives checked: continue Funnel (conflicts with user's choice) or leave contradictory docs (misleads implementation); neither is valid. RED: the approved plan specified Funnel while the current personal MVP plan explicitly excluded it. GREEN: `.venv\\Scripts\\python.exe -m pytest tools\\contracts\\test_contracts.py` — 63 passed; `git diff --check` clean; `PLAN.md` hash is recorded above. Commit/push: `8ca8321d92616c3755bc568904dd9265983c4f30` (`docs(plan): require public HTTPS without Tailscale`), remote SHA verified. No DNS, firewall, router or system settings changed.
 
 ## Goals
 
@@ -2163,3 +2163,13 @@ Updated: 2026-10-12, Europe/Moscow.
 - Runtime: installed `com.decorix.finance.debug` on isolated `emulator-5554`; `MainActivity` resumed. APK SHA-256: `6DCAB03B66FACF6013E55B322168B9CCCC7FB26A16C85C3F7867378F33AA7117`.
 - Limitation: MockWebServer and emulator tests do not prove live authenticated Android-to-Core/OIDC deletion. Android F15 and global F59 remain partial until real Core/OIDC E2E; M2 public runtime remains blocked separately.
 - Commit/push: `615d1a06833138f6a29c0b22ff2d8cfe908669c6` (`feat(F15): delete receipt items on Android`) pushed; `git ls-remote` confirms the branch at this SHA. `gh run list --commit 615d1a0` returned no workflow run, so remote CI is unconfirmed.
+
+## F59.27 F52 Android CSV chooser handoff — GREEN locally; PARTIAL
+
+- TDD RED: chooser helper tests first failed compilation because `launchChooser` did not exist. Activity-level instrumentation then failed compilation because `MainActivity.openExportDownload` was private. The first runtime attempt exposed asynchronous test dispatch; corrected the test with instrumentation `runOnMainSync` before GREEN.
+- Implementation: `MainActivity` now uses the shared safe chooser handoff; production defaults to `startActivity`. Instrumentation calls the actual Activity method with a capture callback and verifies the chooser's nested `ACTION_VIEW` contains only the exact validated HTTPS URI, while unsafe HTTP input launches nothing. Helper tests verify the RU chooser title and absence of intent extras. No Core API or export semantics changed.
+- GREEN/regression: F52 model/API/screen instrumentation 37/37 plus `FinanceFlowTest` 5/5 on Android 8.1/API 27 `emulator-5554`; Android JVM 74/74; parity/contracts 67/67; debug and Android-test APKs built; `git diff --check` clean. Independent review found no API-23, behavior or credential-leak blocker.
+- Runtime: fresh APK installed and `MainActivity` resumed on isolated `emulator-5554`; SHA-256 `8CE136CDD3FF9BBA2EEC60EB1ABAA965082737918778EFB308B1813B728CEBEC`.
+- Limits: this tests the Activity-to-launch-callback handoff, not Android's system resolver UI, live OIDC/Core authorization, export worker/S3, browser transfer or downloaded-byte integrity. F52 Android remains PARTIAL.
+- Commit/push: `28704c67586a3cd4b2c0675398e31b2624fe4efa` (`feat(F52): verify Android CSV chooser handoff`) pushed; `git ls-remote` verified the remote branch at that SHA. GitHub CI remains unconfirmed unless a workflow run is found.
+- Next: continue F59 with an independently closable feature; production runtime/public HTTPS/auth remain release blockers, and no system/network settings have been changed.
