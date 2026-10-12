@@ -14,6 +14,7 @@
 4. Explicit confirmation uses the draft ID, expected version, and idempotency key.
 5. Income history retains type, exact amount, description, source, and transaction date.
 6. Test stays isolated from real accounts and live services.
+7. Synthetic credentials use a test-only preference file and Keystore alias, never the app's normal session vault.
 
 ## Test-first result
 

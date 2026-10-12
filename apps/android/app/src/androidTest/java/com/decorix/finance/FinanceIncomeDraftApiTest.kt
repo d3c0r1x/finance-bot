@@ -18,10 +18,23 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class FinanceIncomeDraftApiTest {
     private val server = MockWebServer()
+    private val tokenVault by lazy {
+        TokenVault.isolatedForTesting(
+            ApplicationProvider.getApplicationContext(),
+            "finance_income_draft_api_test_session",
+            "finance-income-draft-api-test-v1",
+        )
+    }
 
     @get:Rule val serverRule = object : ExternalResource() {
-        override fun before() = server.start()
-        override fun after() = server.shutdown()
+        override fun before() {
+            tokenVault.clear()
+            server.start()
+        }
+        override fun after() {
+            server.shutdown()
+            tokenVault.clear()
+        }
     }
 
     @Test fun incomeDraftRequiresExplicitConfirmationAndHistoryKeepsItsFields() {
@@ -68,7 +81,7 @@ class FinanceIncomeDraftApiTest {
     private fun api(): FinanceApi {
         val base = server.url("/").toString().removeSuffix("/")
         return FinanceApi(ApplicationProvider.getApplicationContext<Context>(),
-            FinanceApiEndpoints(base, base), OkHttpClient()).also {
+            FinanceApiEndpoints(base, base), OkHttpClient(), tokenVault).also {
             it.saveTokens("income-test-token", "refresh-token", System.currentTimeMillis() + 60_000)
         }
     }
