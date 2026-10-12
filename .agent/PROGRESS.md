@@ -2256,3 +2256,12 @@ Updated: 2026-10-12, Europe/Moscow.
 - Limits: encrypted store recreation was tested, but an actual OS force-stop/relaunch, live OIDC/Core, and real tenant-isolation E2E remain unverified. F08 Android remains PARTIAL for those external acceptance gates.
 - Commit/push: `4e2511d6a1fe315434d307c41ab9fdabf6a1e0d8` (`fix(android): persist safe mutation retries`) pushed to `feat/saas-rewrite`; `git ls-remote` confirmed the same SHA. User-owned untracked files and local tooling caches were excluded.
 - Next: continue remaining V1 plan work; keep force-stop and live integration acceptance gates visible.
+
+## F59.34 F58 parity registry reconciliation — GREEN; PARTIAL infrastructure caveat
+
+- Authority: completed approved F58 plan `docs/superpowers/plans/2026-10-08-f58-runtime-config.md`; this slice synchronizes parity metadata with already-completed implementation and recorded verification.
+- TDD RED: new `tests/test_f58_parity_registry.py` failed because F58 was still marked `planned` with no test/evidence references despite `.agent/PROGRESS.md` recording F58 complete.
+- Change: registry now marks F58 `complete`, links existing runtime and formatting tests plus the new registry assertion, and records the exact local checks. It explicitly states Docker is unavailable and PLAN.md does not yet provide Compose profiles; no Compose runtime is claimed. F56 row was reviewed and preserved unchanged.
+- GREEN: focused contract, F58 runtime, presentation formatting, and registry checks passed 77/77; `git diff --check` clean.
+- Scope: no product behavior changed. Commit pending: stage only the F58 parity row, its focused regression test, and this progress record.
+- Next: continue the next independently executable V1 task; preserve live Android/Core/OIDC and production runtime gates as incomplete until exercised.

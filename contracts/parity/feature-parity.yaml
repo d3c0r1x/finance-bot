@@ -1317,9 +1317,13 @@ features:
     feature: "Конфигурация/секреты/Windows launch scripts/документация/MIT"
     target: "Infra + docs + dev scripts"
     acceptance: "Запуск Windows/Linux документирован; лицензионные уведомления сохранены; секреты не в образах"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - tests/test_f58_runtime_config.py
+      - tests/test_presentation_formatting.py
+      - tests/test_f58_parity_registry.py
+    evidence:
+      - "F58 local acceptance passed: 13 focused pytest checks; POSIX shell syntax, PowerShell/legacy launcher help, ignore rules, Docker-context exclusions, and MIT notice checks pass. Docker CLI is unavailable on this host, and PLAN.md explicitly defers Compose stack profiles; no Compose runtime is claimed."
     android:
       status: not_applicable
       scenario: "Android counterpart for F58: Конфигурация/секреты/Windows launch scripts/документация/MIT"
