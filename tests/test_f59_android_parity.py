@@ -177,3 +177,23 @@ def test_f52_android_registry_records_real_elapsed_polling_evidence():
     assert "activeexportwaitsaboutfiverealsecondsbeforefirstautomaticrefresh" in evidence
     assert "elapsed wall-clock polling cadence" not in android["gap"].lower()
     assert "browser transfer" in android["gap"].lower()
+
+
+def test_f52_android_registry_records_system_chooser_and_fixture_download_evidence():
+    feature = next(item for item in _features() if item["id"] == "F52")
+    android = feature["android"]
+    handoff_test = (
+        "apps/android/app/src/androidTest/java/com/decorix/finance/"
+        "FinanceExportDownloadHandoffTest.kt"
+    )
+
+    assert handoff_test in android["tests"]
+    assert (ROOT / handoff_test).is_file()
+    evidence = " ".join(android.get("evidence", [])).lower()
+    assert "f59.45" in evidence
+    assert "system chooser" in evidence
+    assert "sha-256" in evidence
+    gap = android["gap"].lower()
+    assert "live android oidc/core" in gap
+    assert "actual browser transfer" in gap
+    assert "test-only receiver" in gap

@@ -2386,3 +2386,13 @@ Updated: 2026-10-12, Europe/Moscow.
 - GitHub: feature commit `d80e129fff280d71ffd8630804665aa0466cfc7a` and progress commit `fed73963f5c2b0bfdc6cb9da3e4603adc12bd40d` pushed. `git ls-remote` confirmed `origin/feat/saas-rewrite` at `fed73963f5c2b0bfdc6cb9da3e4603adc12bd40d` before this final status update.
 - Current status: COMPLETE. Local F52 elapsed-polling evidence is committed and delivered; live server and browser-transfer gates remain open.
 - Next: continue the next independently verifiable V1 acceptance gap; keep live Core/OIDC and export-storage gates blocked until runtime exists.
+
+## F59.45 F52 Android system chooser and fixture download — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F52 and `.agent/specs/F52-android-csv-export.md`; bounded follow-up to the prior F52 Activity handoff test.
+- Goal: exercise Android's real system resolver, a test-only external receiver, and an HTTPS file transfer without production server or external network.
+- RED: parity regression failed because the new handoff test was not mapped. A focused API-27 guard test also failed before the receiver validated the incoming path; it proved an unexpected path could trigger a fixture request.
+- Change: debug-only receiver is disabled in its manifest by default and enabled only during instrumentation. It accepts only HTTPS `127.0.0.1` at the exact CSV fixture path; its OkHttp trust is pinned to the generated fixture certificate. The actual Android chooser starts the receiver, which fetches a deterministic MockWebServer CSV. No production source or release dependency changed.
+- GREEN/regression: focused chooser/download passed 1/1; negative path guard passed 1/1; combined F52 models/API/screens/flows/chooser suite passed 45/45 on isolated Android 8.1/API 27 `emulator-5554`. The handoff verifies exact CSV bytes/SHA-256, no `Authorization`, correct loopback host/port/path, and empty GET request body. `git diff --check` passed before parity/progress updates.
+- Limits: this uses a local synthetic export fixture and test receiver; live Core/OIDC authorization, worker/S3 signed URL, and real browser download remain unverified. F52 Android remains PARTIAL.
+- Status: final independent review found no blockers. Android JVM 92/92; parity 11/11; contract suite 81 passed, 2 skipped; API-27 F52 suite 45/45; debug and AndroidTest APK assembly passed; `git diff --check` is clean. Commit/push pending.

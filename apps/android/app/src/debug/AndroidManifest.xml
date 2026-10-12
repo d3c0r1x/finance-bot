@@ -1,4 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <application android:usesCleartextTraffic="true" tools:replace="android:usesCleartextTraffic" />
+    <application android:usesCleartextTraffic="true" tools:replace="android:usesCleartextTraffic">
+        <activity
+            android:name=".ExportCsvTestReceiverActivity"
+            android:exported="true"
+            android:enabled="false"
+            android:label="CSV export test receiver">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="127.0.0.1"
+                    android:path="/csv-handoff/export.csv" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>
