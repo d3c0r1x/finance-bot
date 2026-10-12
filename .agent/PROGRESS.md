@@ -2347,5 +2347,5 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN: final focused `FinanceFlowTest` 7/7; full API 27 instrumentation 505/505 on the immediately preceding test revision; Android JVM suite 92/92 via the existing ASCII junction `C:\fbtest`; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` passed after the final test changes; `git diff --check` passed. The direct Cyrillic-path JVM run produced 24 `ClassNotFoundException` initialization errors; the same suite passed via the ASCII junction.
 - Review: independent read-only reviewer found no blocking issue; noted null-by-default hooks leave production behavior unchanged and recommended keeping the test-only seam narrow.
 - Limits: local synthetic execution only. No live Core/OIDC, real bearer URL, worker/S3, browser transfer, downloaded-byte integrity, or elapsed wall-clock test was run. F52 Android remains PARTIAL and the server deployment gates remain open.
-- Commit/push: pending after final review and verification.
+- Commit/push: `35ac4cef178864a1508247b861dcafa7269d56a8` (`test(F52): cover stale Android export completion`) is pushed; `git ls-remote` confirmed `origin/feat/saas-rewrite` at this SHA. `gh run list --commit 35ac4ce` returned no workflow runs.
 - Next: continue the next approved V1 gate; do not mark F52 complete based on this local integration test.
