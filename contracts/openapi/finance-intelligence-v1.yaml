@@ -264,7 +264,11 @@ paths:
         '422': { description: Provider lacks a requested capability }
         '429': { description: Inference capacity is full }
         '502': { description: Model output is invalid }
-        '503': { description: Inference provider is unavailable }
+        '503':
+          description: Provider quota or availability is exhausted; return the stable unavailable error without vendor details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryUnavailableError' }
         '504': { description: Request deadline expired }
   /internal/v1/transaction-drafts:
     post:
@@ -298,7 +302,11 @@ paths:
         '422': { description: Provider lacks a requested capability }
         '429': { description: Inference capacity is full }
         '502': { description: Model output is invalid }
-        '503': { description: Inference provider is unavailable }
+        '503':
+          description: Provider quota or availability is exhausted; return the stable unavailable error without vendor details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryUnavailableError' }
         '504': { description: Request deadline expired }
   /internal/v1/receipts/ocr:
     post:
@@ -332,7 +340,11 @@ paths:
         '422': { description: Provider lacks a requested capability }
         '429': { description: Inference or OCR capacity is full }
         '502': { description: OCR provider output is invalid }
-        '503': { description: Tesseract binary or language data is unavailable }
+        '503':
+          description: OCR provider is unavailable; return the stable unavailable error without provider details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryUnavailableError' }
         '504': { description: Request deadline or Tesseract timeout expired }
   /internal/v1/receipts/vision:
     post:
@@ -363,10 +375,14 @@ paths:
         '403': { description: Effective AI policy denies the selected provider }
         '409': { description: Request was cancelled or correlation ID conflicts }
         '413': { description: Encoded image exceeds the body limit }
-        '422': { description: No allowlisted provider supports vision and structured output }
+        '422': { description: Task kind or requested capability set is invalid for this operation }
         '429': { description: Inference capacity is full }
         '502': { description: Vision output is invalid }
-        '503': { description: Vision provider is unavailable }
+        '503':
+          description: No capable vision provider is configured or provider quota or availability is exhausted; return the stable unavailable error without vendor details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryUnavailableError' }
         '504': { description: Request deadline expired }
   /internal/v1/receipts/basket-review:
     post:
@@ -400,7 +416,11 @@ paths:
         '422': { description: Provider lacks text and structured output }
         '429': { description: Inference capacity is full }
         '502': { description: Model output is invalid }
-        '503': { description: Inference provider is unavailable }
+        '503':
+          description: Provider quota or availability is exhausted; return the stable unavailable error without vendor details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryUnavailableError' }
         '504': { description: Request deadline expired }
   /internal/v1/merchant-classifications:
     post:
@@ -434,7 +454,11 @@ paths:
         '422': { description: Provider lacks text and structured output }
         '429': { description: Inference capacity is full }
         '502': { description: Model output is invalid }
-        '503': { description: Inference provider is unavailable }
+        '503':
+          description: Provider quota or availability is exhausted; return the stable unavailable error without vendor details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemporaryUnavailableError' }
         '504': { description: Request deadline expired }
   /internal/v1/jobs/{correlationId}/cancel:
     post:
@@ -531,6 +555,12 @@ components:
           type: [string, 'null']
           enum: [OLLAMA_UNAVAILABLE, MODEL_MISSING, VISION_DISABLED, VISION_CONFIG_INVALID,
                  TESSERACT_MISSING, HEALTH_CHECK_FAILED, null]
+    TemporaryUnavailableError:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: { type: string, const: unavailable }
     MerchantClassificationContext:
       type: object
       additionalProperties: false
@@ -1517,7 +1547,7 @@ components:
                  inputSchemaVersion, outputSchemaVersion, correlationId, executionPolicy,
                  requiredCapabilities, capabilities, latencyMs, usage, fallbackReason, provenance]
       properties:
-        provider: { type: string, const: ollama }
+        provider: { type: string, enum: [ollama, gemini] }
         store: { type: [string, 'null'], maxLength: 100 }
         date: { type: [string, 'null'], format: date }
         total: { type: [string, 'null'], pattern: '^\d{1,18}(?:\.\d{1,2})?$' }

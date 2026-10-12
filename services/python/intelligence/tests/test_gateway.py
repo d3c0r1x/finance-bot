@@ -1,8 +1,12 @@
 import asyncio
+import base64
+from io import BytesIO
 import json
 
 import httpx
 import pytest
+from PIL import Image
+import services.python.intelligence.gateway as intelligence_gateway
 
 from services.python.intelligence.gateway import (
     OllamaProvider,
@@ -462,3 +466,353 @@ def test_vertex_invalid_transaction_draft_fails_closed_without_retry(draft):
         asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=2))
 
     assert len(calls) == 1
+
+
+def _gemini_api():
+    assert hasattr(intelligence_gateway, "GeminiModelRoute"), "Gemini model routing is not implemented"
+    assert hasattr(intelligence_gateway, "GeminiProvider"), "Gemini Developer API adapter is not implemented"
+    assert hasattr(intelligence_gateway, "GeminiProviderPool"), "Gemini fallback pool is not implemented"
+    assert hasattr(intelligence_gateway, "GeminiRateLimiter"), "Gemini quota guard is not implemented"
+    return intelligence_gateway
+
+
+def _gemini_route(api, model_id, *, tasks=("transaction-draft",), complexity="balanced",
+                  capabilities=("text", "structured_output"), rpm=10, tpm=10_000, rpd=100):
+    return api.GeminiModelRoute(
+        model_id=model_id,
+        tasks=frozenset(tasks),
+        capabilities=frozenset(capabilities),
+        complexity=complexity,
+        rpm=rpm,
+        tpm=tpm,
+        rpd=rpd,
+    )
+
+
+def _gemini_response(value, *, model_version="actual-model-version", usage=None):
+    return {
+        "candidates": [{
+            "content": {"role": "model", "parts": [{"text": json.dumps(value, ensure_ascii=False)}]},
+            "finishReason": "STOP",
+        }],
+        "modelVersion": model_version,
+        "usageMetadata": usage or {"promptTokenCount": 17, "candidatesTokenCount": 8},
+    }
+
+
+def test_gemini_route_config_is_validated_without_bundled_model_ids():
+    api = _gemini_api()
+
+    routes = api.parse_gemini_model_routes(json.dumps([{
+        "modelId": "operator-chosen-model-v1",
+        "tasks": ["transaction-draft"],
+        "capabilities": ["text", "structured_output"],
+        "complexity": "balanced",
+        "rpm": 5,
+        "tpm": 250_000,
+        "rpd": 20,
+    }]))
+
+    assert len(routes) == 1
+    assert routes[0].model_id == "operator-chosen-model-v1"
+    assert routes[0].rpd == 20
+    invalid_model = [{"modelId": "bad/name", "tasks": ["transaction-draft"],
+                      "capabilities": ["text", "structured_output"], "complexity": "balanced",
+                      "rpm": 1, "tpm": 1000, "rpd": 1}]
+    with pytest.raises(ValueError, match="identity"):
+        api.parse_gemini_model_routes(json.dumps(invalid_model))
+
+
+def test_gemini_transaction_draft_uses_server_key_and_validated_structured_output():
+    api = _gemini_api()
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json=_gemini_response(valid_transaction_draft()))
+
+    provider = api.GeminiProvider(
+        _gemini_route(api, "operator-model"),
+        api_key="server-only-secret",
+        transport=httpx.MockTransport(respond),
+        rate_limiter=api.GeminiRateLimiter(),
+    )
+    result = asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.url.path.endswith("/models/operator-model:generateContent")
+    assert request.headers["x-goog-api-key"] == "server-only-secret"
+    assert b"server-only-secret" not in request.content
+    payload = json.loads(request.content)
+    assert payload["generationConfig"]["responseMimeType"] == "application/json"
+    assert payload["generationConfig"]["responseSchema"]["type"] == "OBJECT"
+    assert result["amount"] == "250.00"
+    assert result["provider"] == "gemini"
+    assert result["modelVersion"] == "actual-model-version"
+    assert result["usage"] == {"inputTokens": 17, "outputTokens": 8, "cost": None}
+    assert result["capabilities"] == ["structured_output", "text"]
+
+
+def test_gemini_receipt_vision_sends_only_reencoded_bounded_image():
+    api = _gemini_api()
+    image_buffer = BytesIO()
+    Image.new("RGB", (40, 20), "white").save(image_buffer, format="PNG")
+    original_image = base64.b64encode(image_buffer.getvalue()).decode("ascii")
+    image_context = {"imageBase64": original_image}
+    requests = []
+    vision_result = {"store": None, "date": None, "total": None, "items": []}
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json=_gemini_response(vision_result))
+
+    provider = api.GeminiProvider(
+        _gemini_route(api, "operator-vision-model", tasks=("receipt-vision",), complexity="vision",
+                      capabilities=("text", "structured_output", "vision")),
+        api_key="server-only-secret",
+        transport=httpx.MockTransport(respond),
+        rate_limiter=api.GeminiRateLimiter(),
+        receipt_images_approved=True,
+    )
+    result = asyncio.run(provider.execute("receipt-vision", image_context, timeout=3))
+
+    payload = json.loads(requests[0].content)
+    inline_data = payload["contents"][0]["parts"][1]["inlineData"]
+    assert inline_data["mimeType"] == "image/jpeg"
+    assert inline_data["data"] != original_image
+    assert result["items"] == []
+
+
+@pytest.mark.parametrize("failure", [
+    httpx.Response(429, json={"error": {"status": "RESOURCE_EXHAUSTED"}}),
+    httpx.Response(403, json={"error": {"status": "PERMISSION_DENIED",
+                                         "message": "Prepay credits depleted for billing account"}}),
+    httpx.Response(503, json={"error": {"message": "temporary"}}),
+    httpx.ReadTimeout("provider timed out"),
+])
+def test_gemini_runtime_fallback_uses_one_compatible_model(failure):
+    api = _gemini_api()
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        if len(calls) == 1:
+            if isinstance(failure, Exception):
+                raise failure
+            return failure
+        return httpx.Response(200, json=_gemini_response(valid_transaction_draft(), model_version="fallback-version"))
+
+    pool = api.GeminiProviderPool([
+        api.GeminiProvider(_gemini_route(api, "preferred-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "fallback-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "unused-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+    ])
+
+    result = asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+    assert len(calls) == 2
+    assert "fallback-model" in calls[1]
+    assert result["modelVersion"] == "fallback-version"
+    assert result["fallbackReason"] in {"quota", "timeout", "provider_unavailable"}
+
+
+def test_gemini_all_models_unavailable_returns_stable_error_after_one_fallback():
+    api = _gemini_api()
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(429, json={"error": {"status": "RESOURCE_EXHAUSTED"}})
+
+    pool = api.GeminiProviderPool([
+        api.GeminiProvider(_gemini_route(api, "first-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "second-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "third-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+    ])
+
+    with pytest.raises(api.ProviderUnavailable, match="temporarily unavailable"):
+        asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+    assert len(calls) == 2
+
+
+def test_gemini_pool_routes_by_task_complexity_and_refuses_unsupported_image_task():
+    api = _gemini_api()
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json=_gemini_response(valid_transaction_draft()))
+
+    pool = api.GeminiProviderPool([
+        api.GeminiProvider(_gemini_route(api, "fast-model", complexity="fast"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "quality-model", complexity="reasoning"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+    ])
+
+    with pytest.raises(api.UnsupportedCapability):
+        asyncio.run(pool.execute("receipt-ocr", {}, timeout=1))
+    assert calls == []
+
+
+def test_gemini_pool_prefers_model_class_for_task_complexity():
+    api = _gemini_api()
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, json=_gemini_response(valid_transaction_draft()))
+
+    pool = api.GeminiProviderPool([
+        api.GeminiProvider(_gemini_route(api, "fast-model", complexity="fast"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "balanced-model", complexity="balanced"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+    ])
+
+    asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+    assert len(calls) == 1
+    assert "balanced-model" in calls[0]
+
+
+def test_gemini_capability_router_checks_one_models_actual_task_capabilities():
+    api = _gemini_api()
+    provider = api.GeminiProvider(
+        _gemini_route(api, "text-only-for-this-task"), "key",
+        transport=httpx.MockTransport(lambda _request: pytest.fail("Must not call unsupported model")),
+        rate_limiter=api.GeminiRateLimiter(),
+    )
+    pool = api.GeminiProviderPool([provider])
+
+    with pytest.raises(api.UnsupportedCapability):
+        api.ProviderRouter([pool]).select(
+            {"text", "structured_output", "vision"}, "cloud-opt-in", "transaction-draft",
+        )
+    with pytest.raises(api.UnsupportedCapability):
+        asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=1,
+                                 required_capabilities={"text", "structured_output", "vision"}))
+
+
+def test_gemini_invalid_json_falls_back_once_and_reports_safe_reason():
+    api = _gemini_api()
+    calls = []
+
+    def respond(request):
+        calls.append(request.url.path)
+        output = {"type": "expense", "amount": "0", "categoryCode": "еда", "subcategoryCode": None,
+                  "description": "Обед", "occurredAt": "2026-10-12T12:00:00+03:00"}
+        if len(calls) == 1:
+            return httpx.Response(200, json=_gemini_response(output))
+        return httpx.Response(200, json=_gemini_response(valid_transaction_draft()))
+
+    pool = api.GeminiProviderPool([
+        api.GeminiProvider(_gemini_route(api, "invalid-output-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "valid-output-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+    ])
+
+    result = asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+    assert len(calls) == 2
+    assert result["modelVersion"] == "actual-model-version"
+    assert result["fallbackReason"] == "invalid_output"
+
+
+def test_gemini_malformed_json_falls_back_once():
+    api = _gemini_api()
+    calls = []
+    valid_body = _gemini_response(valid_transaction_draft())
+
+    def respond(request):
+        calls.append(request.url.path)
+        if len(calls) == 1:
+            return httpx.Response(200, json={"candidates": [{
+                "content": {"parts": [{"text": "not JSON"}]}, "finishReason": "STOP",
+            }]})
+        return httpx.Response(200, json=valid_body)
+
+    pool = api.GeminiProviderPool([
+        api.GeminiProvider(_gemini_route(api, "malformed-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+        api.GeminiProvider(_gemini_route(api, "recovery-model"), "key",
+                           transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter()),
+    ])
+
+    result = asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+    assert len(calls) == 2
+    assert result["fallbackReason"] == "invalid_output"
+
+
+@pytest.mark.parametrize(("task_kind", "context", "output"), [
+    ("budget-proposal", {
+        "monthlyIncome": "100000.00", "historyDays": 45, "categoryCodes": ["еда", "транспорт"],
+        "monthlyExpenseByMonth": {"2026-09": {"еда": "12000.00"}},
+        "monthlyIncomeByMonth": {"2026-09": "95000.00"},
+        "currentFamilyLimits": {"еда": "20000.00", "транспорт": "5000.00", "долги": "0.00"},
+    }, {"shares": {"еда": 60, "транспорт": 40}}),
+    ("receipt-basket-review", {"items": [{"ordinal": 1, "name": "сыр"}]},
+     {"items": [{"ordinal": 1, "verdict": "neutral", "reason": "", "action": ""}]}),
+    ("merchant-classification", {"merchants": ["Market"]},
+     {"classifications": [{"merchant": "market", "categoryCode": "прочее", "confidence": 0.7}]}),
+])
+def test_gemini_structured_tasks_reuse_existing_validators(task_kind, context, output):
+    api = _gemini_api()
+    route = _gemini_route(api, f"configured-{task_kind}", tasks=(task_kind,), complexity="reasoning")
+    provider = api.GeminiProvider(
+        route,
+        "key",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=_gemini_response(output))),
+        rate_limiter=api.GeminiRateLimiter(),
+    )
+
+    result = asyncio.run(provider.execute(task_kind, context, timeout=3))
+
+    assert result["provider"] == "gemini"
+    assert result["modelVersion"] == "actual-model-version"
+    assert "promptVersion" in result
+
+
+def test_gemini_per_model_request_limit_is_enforced_before_second_network_call():
+    api = _gemini_api()
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, json=_gemini_response(valid_transaction_draft()))
+
+    provider = api.GeminiProvider(
+        _gemini_route(api, "limited-model", rpm=1), "key",
+        transport=httpx.MockTransport(respond), rate_limiter=api.GeminiRateLimiter(),
+    )
+    pool = api.GeminiProviderPool([provider])
+    asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+    with pytest.raises(api.ProviderUnavailable, match="temporarily unavailable"):
+        asyncio.run(pool.execute("transaction-draft", transaction_draft_context(), timeout=3))
+    assert len(calls) == 1
+
+
+def test_gemini_token_and_daily_quota_limits_are_independently_enforced():
+    api = _gemini_api()
+    now = [60.0]
+    limiter = api.GeminiRateLimiter(clock=lambda: now[0])
+    route = _gemini_route(api, "bounded-model", rpm=10, tpm=20, rpd=1)
+
+    with pytest.raises(api.GeminiQuotaExceeded):
+        limiter.reserve(route, 21)
+    limiter.reserve(route, 20)
+    with pytest.raises(api.GeminiQuotaExceeded):
+        limiter.reserve(route, 1)
+    now[0] = 86_400.0
+    limiter.reserve(route, 20)

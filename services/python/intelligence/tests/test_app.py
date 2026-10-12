@@ -582,12 +582,13 @@ def test_receipt_basket_review_uses_private_local_ai_route_and_preserves_ordinal
         thread.join(timeout=2)
 
 
-def test_receipt_vision_requires_allowlisted_vision_model_before_network(internal_server, monkeypatch):
+def test_receipt_vision_without_configured_vision_model_is_temporarily_unavailable(internal_server, monkeypatch):
     base_url, _ = internal_server
     image_buffer = BytesIO()
     Image.new("RGB", (40, 20), "white").save(image_buffer, format="PNG")
     context = {"imageBase64": base64.b64encode(image_buffer.getvalue()).decode("ascii")}
     monkeypatch.delenv("OLLAMA_VISION_MODELS", raising=False)
+    monkeypatch.setenv("GEMINI_LIVE_TRAFFIC_APPROVED", "false")
 
     with httpx.Client(trust_env=False) as client:
         response = client.post(
@@ -598,8 +599,8 @@ def test_receipt_vision_requires_allowlisted_vision_model_before_network(interna
             json=context,
         )
 
-    assert response.status_code == 422
-    assert response.json() == {"error": "unsupported_capability"}
+    assert response.status_code == 503
+    assert response.json() == {"error": "unavailable"}
 
 
 def test_receipt_vision_routes_to_allowlisted_model_and_preserves_provenance(monkeypatch):
@@ -721,6 +722,165 @@ def test_receipt_vision_model_failover_is_typed_and_returns_actual_model(monkeyp
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_gemini_routes_are_enabled_only_by_cloud_policy_and_explicit_live_gate(monkeypatch):
+    monkeypatch.setenv("FINANCE_AI_POLICY", "cloud-opt-in")
+    monkeypatch.setenv("GEMINI_LIVE_TRAFFIC_APPROVED", "true")
+    monkeypatch.setenv("GEMINI_API_KEY", "private-server-key")
+    monkeypatch.setenv("GEMINI_MODEL_ROUTES", json.dumps([{
+        "modelId": "operator-selected-model",
+        "tasks": ["transaction-draft"],
+        "capabilities": ["text", "structured_output"],
+        "complexity": "balanced",
+        "rpm": 5,
+        "tpm": 250_000,
+        "rpd": 20,
+    }]))
+
+    providers = object.__new__(IntelligenceHandler)._providers()
+
+    assert providers[0].name == "gemini"
+    assert "operator-selected-model" in repr(providers[0].providers[0].route)
+
+
+def test_gemini_routes_stay_disabled_under_local_only_even_when_gate_and_key_exist(monkeypatch):
+    monkeypatch.setenv("FINANCE_AI_POLICY", "local-only")
+    monkeypatch.setenv("GEMINI_LIVE_TRAFFIC_APPROVED", "true")
+    monkeypatch.setenv("GEMINI_API_KEY", "private-server-key")
+    monkeypatch.setenv("GEMINI_MODEL_ROUTES", json.dumps([{
+        "modelId": "operator-selected-model",
+        "tasks": ["transaction-draft"],
+        "capabilities": ["text", "structured_output"],
+        "complexity": "balanced",
+        "rpm": 5,
+        "tpm": 250_000,
+        "rpd": 20,
+    }]))
+
+    providers = object.__new__(IntelligenceHandler)._providers()
+
+    assert not any(provider.name == "gemini" for provider in providers)
+
+
+def test_gemini_routes_require_live_gate_and_receipt_image_gate(monkeypatch):
+    monkeypatch.setenv("FINANCE_AI_POLICY", "cloud-opt-in")
+    monkeypatch.setenv("GEMINI_API_KEY", "private-server-key")
+    monkeypatch.setenv("GEMINI_MODEL_ROUTES", json.dumps([{
+        "modelId": "operator-vision-model",
+        "tasks": ["receipt-vision"],
+        "capabilities": ["text", "structured_output", "vision"],
+        "complexity": "vision",
+        "rpm": 3,
+        "tpm": 10_000,
+        "rpd": 10,
+    }]))
+    handler = object.__new__(IntelligenceHandler)
+
+    monkeypatch.setenv("GEMINI_LIVE_TRAFFIC_APPROVED", "false")
+    assert not any(provider.name == "gemini" for provider in handler._providers())
+
+    monkeypatch.setenv("GEMINI_LIVE_TRAFFIC_APPROVED", "true")
+    monkeypatch.setenv("GEMINI_RECEIPT_IMAGES_APPROVED", "false")
+    providers = handler._providers()
+    pool = next(provider for provider in providers if provider.name == "gemini")
+    assert "receipt-vision" not in pool.supported_tasks
+
+
+def test_gemini_unavailable_is_returned_as_stable_503(internal_server, monkeypatch):
+    base_url, generated = internal_server
+    from services.python.intelligence.gateway import ProviderUnavailable
+
+    class UnavailableGeminiHandler(IntelligenceHandler):
+        def _provider(self, *_args, **_kwargs):
+            return SimpleNamespace(name="gemini", capabilities=frozenset({"text", "structured_output"}))
+
+        async def _generate_transaction_draft(self, _context):
+            raise ProviderUnavailable("Gemini is temporarily unavailable")
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), UnavailableGeminiHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    context = {
+        "text": "Такси 2 тыс",
+        "timezone": "Europe/Moscow",
+        "now": "2026-10-01T12:00:00+03:00",
+    }
+    try:
+        headers = ai_headers("transaction-draft", **{"X-Finance-AI-Policy": "cloud-opt-in"})
+        with httpx.Client(trust_env=False) as client:
+            response = client.post(f"http://127.0.0.1:{server.server_port}/internal/v1/transaction-drafts",
+                                   headers=headers, json=context)
+
+        assert response.status_code == 503
+        assert response.json() == {"error": "unavailable"}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_gemini_success_returns_actual_model_usage_and_provenance(monkeypatch):
+    from services.python.intelligence.gateway import (
+        GeminiModelRoute, GeminiProvider, GeminiProviderPool, GeminiRateLimiter,
+    )
+
+    monkeypatch.setenv("FINANCE_AI_SERVICE_TOKEN", "private-test-token")
+    monkeypatch.setenv("FINANCE_AI_POLICY", "cloud-opt-in")
+    requests = []
+    draft = {
+        "type": "expense", "amount": "250", "categoryCode": "еда", "subcategoryCode": None,
+        "description": "Обед", "occurredAt": "2026-10-12T12:00:00+03:00",
+    }
+
+    def respond(request):
+        requests.append(request)
+        body = {"candidates": [{"content": {"parts": [{"text": json.dumps(draft, ensure_ascii=False)}]},
+                                "finishReason": "STOP"}],
+                "modelVersion": "confirmed-test-model",
+                "usageMetadata": {"promptTokenCount": 15, "candidatesTokenCount": 7}}
+        return httpx.Response(200, json=body)
+
+    route = GeminiModelRoute("configured-test-model", frozenset({"transaction-draft"}),
+                             frozenset({"text", "structured_output"}), "balanced", 5, 250_000, 20)
+    provider = GeminiProvider(route, "private-gemini-test-key", transport=httpx.MockTransport(respond),
+                              rate_limiter=GeminiRateLimiter())
+
+    class MockGeminiHandler(IntelligenceHandler):
+        def _providers(self):
+            return [GeminiProviderPool([provider])]
+
+        def log_message(self, format, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), MockGeminiHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    context = {"text": "Обед 250 рублей", "timezone": "Europe/Moscow",
+               "now": "2026-10-12T12:30:00+03:00"}
+    try:
+        headers = ai_headers("transaction-draft", **{"X-Finance-AI-Policy": "cloud-opt-in"})
+        with httpx.Client(trust_env=False) as client:
+            response = client.post(f"http://127.0.0.1:{server.server_port}/internal/v1/transaction-drafts",
+                                   headers=headers, json=context)
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["provider"] == "gemini"
+        assert body["modelVersion"] == "confirmed-test-model"
+        assert body["usage"] == {"inputTokens": 15, "outputTokens": 7, "cost": None}
+        assert body["provenance"]["modelVersion"] == "confirmed-test-model"
+        assert body["fallbackReason"] is None
+        assert requests[0].headers["x-goog-api-key"] == "private-gemini-test-key"
+        assert "private-gemini-test-key" not in response.text
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
 
 
 def test_gateway_cancels_inflight_inference_by_correlation_id(monkeypatch):

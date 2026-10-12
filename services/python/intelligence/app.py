@@ -19,9 +19,11 @@ import httpx
 from services.python.intelligence.budget_proposals import validate_context
 from services.python.intelligence.gateway import (AiRequestEnvelope, OllamaProvider, PolicyDenied, ProviderRouter,
                                                   ProviderUnavailable, RequestCancelled, RequestDeadlineExceeded,
-                                                  UnsupportedCapability,
+                                                  TASK_SCHEMAS, UnsupportedCapability,
                                                   authorize_provider, is_local_endpoint,
-                                                  restrictive_policy, run_with_controls)
+                                                  restrictive_policy, run_with_controls,
+                                                  GeminiProvider, GeminiProviderPool,
+                                                  parse_gemini_model_routes)
 from services.python.intelligence.health import collect_health
 from services.python.intelligence.models import list_installed_models, parse_model_preferences, resolve_model
 from services.python.intelligence.model_scheduler import OLLAMA_MODEL_SCHEDULER
@@ -172,18 +174,21 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
             fallback_reason = result.pop("fallbackReason", None)
             model_version = result.get("modelVersion")
             prompt_version = result.get("promptVersion")
-            self._reply(200, {"provider": provider.name, **result,
+            response_provider = result.pop("provider", provider.name)
+            response_capabilities = result.pop("capabilities", provider.capabilities)
+            usage = result.pop("usage", {"inputTokens": None, "outputTokens": None, "cost": None})
+            self._reply(200, {"provider": response_provider, **result,
                               "taskKind": envelope.task_kind,
                               "inputSchemaVersion": envelope.input_schema_version,
                               "outputSchemaVersion": envelope.output_schema_version,
                               "correlationId": envelope.correlation_id,
                               "executionPolicy": execution_policy,
                               "requiredCapabilities": sorted(envelope.required_capabilities),
-                              "capabilities": sorted(provider.capabilities),
+                              "capabilities": sorted(response_capabilities),
                               "latencyMs": max(0, round((time.perf_counter() - started) * 1000)),
-                              "usage": {"inputTokens": None, "outputTokens": None, "cost": None},
+                              "usage": usage,
                               "fallbackReason": fallback_reason,
-                              "provenance": {"provider": provider.name, "modelVersion": model_version,
+                              "provenance": {"provider": response_provider, "modelVersion": model_version,
                                              "promptVersion": prompt_version,
                                              "executionPolicy": execution_policy}})
         except RequestCancelled:
@@ -195,6 +200,8 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
         except TimeoutError:
             self._reply(504, {"error": "timeout"})
         except TesseractUnavailable:
+            self._reply(503, {"error": "unavailable"})
+        except ProviderUnavailable:
             self._reply(503, {"error": "unavailable"})
         except httpx.TimeoutException:
             self._reply(504, {"error": "timeout"})
@@ -257,6 +264,21 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
         from services.python.intelligence.gateway import VertexAIProvider
 
         providers = []
+        service_policy = os.getenv("FINANCE_AI_POLICY", "local-only").strip()
+        live_approved = os.getenv("GEMINI_LIVE_TRAFFIC_APPROVED", "false").strip().casefold() == "true"
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if service_policy == "cloud-opt-in" and live_approved and api_key:
+            try:
+                gemini_routes = parse_gemini_model_routes(os.getenv("GEMINI_MODEL_ROUTES", ""))
+            except ValueError:
+                # Invalid deployment configuration disables Gemini; it never picks a model implicitly.
+                gemini_routes = ()
+            if gemini_routes:
+                images_approved = os.getenv("GEMINI_RECEIPT_IMAGES_APPROVED", "false").strip().casefold() == "true"
+                providers.append(GeminiProviderPool([
+                    GeminiProvider(route, api_key, receipt_images_approved=images_approved)
+                    for route in gemini_routes
+                ]))
         if installed is None or text_model in installed and "embed" not in text_model.casefold():
             providers.append(OllamaProvider(endpoint.endpoint, text_model))
         if vision_models:
@@ -277,40 +299,45 @@ class IntelligenceHandler(BaseHTTPRequestHandler):
         try:
             return ProviderRouter(providers).select(required_capabilities, policy, task_kind)
         except UnsupportedCapability as error:
-            if task_kind in {"budget-proposal", "transaction-draft", "receipt-basket-review",
-                             "merchant-classification"} and not any(
-                                 provider.name == "ollama" for provider in providers):
-                raise ProviderUnavailable("No usable text model is installed") from error
+            expected_capabilities = TASK_SCHEMAS.get(task_kind, (None, None, None))[2]
+            if expected_capabilities is not None and required_capabilities == expected_capabilities:
+                raise ProviderUnavailable("No configured provider supports this task") from error
             raise
 
     async def _generate(self, context):
         timeout = min(float(os.getenv("FINANCE_AI_TIMEOUT_SECONDS", "90")), self._active_envelope.remaining_seconds)
-        return await self._active_provider.execute("budget-proposal", context, timeout,
-                                                    os.getenv("OLLAMA_API_KEY", ""))
+        return await self._execute_active_provider("budget-proposal", context, timeout,
+                                                   os.getenv("OLLAMA_API_KEY", ""))
 
     async def _generate_transaction_draft(self, context):
         timeout = min(float(os.getenv("FINANCE_AI_TIMEOUT_SECONDS", "90")), self._active_envelope.remaining_seconds)
-        return await self._active_provider.execute("transaction-draft", context, timeout,
-                                                    os.getenv("OLLAMA_API_KEY", ""))
+        return await self._execute_active_provider("transaction-draft", context, timeout,
+                                                   os.getenv("OLLAMA_API_KEY", ""))
 
     async def _generate_receipt_ocr(self, context):
         timeout = min(float(os.getenv("FINANCE_AI_TIMEOUT_SECONDS", "90")), self._active_envelope.remaining_seconds)
-        return await self._active_provider.execute("receipt-ocr", context, timeout)
+        return await self._execute_active_provider("receipt-ocr", context, timeout)
 
     async def _generate_receipt_vision(self, context):
         timeout = min(float(os.getenv("FINANCE_AI_TIMEOUT_SECONDS", "90")), self._active_envelope.remaining_seconds)
-        return await self._active_provider.execute("receipt-vision", context, timeout,
-                                                    os.getenv("OLLAMA_API_KEY", ""))
+        return await self._execute_active_provider("receipt-vision", context, timeout,
+                                                   os.getenv("OLLAMA_API_KEY", ""))
 
     async def _generate_receipt_basket_review(self, context):
         timeout = min(float(os.getenv("FINANCE_AI_TIMEOUT_SECONDS", "90")), self._active_envelope.remaining_seconds)
-        return await self._active_provider.execute("receipt-basket-review", context, timeout,
-                                                    os.getenv("OLLAMA_API_KEY", ""))
+        return await self._execute_active_provider("receipt-basket-review", context, timeout,
+                                                   os.getenv("OLLAMA_API_KEY", ""))
 
     async def _generate_merchant_classifications(self, context):
         timeout = min(float(os.getenv("FINANCE_AI_TIMEOUT_SECONDS", "90")), self._active_envelope.remaining_seconds)
-        return await self._active_provider.execute("merchant-classification", context, timeout,
-                                                    os.getenv("OLLAMA_API_KEY", ""))
+        return await self._execute_active_provider("merchant-classification", context, timeout,
+                                                   os.getenv("OLLAMA_API_KEY", ""))
+
+    async def _execute_active_provider(self, task_kind, context, timeout, api_key=""):
+        options = {"api_key": api_key}
+        if self._active_provider.name == "gemini":
+            options["required_capabilities"] = self._active_envelope.required_capabilities
+        return await self._active_provider.execute(task_kind, context, timeout, **options)
 
     def _reply(self, status: int, body: dict):
         data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")

@@ -763,7 +763,7 @@ def test_private_intelligence_contract_requires_scoped_context_and_service_beare
     assert set(top_up["required"]) == {"ocrOrdinal", "name", "lineSum"}
     assert ocr["properties"]["capabilities"]["items"]["enum"] == ["text"]
     vision = spec["components"]["schemas"]["ReceiptVisionAdvice"]
-    assert vision["properties"]["provider"]["const"] == "ollama"
+    assert vision["properties"]["provider"]["enum"] == ["ollama", "gemini"]
     assert vision["properties"]["requiredCapabilities"]["items"]["enum"] == ["vision", "structured_output"]
 
 

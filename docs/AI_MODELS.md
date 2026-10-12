@@ -47,3 +47,32 @@ The service never queries `/api/tags` on a remote host and never routes local-on
 The private health panel reports remote model status as unchecked. It does not enumerate a remote model inventory to make that status look more precise.
 
 There is intentionally no tenant-facing model selector or model download/delete endpoint. Model lifecycle belongs to the deployment operator.
+
+## Gemini Developer API
+
+Gemini is an optional server-side provider for structured text tasks and, when separately approved, minimized receipt images. Android and Telegram never receive the Gemini key. Gemini stays disabled unless all of these are true:
+
+- `FINANCE_AI_POLICY=cloud-opt-in` on the service and the individual request asks for `cloud-opt-in`;
+- `GEMINI_LIVE_TRAFFIC_APPROVED=true`;
+- `GEMINI_API_KEY` is supplied by the deployment secret store;
+- `GEMINI_MODEL_ROUTES` contains an explicit, bounded list of model IDs and task capabilities.
+
+Do not set the live-traffic flag until the exact Google account/model availability, billing status, current terms, data-processing conditions, and Russian cross-border data requirements have been checked. This code does not bypass provider region restrictions. Unit tests use an injected mock HTTP transport and never call Gemini.
+
+Receipt image processing has an extra `GEMINI_RECEIPT_IMAGES_APPROVED=true` gate. The service decodes the submitted image, removes metadata, corrects orientation, scales it to at most 2200 pixels on the long side, and re-encodes it as a bounded JPEG before upload. This is still receipt content; the image gate must reflect explicit user consent and the operator's data policy. Gemini does not receive full transaction history: budget proposals accept only validated monthly aggregates, transaction drafts accept one bounded user statement, basket review accepts item names without prices, and merchant classification accepts merchant names.
+
+Configure exact model IDs and limits in private deployment configuration. Example shape (replace every placeholder with a verified value and limits below the account's current quota):
+
+```dotenv
+FINANCE_AI_POLICY=cloud-opt-in
+GEMINI_LIVE_TRAFFIC_APPROVED=false
+GEMINI_RECEIPT_IMAGES_APPROVED=false
+GEMINI_API_KEY=<secret-store-injected-value>
+GEMINI_MODEL_ROUTES=[{"modelId":"<verified-model-id>","tasks":["merchant-classification","receipt-basket-review"],"capabilities":["text","structured_output"],"complexity":"fast","rpm":5,"tpm":250000,"rpd":20}]
+```
+
+`GEMINI_MODEL_ROUTES` is an ordered JSON array. Each entry has exactly `modelId`, `tasks`, `capabilities`, `complexity`, `rpm`, `tpm`, and `rpd`. Supported task classes are `fast`, `balanced`, `reasoning`, and `vision`. Task class defaults are server-owned: merchant classification and basket review are fast, transaction draft is balanced, budget proposal is reasoning, and receipt reading is vision. The router prefers a configured class match and can use only models whose task and capabilities are explicitly listed. It tries the preferred model and at most one compatible alternate on a quota response, 5xx, timeout, or invalid structured output. It never fans one request out to every model.
+
+The user-provided Gemini console list is a quota planning hint only. Model names and availability change; do not copy display labels into configuration without checking the current API model ID. The configured RPM, TPM, and RPD values are conservative per-process guards, not a provider quota guarantee. They reset on service restart and are not shared across replicas; keep the friends MVP to one Intelligence replica or add shared coordination before scaling horizontally. Requests that exceed a configured model limit move to the one allowed compatible fallback. If no route succeeds, the API returns only `503 {"error":"unavailable"}`; clients should show “Временно недоступно” and preserve manual finance workflows.
+
+The adapter sends only the validated task prompt and optional sanitized receipt image. It does not store prompts, image contents, raw vendor errors, or API keys in telemetry. Responses are checked against the task's existing validator; transaction drafts remain review-only and never mutate financial records. Provider/model, safe usage counts when supplied, status, and latency are returned as provenance only.

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
+import io
 import json
+import math
 import re
+import threading
 import time
 import uuid
 from collections.abc import Mapping
@@ -76,6 +80,452 @@ TASK_SCHEMAS = {
 KNOWN_CAPABILITIES = frozenset({"text", "structured_output", "vision", "embeddings", "tool_calling", "streaming"})
 MAX_VERTEX_RESPONSE_BYTES = 16 * 1024
 MAX_VERTEX_OUTPUT_TOKENS = 512
+MAX_GEMINI_RESPONSE_BYTES = 64 * 1024
+MAX_GEMINI_OUTPUT_TOKENS = 2048
+MAX_GEMINI_IMAGE_BYTES = 4 * 1024 * 1024
+MAX_GEMINI_IMAGE_SIDE = 2200
+MAX_GEMINI_MODELS = 12
+GEMINI_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+GEMINI_COMPLEXITIES = frozenset({"fast", "balanced", "reasoning", "vision"})
+GEMINI_TASKS = frozenset({"budget-proposal", "transaction-draft", "receipt-vision",
+                          "receipt-basket-review", "merchant-classification"})
+TASK_COMPLEXITY = {
+    "budget-proposal": "reasoning",
+    "transaction-draft": "balanced",
+    "receipt-vision": "vision",
+    "receipt-basket-review": "fast",
+    "merchant-classification": "fast",
+}
+
+
+@dataclass(frozen=True)
+class GeminiModelRoute:
+    """One operator-selected Gemini model and its server-owned task/quota policy."""
+
+    model_id: str
+    tasks: frozenset[str]
+    capabilities: frozenset[str]
+    complexity: str
+    rpm: int
+    tpm: int
+    rpd: int
+
+
+def parse_gemini_model_routes(value: str | None) -> tuple[GeminiModelRoute, ...]:
+    """Parse bounded, explicit model routes; model IDs and limits are deployment settings."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 16_384:
+        return ()
+    try:
+        raw_routes = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError("Gemini model route configuration is invalid") from error
+    if not isinstance(raw_routes, list) or not 1 <= len(raw_routes) <= MAX_GEMINI_MODELS:
+        raise ValueError("Gemini model route configuration is invalid")
+    routes: list[GeminiModelRoute] = []
+    seen: set[str] = set()
+    expected_fields = {"modelId", "tasks", "capabilities", "complexity", "rpm", "tpm", "rpd"}
+    for item in raw_routes:
+        if not isinstance(item, dict) or set(item) != expected_fields:
+            raise ValueError("Gemini model route fields are invalid")
+        model_id, complexity = item["modelId"], item["complexity"]
+        if (not isinstance(model_id, str) or not GEMINI_MODEL_ID.fullmatch(model_id)
+                or model_id in seen or not isinstance(complexity, str)
+                or complexity not in GEMINI_COMPLEXITIES):
+            raise ValueError("Gemini model route identity is invalid")
+        tasks = item["tasks"]
+        capabilities = item["capabilities"]
+        if (not isinstance(tasks, list) or not tasks
+                or any(not isinstance(task, str) or task not in GEMINI_TASKS for task in tasks)
+                or len(tasks) != len(set(tasks))):
+            raise ValueError("Gemini model route tasks are invalid")
+        if (not isinstance(capabilities, list) or not capabilities
+                or any(not isinstance(capability, str) or capability not in KNOWN_CAPABILITIES
+                       for capability in capabilities)
+                or len(capabilities) != len(set(capabilities))):
+            raise ValueError("Gemini model route capabilities are invalid")
+        task_set, capability_set = frozenset(tasks), frozenset(capabilities)
+        if any(not TASK_SCHEMAS[task][2].issubset(capability_set) for task in task_set):
+            raise ValueError("Gemini model route omits a required task capability")
+        limits = (item["rpm"], item["tpm"], item["rpd"])
+        if any(not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+               for limit in limits):
+            raise ValueError("Gemini model route quota limits are invalid")
+        if item["rpm"] > 600 or item["tpm"] > 5_000_000 or item["rpd"] > 500_000:
+            raise ValueError("Gemini model route quota limits exceed the safety bound")
+        routes.append(GeminiModelRoute(model_id, task_set, capability_set, complexity, *limits))
+        seen.add(model_id)
+    return tuple(routes)
+
+
+class GeminiQuotaExceeded(Exception):
+    """The configured per-model quota or upstream project quota is exhausted."""
+
+    reason = "quota"
+
+
+class GeminiTemporaryFailure(Exception):
+    """A retryable provider outage, timeout, or malformed model response."""
+
+    def __init__(self, reason: str = "provider_unavailable"):
+        super().__init__(reason)
+        self.reason = reason
+
+
+class GeminiRateLimiter:
+    """Bound per-model requests and estimated input tokens in fixed UTC windows."""
+
+    def __init__(self, clock: Callable[[], float] = time.time):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._states: dict[str, tuple[int, int, int, int, int]] = {}
+
+    def reserve(self, route: GeminiModelRoute, estimated_tokens: int) -> None:
+        now = self._clock()
+        minute = int(now // 60)
+        day = int(now // 86_400)
+        with self._lock:
+            old = self._states.get(route.model_id)
+            if old is None or old[0] != minute or old[3] != day:
+                requests_minute, tokens_minute = (old[1], old[2]) if old and old[0] == minute else (0, 0)
+                requests_day = old[4] if old and old[3] == day else 0
+            else:
+                requests_minute, tokens_minute, requests_day = old[1], old[2], old[4]
+            if (requests_minute + 1 > route.rpm or tokens_minute + estimated_tokens > route.tpm
+                    or requests_day + 1 > route.rpd):
+                raise GeminiQuotaExceeded("configured model rate limit reached")
+            self._states[route.model_id] = (minute, requests_minute + 1,
+                                            tokens_minute + estimated_tokens, day, requests_day + 1)
+
+
+_SHARED_GEMINI_RATE_LIMITER = GeminiRateLimiter()
+
+
+class GeminiProvider:
+    """Bounded Gemini Developer API adapter with task-specific prompts and validation."""
+
+    name = "gemini"
+    requires_cloud_opt_in = True
+
+    def __init__(self, route: GeminiModelRoute, api_key: str,
+                 transport: httpx.AsyncBaseTransport | None = None,
+                 rate_limiter: GeminiRateLimiter | None = None,
+                 receipt_images_approved: bool = False):
+        self.route = route
+        self.api_key = api_key
+        self.transport = transport
+        self.rate_limiter = rate_limiter or _SHARED_GEMINI_RATE_LIMITER
+        self.receipt_images_approved = receipt_images_approved
+
+    @property
+    def enabled(self) -> bool:
+        return True
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        return self.route.capabilities
+
+    @property
+    def supported_tasks(self) -> frozenset[str]:
+        if self.receipt_images_approved:
+            return self.route.tasks
+        return self.route.tasks - {"receipt-vision"}
+
+    async def execute(self, task_kind: str, context: dict, timeout: float, api_key: str = "") -> dict:
+        if task_kind not in self.supported_tasks:
+            raise UnsupportedCapability(f"Gemini route does not implement task: {task_kind}")
+        if not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise TimeoutError("Gemini request deadline has expired")
+        key = self.api_key or api_key
+        if not isinstance(key, str) or not key.strip() or "\r" in key or "\n" in key:
+            raise PolicyDenied("Gemini server API key is not configured")
+        if task_kind == "receipt-vision" and not self.receipt_images_approved:
+            raise PolicyDenied("Gemini receipt image processing is not approved")
+        prompt, parts, normalized_context = self._request_parts(task_kind, context)
+        estimated_tokens = self._estimate_tokens(prompt, normalized_context)
+        self.rate_limiter.reserve(self.route, estimated_tokens)
+        payload = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {
+                "temperature": 0,
+                "maxOutputTokens": MAX_GEMINI_OUTPUT_TOKENS,
+                "responseMimeType": "application/json",
+                "responseSchema": self._response_schema(task_kind, normalized_context),
+            },
+        }
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.route.model_id}:generateContent"
+        response_bytes = bytearray()
+        async with httpx.AsyncClient(timeout=float(timeout), transport=self.transport, trust_env=False) as client:
+            async with client.stream("POST", url, json=payload,
+                                     headers={"x-goog-api-key": key}) as response:
+                limit = 4096 if response.status_code != 200 else MAX_GEMINI_RESPONSE_BYTES
+                async for chunk in response.aiter_bytes():
+                    if len(response_bytes) + len(chunk) > limit:
+                        raise GeminiTemporaryFailure("invalid_output" if response.status_code == 200
+                                                      else "provider_unavailable")
+                    response_bytes.extend(chunk)
+                if response.status_code != 200:
+                    self._raise_http_failure(response.status_code, bytes(response_bytes))
+        try:
+            envelope = json.loads(response_bytes)
+        except (ValueError, json.JSONDecodeError) as error:
+            raise GeminiTemporaryFailure("invalid_output") from error
+        if not isinstance(envelope, Mapping):
+            raise GeminiTemporaryFailure("invalid_output")
+        candidates = envelope.get("candidates")
+        if not isinstance(candidates, list) or len(candidates) != 1 or not isinstance(candidates[0], Mapping):
+            raise GeminiTemporaryFailure("invalid_output")
+        candidate = candidates[0]
+        content = candidate.get("content")
+        response_parts = content.get("parts") if isinstance(content, Mapping) else None
+        if (candidate.get("finishReason") != "STOP" or not isinstance(response_parts, list)
+                or len(response_parts) != 1 or not isinstance(response_parts[0], Mapping)
+                or not isinstance(response_parts[0].get("text"), str)):
+            raise GeminiTemporaryFailure("invalid_output")
+        try:
+            raw_result = json.loads(response_parts[0]["text"])
+            result, prompt_version = self._validate_output(task_kind, raw_result, normalized_context)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise GeminiTemporaryFailure("invalid_output") from error
+        version = envelope.get("modelVersion")
+        if not isinstance(version, str) or not version.strip() or len(version) > 128:
+            version = self.route.model_id
+        usage = envelope.get("usageMetadata")
+        return {
+            **result,
+            "provider": "gemini",
+            "modelVersion": version,
+            "promptVersion": prompt_version,
+            "capabilities": sorted(self.capabilities),
+            "usage": self._usage(usage),
+        }
+
+    @staticmethod
+    def _raise_http_failure(status_code: int, body: bytes) -> None:
+        try:
+            error = json.loads(body).get("error", {})
+        except (ValueError, json.JSONDecodeError, AttributeError):
+            error = {}
+        status = error.get("status") if isinstance(error, Mapping) else None
+        message = error.get("message", "") if isinstance(error, Mapping) else ""
+        lowered_message = str(message).casefold()
+        quota = status_code == 429 or (status_code == 403 and (
+            status == "RESOURCE_EXHAUSTED" or any(term in lowered_message for term in
+                                                   ("quota", "billing", "exhaust", "deplet", "insufficient credit"))))
+        if quota:
+            raise GeminiQuotaExceeded("Gemini quota unavailable")
+        if status_code in {408, 425} or status_code >= 500:
+            raise GeminiTemporaryFailure("provider_unavailable")
+        raise ProviderUnavailable("Gemini is temporarily unavailable")
+
+    @staticmethod
+    def _usage(value: Any) -> dict[str, int | float | None]:
+        if not isinstance(value, Mapping):
+            return {"inputTokens": None, "outputTokens": None, "cost": None}
+        prompt = value.get("promptTokenCount")
+        output = value.get("candidatesTokenCount")
+        return {
+            "inputTokens": prompt if isinstance(prompt, int) and not isinstance(prompt, bool) and prompt >= 0 else None,
+            "outputTokens": output if isinstance(output, int) and not isinstance(output, bool) and output >= 0 else None,
+            "cost": None,
+        }
+
+    def _request_parts(self, task_kind: str, context: dict) -> tuple[str, list[dict], dict]:
+        if task_kind == "budget-proposal":
+            from services.python.intelligence.budget_proposals import build_prompt, validate_context
+            safe = validate_context(context)
+            prompt = build_prompt(safe)
+            return prompt, [{"text": prompt}], safe
+        if task_kind == "transaction-draft":
+            from services.python.intelligence.transaction_drafts import build_draft_prompt, validate_draft_context
+            safe = validate_draft_context(context)
+            prompt = build_draft_prompt(safe)
+            return prompt, [{"text": prompt}], safe
+        if task_kind == "receipt-vision":
+            from services.python.intelligence.vision import VISION_PROMPT
+            from services.python.intelligence.tesseract import TesseractProvider
+            image = TesseractProvider._decode_image(context)
+            if max(image.size) > MAX_GEMINI_IMAGE_SIDE:
+                image.thumbnail((MAX_GEMINI_IMAGE_SIDE, MAX_GEMINI_IMAGE_SIDE))
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=82, optimize=True)
+            image_bytes = output.getvalue()
+            if not image_bytes or len(image_bytes) > MAX_GEMINI_IMAGE_BYTES:
+                raise ValueError("Receipt image exceeds Gemini's minimized image bound")
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            return VISION_PROMPT, [{"text": VISION_PROMPT},
+                                   {"inlineData": {"mimeType": "image/jpeg", "data": encoded}}], {
+                                       "imageBase64": encoded, "imageSize": image.size}
+        if task_kind == "receipt-basket-review":
+            from services.python.intelligence.receipt_basket_review import build_prompt, validate_context
+            safe = validate_context(context)
+            prompt = build_prompt(safe)
+            return prompt, [{"text": prompt}], safe
+        if task_kind == "merchant-classification":
+            from services.python.intelligence.merchant_classification import build_prompt, validate_context
+            safe = validate_context(context)
+            prompt = build_prompt(safe)
+            return prompt, [{"text": prompt}], safe
+        raise UnsupportedCapability(f"Gemini adapter does not implement task: {task_kind}")
+
+    @staticmethod
+    def _estimate_tokens(prompt: str, context: dict) -> int:
+        estimate = max(1, math.ceil(len(prompt.encode("utf-8")) / 4))
+        dimensions = context.get("imageSize")
+        if isinstance(dimensions, tuple) and len(dimensions) == 2:
+            width, height = dimensions
+            estimate += max(1, math.ceil(width / 768) * math.ceil(height / 768)) * 258
+        return estimate
+
+    @staticmethod
+    def _response_schema(task_kind: str, context: dict) -> dict[str, Any]:
+        string = {"type": "STRING"}
+        if task_kind == "budget-proposal":
+            categories = context["categoryCodes"]
+            return {"type": "OBJECT", "properties": {"shares": {
+                "type": "OBJECT", "properties": {category: {"type": "NUMBER"} for category in categories},
+                "required": categories}}, "required": ["shares"]}
+        if task_kind == "transaction-draft":
+            properties = {
+                "type": {"type": "STRING", "enum": ["expense", "income", "debt_payment"]},
+                "amount": string,
+                "categoryCode": string,
+                "subcategoryCode": {"type": "STRING", "nullable": True},
+                "description": string,
+                "occurredAt": string,
+            }
+            return {"type": "OBJECT", "properties": properties, "required": list(properties)}
+        if task_kind == "receipt-vision":
+            item = {"type": "OBJECT", "properties": {
+                "name": string,
+                "quantity": {"type": "STRING", "nullable": True},
+                "unitPrice": {"type": "STRING", "nullable": True},
+                "lineSum": {"type": "STRING", "nullable": True},
+            }, "required": ["name", "quantity", "unitPrice", "lineSum"]}
+            properties = {
+                "store": {"type": "STRING", "nullable": True},
+                "date": {"type": "STRING", "nullable": True},
+                "total": {"type": "STRING", "nullable": True},
+                "items": {"type": "ARRAY", "items": item},
+            }
+            return {"type": "OBJECT", "properties": properties, "required": list(properties)}
+        if task_kind == "receipt-basket-review":
+            item = {"type": "OBJECT", "properties": {
+                "ordinal": {"type": "INTEGER"},
+                "verdict": {"type": "STRING", "enum": ["useful", "neutral", "harmful", "unnecessary"]},
+                "reason": string,
+                "action": string,
+            }, "required": ["ordinal", "verdict", "reason", "action"]}
+            return {"type": "OBJECT", "properties": {"items": {"type": "ARRAY", "items": item}},
+                    "required": ["items"]}
+        if task_kind == "merchant-classification":
+            from services.python.intelligence.merchant_classification import CATEGORIES
+            item = {"type": "OBJECT", "properties": {
+                "merchant": string,
+                "categoryCode": {"type": "STRING", "enum": sorted(CATEGORIES)},
+                "confidence": {"type": "NUMBER"},
+            }, "required": ["merchant", "categoryCode", "confidence"]}
+            return {"type": "OBJECT", "properties": {"classifications": {"type": "ARRAY", "items": item}},
+                    "required": ["classifications"]}
+        raise UnsupportedCapability(f"Gemini adapter does not implement task: {task_kind}")
+
+    @staticmethod
+    def _validate_output(task_kind: str, raw: Any, context: dict) -> tuple[dict, str]:
+        if task_kind == "budget-proposal":
+            from services.python.intelligence.budget_proposals import PROMPT_VERSION, normalize_shares
+            if not isinstance(raw, Mapping) or set(raw) != {"shares"}:
+                raise ValueError("Gemini budget proposal schema is invalid")
+            return {"shares": normalize_shares(raw["shares"], context["categoryCodes"])}, PROMPT_VERSION
+        if task_kind == "transaction-draft":
+            from services.python.intelligence.transaction_drafts import PROMPT_VERSION, validate_draft_output
+            return validate_draft_output(raw, now=datetime.fromisoformat(context["now"])), PROMPT_VERSION
+        if task_kind == "receipt-vision":
+            from services.python.intelligence.vision import OllamaVisionProvider
+            return OllamaVisionProvider._validate(raw), "receipt-vision.v1"
+        if task_kind == "receipt-basket-review":
+            from services.python.intelligence.receipt_basket_review import PROMPT_VERSION, validate_result
+            return validate_result(raw, context), PROMPT_VERSION
+        if task_kind == "merchant-classification":
+            from services.python.intelligence.merchant_classification import (
+                PROMPT_VERSION, normalize_classifications,
+            )
+            if not isinstance(raw, Mapping) or set(raw) != {"classifications"}:
+                raise ValueError("Gemini merchant classification schema is invalid")
+            return {"classifications": normalize_classifications(raw, context["merchants"])}, PROMPT_VERSION
+        raise UnsupportedCapability(f"Gemini adapter does not implement task: {task_kind}")
+
+
+class GeminiProviderPool:
+    """Select by task complexity, then try at most one compatible model fallback."""
+
+    name = "gemini"
+    requires_cloud_opt_in = True
+
+    def __init__(self, providers: list[GeminiProvider] | tuple[GeminiProvider, ...]):
+        self.providers = tuple(providers)
+        if not self.providers or len(self.providers) > MAX_GEMINI_MODELS:
+            raise ValueError("Gemini model pool size is invalid")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.providers)
+
+    @property
+    def capabilities(self) -> frozenset[str]:
+        return frozenset().union(*(provider.capabilities for provider in self.providers))
+
+    @property
+    def supported_tasks(self) -> frozenset[str]:
+        return frozenset().union(*(provider.supported_tasks for provider in self.providers))
+
+    def supports(self, task_kind: str, required: set[str] | frozenset[str]) -> bool:
+        return any(task_kind in provider.supported_tasks and required.issubset(provider.capabilities)
+                   for provider in self.providers)
+
+    @staticmethod
+    def _complexity_rank(target: str, configured: str) -> int:
+        order = {
+            "fast": ("fast", "balanced", "reasoning", "vision"),
+            "balanced": ("balanced", "fast", "reasoning", "vision"),
+            "reasoning": ("reasoning", "balanced", "fast", "vision"),
+            "vision": ("vision", "reasoning", "balanced", "fast"),
+        }
+        return order[target].index(configured)
+
+    async def execute(self, task_kind: str, context: dict, timeout: float, api_key: str = "",
+                      required_capabilities: set[str] | frozenset[str] | None = None) -> dict:
+        target_complexity = TASK_COMPLEXITY.get(task_kind)
+        if target_complexity is None:
+            raise UnsupportedCapability(f"Gemini adapter does not implement task: {task_kind}")
+        required = frozenset(required_capabilities or TASK_SCHEMAS[task_kind][2])
+        candidates = [provider for provider in self.providers
+                     if task_kind in provider.supported_tasks
+                     and required.issubset(provider.capabilities)]
+        candidates.sort(key=lambda provider: self._complexity_rank(target_complexity, provider.route.complexity))
+        if not candidates:
+            raise UnsupportedCapability("No configured Gemini model supports this task and capability set")
+        failures: list[Exception] = []
+        deadline = asyncio.get_running_loop().time() + timeout
+        for index, provider in enumerate(candidates[:2]):
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                failures.append(GeminiTemporaryFailure("timeout"))
+                break
+            try:
+                result = await asyncio.wait_for(provider.execute(task_kind, context, remaining, api_key), timeout=remaining)
+                return {**result, "fallbackReason": failures[0].reason if failures else None}
+            except asyncio.CancelledError:
+                raise
+            except GeminiQuotaExceeded as error:
+                failures.append(error)
+            except GeminiTemporaryFailure as error:
+                failures.append(error)
+            except (httpx.TimeoutException, TimeoutError) as error:
+                failures.append(GeminiTemporaryFailure("timeout"))
+            except httpx.HTTPError as error:
+                failures.append(GeminiTemporaryFailure("provider_unavailable"))
+            if index + 1 < min(2, len(candidates)):
+                continue
+        raise ProviderUnavailable("Gemini is temporarily unavailable") from (failures[-1] if failures else None)
 
 
 class ProviderAdapter(Protocol):
@@ -383,7 +833,9 @@ class ProviderRouter:
         capable = [provider for provider in self.providers
                    if getattr(provider, "enabled", True)
                    and (task_kind is None or task_kind in provider.supported_tasks)
-                   and required.issubset(provider.capabilities)]
+                   and (provider.supports(task_kind, required) if task_kind is not None
+                        and callable(getattr(provider, "supports", None))
+                        else required.issubset(provider.capabilities))]
         if not capable:
             raise UnsupportedCapability("No enabled provider supports all required capabilities")
         allowed = [provider for provider in capable
