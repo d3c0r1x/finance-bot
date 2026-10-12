@@ -7069,7 +7069,8 @@ private fun DoNotBuyScreen(modifier: Modifier, state: FinanceUiState, language: 
     val russian = language == "ru"
     val report = state.doNotBuy
     val decisions = state.productDecisions
-    val canWrite = state.tenants.firstOrNull()?.role != "viewer" && decisions != null && !state.doNotBuyLoading
+    val canWrite = state.tenants.firstOrNull()?.role in setOf("owner", "admin", "member") &&
+        decisions != null && !state.doNotBuyLoading
     LazyColumn(modifier = modifier.testTag("do-not-buy-list"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text(if (russian) "Не брать" else "Do not buy", style = MaterialTheme.typography.titleLarge) }
         when {

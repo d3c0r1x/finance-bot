@@ -2454,3 +2454,14 @@ Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850e
 - Limits: Compose uses in-memory synthetic state; Core persistence, actual income totals/budget behavior, and authenticated Android-to-Core/OIDC remain covered by separate tests or external integration gates. F07 Android remains PARTIAL for live integration.
 - Files: `FinanceScreensTest.kt`, bounded plan, parity evidence, and this progress record. User-owned untracked paths remain excluded.
 - Next: choose next locally actionable unfinished V1 gap; public runtime/OIDC still awaits host prerequisites.
+
+## F59.50 F41 Android decision controls and unknown-role gate — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F41 and Android F41 mapping; bounded plan `docs/superpowers/plans/2026-10-12-f41-android-decisions.md`.
+- Goal: verify explicit allow/revoke/confirm UI and API actions, read-only roles, and the authenticated Core confirm request without overstating live integration.
+- TDD RED: parity contract failed because F41 omitted the Android API tests and accurate remaining gate. API-27 Compose test then failed because unsupported tenant role `unknown` displayed “Подтвердить «не брать»”.
+- Change: DoNotBuy decision buttons now require an explicit `owner`, `admin`, or `member` role; unknown roles and viewers remain read-only. Added Compose cases for member allow/revoke, viewer controls, and unknown-role controls, plus an isolated-vault MockWebServer test for authenticated tenant-scoped `confirm` and confirmed-key readback. Corrected F41 evidence; no Core policy/API changed.
+- GREEN/regression: debug and AndroidTest APK assembly plus `:app:testDebugUnitTest` passed. Focused API-27 instrumentation passed 5/5 (member allow/revoke; viewer; unknown role; existing model-guess confirmation; authenticated confirm API). Full `FinanceScreensTest` passed 93/93 on dedicated Android 8.1/API 27 `CodexFinanceBotApi27` / `emulator-5554`. Android parity registry and contract tests passed 75/75.
+- Limits: synthetic Compose and MockWebServer evidence only; live authenticated Android-to-Core/OIDC persistence and tenant-isolation E2E remain unverified. F41 stays partial/in progress.
+- Files: F41 decision tests, `MainActivity.kt`, parity registry/test, bounded plan, and this progress record. User-owned untracked paths remain excluded.
+- Next: continue an independently testable V1 gap; keep Core/OIDC runtime gates explicit until the host runtime is available.

@@ -594,6 +594,65 @@ class FinanceScreensTest {
         compose.onNodeWithText("Model guesses").assertIsDisplayed()
     }
 
+    @Test fun doNotBuyMemberCanAllowAndRevokeDecisions() {
+        val chips = FinanceAdviceGroup("chips", "Чипсы", 2, "20.00", 2, 0, 0, 0,
+            false, "harmful", "", "2026-10-06T10:00:00Z")
+        val tea = FinanceAdviceGroup("tea", "Чай", 2, null, 0, 2, 0, 0,
+            true, "unnecessary", "Проверьте привычку", "2026-10-06T10:00:00Z")
+        val report = FinanceDoNotBuy(true, "available", listOf(chips), listOf(tea))
+        val writerDecisions = FinanceProductDecisions(emptyList(), listOf("tea"))
+        val emitted = mutableListOf<Pair<String, String>>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("member")),
+            doNotBuy = report, productDecisions = writerDecisions),
+            onDoNotBuyDecision = { key, action -> emitted += key to action })
+
+        compose.onNodeWithText("Не брать").performScrollTo().performClick()
+        compose.onNodeWithText("По правилам или вашему решению").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Подтверждено вами").performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("Можно брать").fetchSemanticsNodes().also { assertEquals(2, it.size) }
+        compose.onAllNodesWithText("Отменить решение").fetchSemanticsNodes().also { assertEquals(1, it.size) }
+        compose.onAllNodesWithText("Можно брать")[0].performScrollTo().performClick()
+        compose.onAllNodesWithText("Отменить решение")[0].performScrollTo().performClick()
+        assertEquals(listOf("chips" to "allow", "tea" to "revoke"), emitted)
+    }
+
+    @Test fun doNotBuyViewerCannotChangeDecisions() {
+        val chips = FinanceAdviceGroup("chips", "Чипсы", 2, "20.00", 2, 0, 0, 0,
+            false, "harmful", "", "2026-10-06T10:00:00Z")
+        val tea = FinanceAdviceGroup("tea", "Чай", 2, null, 0, 2, 0, 0,
+            true, "unnecessary", "Проверьте привычку", "2026-10-06T10:00:00Z")
+        val report = FinanceDoNotBuy(true, "available", listOf(chips), listOf(tea))
+        val emitted = mutableListOf<Pair<String, String>>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
+            doNotBuy = report, productDecisions = FinanceProductDecisions(emptyList(), listOf("tea"))),
+            onDoNotBuyDecision = { key, action -> emitted += key to action })
+
+        compose.onNodeWithText("Не брать").performScrollTo().performClick()
+        compose.onNodeWithText("Чай").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("По правилам или вашему решению").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Подтвердить «не брать»").assertDoesNotExist()
+        compose.onNodeWithText("Можно брать").assertDoesNotExist()
+        compose.onNodeWithText("Отменить решение").assertDoesNotExist()
+        assertEquals(emptyList<Pair<String, String>>(), emitted)
+    }
+
+    @Test fun doNotBuyUnknownRoleCannotChangeDecisions() {
+        val tea = FinanceAdviceGroup("tea", "Чай", 2, null, 0, 2, 0, 0,
+            true, "unnecessary", "Проверьте привычку", "2026-10-06T10:00:00Z")
+        val emitted = mutableListOf<Pair<String, String>>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("unknown")),
+            doNotBuy = FinanceDoNotBuy(true, "available", emptyList(), listOf(tea)),
+            productDecisions = FinanceProductDecisions(emptyList(), emptyList())),
+            onDoNotBuyDecision = { key, action -> emitted += key to action })
+
+        compose.onNodeWithText("Не брать").performScrollTo().performClick()
+
+        compose.onNodeWithText("Чай").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Подтвердить «не брать»").assertDoesNotExist()
+        compose.onNodeWithText("Можно брать").assertDoesNotExist()
+        assertEquals(emptyList<Pair<String, String>>(), emitted)
+    }
+
     @Test fun personalInflationShowsReceiptOnlyDisclosureAndCoreBasketInRussianAndEnglish() {
         val inflation = FinancePersonalInflation(
             available = true, reasonCode = "available", asOf = "2026-10-06T12:00:00Z", windowDays = 90,

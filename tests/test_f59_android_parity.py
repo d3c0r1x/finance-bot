@@ -205,3 +205,22 @@ def test_f52_android_registry_records_system_chooser_and_fixture_download_eviden
     assert "live android oidc/core" in gap
     assert "actual browser transfer" in gap
     assert "test-only receiver" in gap
+
+
+def test_f41_android_registry_records_decision_controls_and_remaining_live_gate():
+    feature = next(item for item in _features() if item["id"] == "F41")
+    android = feature["android"]
+    expected_tests = {
+        "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt",
+        "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt",
+        "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceDoNotBuyDecisionApiTest.kt",
+    }
+
+    assert android["status"] == "partial"
+    assert expected_tests.issubset(android["tests"])
+    evidence = " ".join(android.get("evidence", [])).lower()
+    assert "confirm" in evidence and "allow" in evidence and "revoke" in evidence
+    assert "viewer" in evidence and "unknown role" in evidence
+    gap = android["gap"].lower()
+    assert "live authenticated android-to-core/oidc" in gap
+    assert "viewer" not in gap, "viewer control visibility now has a direct Android UI test"

@@ -948,15 +948,18 @@ features:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
       - tools/contracts/test_contracts.py
     evidence:
-      - "F41.1 groups at least two harmful/unnecessary receipt verdicts by Core-supplied stable product key. Go returns versioned counts, exact-or-null amounts, latest advice, and source counts; only an exclusively model-sourced group is marked modelOnly. A modelOnly flag is evidence, not a purchase block or user decision. Strict authenticated internal HTTP and golden OpenAPI fixture are locally GREEN: full Go tests/vet and 43 contract tests pass. Core member-scoped decision overlay, list/query API, and RU/EN Web/Telegram/Android controls remain F41.2/F41.3 work."
-      - "F41.1 GitHub runs 37413587958, 37413587940 and 37413587971 passed. F41.2a stores member-local confirmed/allowed decisions with idempotent versioning, audit, revoke and BFF CSRF; isolated PostgreSQL/Core/contract checks and GitHub runs 37414351352, 37414351376, 37414351356 and 37414351388 passed. F41.2b selects only the member's confirmed expense receipt verdicts, caps input at 50,000, calls Go after the DB transaction, and overlays human decisions in a separate list API. Model-only groups remain guesses and visible shopping candidates until confirmed; rule-backed groups are blocked unless allowed. Outage/overflow is explicit. Focused PostgreSQL/API, full Core check and 45 contract tests pass locally. RU/EN Web/Telegram/Android controls remain F41.3 work."
-      - "F41.2b GitHub runs 37415625964, 37415625735, 37415625772 and 37415625724 passed. F41.3a Web now shows rule-backed blocks and model-only guesses separately in RU/EN, requires an explicit CSRF-protected confirm/allow decision, exposes undo for human confirmation, handles analytics outage, and labels blocked shopping candidates by their actual reason. Full Web Vitest 53/53 and TypeScript/Vite production build pass locally. Telegram and Android controls remain F41.3b/F41.3c work."
+      - "F41.1 groups harmful/unnecessary receipt verdicts by Core-supplied stable product key. Go returns versioned counts, exact-or-null amounts, latest advice, and source counts; only exclusively model-sourced evidence is modelOnly. F41.2a persists member-local confirmed/allowed decisions with audit, revoke and BFF CSRF; F41.2b scopes evidence to the member's confirmed expense receipt verdicts, caps inputs at 50,000, and keeps model-only guesses visible until a person decides. Rule-backed items stay blocked unless allowed; outage and overflow are explicit. Local Go, Core/PostgreSQL and contract checks passed; the listed F41.1/F41.2 GitHub runs passed."
+      - "F41.3a Web provides RU/EN separated rule evidence and model guesses with explicit CSRF-protected confirm/allow/undo; Web tests and production build passed. F41.3b Telegram provides actor-scoped lists and decisions; local tests and listed GitHub workflows passed. F41.3c Android list and decision controls were implemented and committed; prior focused instrumentation and APK launch passed, with no GitHub run recorded. Overall F41 stays in_progress for live integration gates."
     android:
       status: partial
       scenario: "Android counterpart for F41: «Не брать», отдельные догадки модели, подтверждение/разрешение"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F41 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceDoNotBuyDecisionApiTest.kt"
+      evidence:
+        - "F59.50: API-27 Compose checks separate rule-backed evidence and model guesses, explicit member allow/revoke callbacks, and hidden confirm/allow/revoke controls for viewer and unknown roles. Isolated MockWebServer check confirms tenant-scoped authenticated `confirm` maps to Core decision `confirmed` and reads the confirmed product key back; existing API checks cover allow/revoke refresh and Core 403. Tests use synthetic UI/API state and make no live Core or persistence claim."
+      gap: "Live authenticated Android-to-Core/OIDC integration, persisted decision refresh, and end-to-end tenant isolation are not verified."
     intentional_differences: []
   - id: F42
     feature: "Пересчёт старых verdict по текущим правилам и отчёт изменений"
