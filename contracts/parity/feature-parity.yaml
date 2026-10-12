@@ -3,7 +3,7 @@ legacy_commit: cfaa013e1c977db24d7ab81944d0113ca79daea9
 features:
   - id: F01
     feature: "Запуск, меню, `/start`, `/menu`, `/help`; `bot.py`, `handlers/main_menu.py`"
-    target: "P Telegram gateway; J dashboard; W главная"
+    target: "P Telegram gateway; J dashboard; Android/Telegram главная"
     acceptance: "Все команды отвечают; нижнее меню возвращается после операций; старую menu button можно заменить"
     status: complete
     tests:
@@ -18,6 +18,13 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F01 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Запуск, меню, `/start`, `/menu`, `/help`; `bot.py`, `handlers/main_menu.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F02
     feature: "Whitelist и роли из `config.py`, `utils/filters.py`"
@@ -40,10 +47,17 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F02 acceptance condition or live Core integration."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: Whitelist и роли из `config.py`, `utils/filters.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram access still requires a one-time link code; replace it with the server allowlist and canonical Core mapping."
     intentional_differences: []
   - id: F03
     feature: "Onboarding: имя, доход, пропуск, назад, бюджет, повторная настройка; `handlers/onboarding.py`"
-    target: "J profile/onboarding; P/W пошаговая форма"
+    target: "J profile/onboarding; P/Android/Telegram пошаговая форма"
     acceptance: "Повторная настройка не удаляет транзакции; пользователь с историей не считается новым"
     status: complete
     tests:
@@ -59,6 +73,10 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
       gap: "Android repeat setup and profile PATCH are covered by local API 27 tests; authenticated Android-to-Core/OIDC end-to-end remains unverified."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Onboarding: имя, доход, пропуск, назад, бюджет, повторная настройка; `handlers/onboarding.py`"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F04
     feature: "Имя из Telegram, своё имя, план дохода, статус onboarding; `services/profile.py`"
@@ -77,6 +95,13 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F04 acceptance condition or live Core integration."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: Имя из Telegram, своё имя, план дохода, статус onboarding; `services/profile.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram accepts a display-name fallback, but has no complete profile setup or edit flow."
     intentional_differences: []
   - id: F05
     feature: "Свободный текст расхода/дохода/платежа; `ai/llm.py`, `handlers/expenses.py`"
@@ -99,10 +124,17 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F05 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Свободный текст расхода/дохода/платежа; `ai/llm.py`, `handlers/expenses.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F06
     feature: "Карточка подтверждения, сумма, категория, подкатегория, быстрые суммы, отмена"
-    target: "J drafts; P keyboards; W transaction form"
+    target: "J drafts; P keyboards; Android/Telegram transaction form"
     acceptance: "До подтверждения нет финансовой записи; устаревшая кнопка безопасна"
     status: complete
     tests:
@@ -118,10 +150,17 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F06 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Карточка подтверждения, сумма, категория, подкатегория, быстрые суммы, отмена"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F07
     feature: "Добавление дохода и источника операции"
-    target: "J transactions; P/W ввод"
+    target: "J transactions; P/Android/Telegram ввод"
     acceptance: "Доход не попадает в расходы/лимиты; сохраняются description/source/date"
     status: complete
     tests:
@@ -139,10 +178,17 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceIncomeDraftApiTest.kt"
       evidence: "Compose instrumentation verifies changing a pending expense draft to income, saving the exact amount/description/type against the current version, keeping confirm disabled until Core returns the refreshed version, and confirming only after an explicit tap. MockWebServer API coverage checks stable idempotency, draft/confirm request order, and income history fields including source and offset-bearing date. Both synthetic API tests use isolated token storage. Existing PostgreSQL acceptance covers pending income totals and budget spend; live Android-to-Core/OIDC remains unverified."
       gap: "No authenticated live Android-to-Core/OIDC integration test. MockWebServer test does not prove database persistence."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Добавление дохода и источника операции"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F08
     feature: "История последних операций, повтор траты, отмена последней; `main_menu.py`"
-    target: "J repeat/reverse; P/W history"
+    target: "J repeat/reverse; P/Android/Telegram history"
     acceptance: "Повтор создаёт новую запись один раз; отмена ограничена доступной пользователю операцией"
     status: complete
     tests:
@@ -170,10 +216,17 @@ features:
         - "apps/android/scripts/verify-f08-process-death.ps1"
       gap: "Live authenticated Android-to-Core/OIDC idempotency and tenant-isolation E2E remain unverified; F09 separately tracks history filters and paging."
       evidence: "Android stores the immutable repeat/void body, timestamp where applicable, source version, caller userId, tenant, and idempotency key under Android Keystore AES-GCM. Retry appears only on explicit tap, including off-page/filtered results and changed source versions; new mutations and source edits are suppressed while retries are pending. Checkpoints clear only after a validated Core response and same-identity workspace refresh. API-27 tests cover store recreation, no plaintext, damaged ciphertext fail-closed, missing Keystore key cannot replace checkpoint ciphertext, missing/parsed caller ID, lost-response replay with the same request key/body, and RU/EN explicit retry UI. The PowerShell process-death harness force-stopped only the isolated debug package, relaunched MainActivity, and a fresh instrumentation run recovered exact synthetic repeat/void snapshots. An authenticated MainActivity startup test restores only the matching Core userId and tenant from isolated encrypted storage; startup sends no mutation POST and a different Core owner sees no saved retry. Live Core/OIDC remains unverified."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: История последних операций, повтор траты, отмена последней; `main_menu.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F09
     feature: "Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"
-    target: "J transactions API; W таблица"
+    target: "J transactions API; Android/Telegram таблица"
     acceptance: "Все доступные поля и фильтры перенесены; правка долга выполняет корректную компенсацию"
     status: complete
     tests:
@@ -190,10 +243,17 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceTransactionsPaginationApiTest.kt"
       evidence: "MockWebServer instrumentation verifies authenticated tenant GET, search/type/date/member filters, exact transaction DTO parsing, and opaque cursor reuse across two pages. Synthetic tokens use isolated test storage."
       gap: "Live authenticated Android-to-Core end-to-end proof remains incomplete. MockWebServer does not verify Core pagination ordering or tenant isolation."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram shows only the latest eight operations and supports repeat/latest undo; search, filters, and full CRUD are absent."
     intentional_differences: []
   - id: F10
     feature: "Фото чека, прогресс, draft; `expenses.py`"
-    target: "J receipt job; P OCR worker; W upload/review"
+    target: "J receipt job; P OCR worker; Android/Telegram upload/review"
     acceptance: "Длительный job показывает статус; повтор update не создаёт второй job"
     status: complete
     tests:
@@ -218,6 +278,10 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt"
       gap: "Local Android API/UI tests cover photo upload, bounded OCR progress, and opening the returned draft. Receipt review and editing are separately covered by F14-F19 local acceptance. Only live authenticated Android-to-Core/OIDC upload E2E remains unverified."
       evidence: "F10.1 Android upload tests cover authenticated multipart upload, same file/key replay after token refresh, bounded job polling, localized draft display, and no transaction side effect. The isolated API-27 F10.1 regression passed 94/94; synthetic MockWebServer and Compose tests do not prove live OIDC/Core integration."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Фото чека, прогресс, draft; `expenses.py`"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F11
     feature: "Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
@@ -244,6 +308,10 @@ features:
       gap: "Synthetic Android tests cover returned Vision provider/model/prompt and localized fallbacks. Live authenticated Android-to-Core OIDC, member roles and configured model execution remain unverified."
       evidence:
         - "Android API tests preserve the actual Vision provider, model version and prompt version from Core. RU/EN Compose acceptance displays those values as unverified, shows localized Vision/OCR fallback reasons and proves reading alone creates no transaction. Synthetic data only; live Android-to-Core OIDC remains open."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F12
     feature: "Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
@@ -261,6 +329,10 @@ features:
       scenario: "Android sends receipt photos to Core and reviews its OCR result through the F11/F13 flows; OCR image processing stays in the server worker."
       approved_by: "PLAN.md F12 server ownership; CONTINUATION.md §B shared Java API and user-flow parity"
       reason: "Tesseract/OpenCV variants, coordinate mapping and rereads are internal Python OCR-worker steps, not mobile user actions. Android consumes the Core-produced reading through F11 and reconciliation through F13; duplicating OCR on-device would create a second processing path."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Tesseract/OpenCV: варианты, координаты, колонки, склейка чисел, reread ячеек"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F13
     feature: "Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
@@ -282,6 +354,10 @@ features:
       evidence:
         - "Compose UI локализует decision/mismatch и показывает выбранный источник, версии, one-to-one ordinal/status, Core totals/tolerance и review-only top-ups; все суммы форматируются валютой черновика. Тесты подтверждают отсутствие receipt mutations, RU/EN и USD/RUB."
         - "API 27 полный FinanceReceiptScreensTest 77/77; API 23 F13 focused; Android JVM suite 37/37; APK/test APK build; synthetic fixtures only. Live authenticated Android-to-Core OIDC E2E remains open."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Сведение Vision/OCR, подтверждение one-to-one, добор, арифметика"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F14
     feature: "Защита магазина/даты от выдумывания, fallback категории"
@@ -304,10 +380,14 @@ features:
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Защита магазина/даты от выдумывания, fallback категории"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F15
     feature: "Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
-    target: "J receipt draft/items; P/W review editor"
+    target: "J receipt draft/items; P/Android/Telegram review editor"
     acceptance: "Любая позиция доступна; кассовый итог не меняется незаметно; явное действие sync total"
     status: complete
     tests:
@@ -325,6 +405,10 @@ features:
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F16
     feature: "Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
@@ -348,6 +432,10 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
         - apps/android/app/src/test/java/com/decorix/finance/ReceiptConflictRecoveryPolicyTest.kt
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Возможный дубль чека: та же сумма/тип за 10 минут, решение пользователя"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F17
     feature: "Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"
@@ -371,6 +459,10 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
         - apps/android/app/src/test/java/com/decorix/finance/ReceiptCategoryPermissionTest.kt
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Продуктовый/досуговый чек, доля алкоголя/развлечений, ручная смена"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F18
     feature: "Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"
@@ -396,6 +488,10 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
       gap: "Live authenticated Android-to-Core OIDC E2E remains unverified; Activity network stale-refresh path is code-reviewed and simulated only at the screen seam."
       evidence: "API 31/31 and screen 51/51 Android API-27 instrumentation tests pass. Core remains source of truth; Android sends quoted If-Match and no request body, renders returned DTO, and never calculates basket advice or monetary totals."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Разбор корзины: verdict/reason/action, очистка повторов, правила поверх модели"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F19
     feature: "Сохранение verdict/advice/verdict_source по позициям"
@@ -418,10 +514,14 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
       gap: "Live authenticated Android-to-Core OIDC E2E remains unverified. Persistence ownership and exact item-ID audit behavior are covered by existing Core/PostgreSQL acceptance; Android tests use synthetic Core-response fixtures."
       evidence: "API parser and Compose tests prove two same-name items retain distinct IDs, verdicts and advice; legacy unknown source remains unknown. Focused API-27 instrumentation passed 2/2. Android delegates persistence and association to Core."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Сохранение verdict/advice/verdict_source по позициям"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F20
     feature: "«Не согласен» с вердиктом, пагинация спорных строк"
-    target: "J user decisions; P/W controls"
+    target: "J user decisions; P/Android/Telegram controls"
     acceptance: "Товар исключён из необязательного; решение отменяемо и действует везде одинаково"
     status: complete
     tests:
@@ -441,6 +541,10 @@ features:
         - apps/android/app/src/test/java/com/decorix/finance/ReceiptDisputedDecisionRefreshTest.kt
       gap: "Locally verified Android flow; live authenticated Android-to-Core OIDC E2E remains unverified."
       evidence: "Android reads Core-owned disputed-item pages, shows verdict evidence, and uses reversible allow/revoke decisions without changing receipt totals. API-27 instrumentation passed 35 API + 64 screen tests; Android JVM 26/26; parity contracts 60/60. Tests cover page metadata/navigation, writer/viewer roles, RU/EN, errors/retry, USD formatting, 20-key allowed-decision paging, unchanged totals, and ambiguous-write reconciliation. Debug APK installed/launched on isolated Android 8.1/API 27 emulator; SHA-256 A6B77AC6220FCE26248909877021A9C18611200349D117C1C0DEE286BEE1595B. Synthetic response fixtures only; live authenticated Android-to-Core OIDC E2E remains unverified."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: «Не согласен» с вердиктом, пагинация спорных строк"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F21
     feature: "Повторные предупреждения о необязательном товаре; `services/advice.py`"
@@ -467,6 +571,10 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt
         - apps/android/app/src/test/java/com/decorix/finance/ReceiptDisputedDecisionRefreshTest.kt
       evidence: "RU/EN repeat-warning screen uses the authenticated Core endpoint, shows Core evidence and exact last amount in receipt currency, and hides outside draft review. API-27 instrumentation 196/196 and JVM 29/29 pass; debug APK installed/launched on isolated Android 8.1/API 27 emulator."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Повторные предупреждения о необязательном товаре; `services/advice.py`"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F22
     feature: "Семейные и личные месячные лимиты, общий лимит, reset"
@@ -489,6 +597,13 @@ features:
         - "apps/android/app/src/test/java/com/decorix/finance/FinanceReportResponsePolicyTest.kt"
       gap: "Live authenticated Android-to-Core OIDC E2E remains unverified; local API and UI tests use synthetic fixtures."
       evidence: "Android explicitly labels family monthly/category/rolling limits and never presents one member's spending/status as family data; personal mode retains Core effective values and status. The full budget screen scrolls on Android 6-8. Tests cover RU/EN family display, family and personal category/total version routing, inheritance/reset, viewer denial, family report scope/limit/remaining, and stale report response protection. Android JVM 34/34, API-27 instrumentation 40/40, six focused Compose cases, APK builds/install/launch, and parity contracts 60/60 pass. Fixtures are synthetic."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Семейные и личные месячные лимиты, общий лимит, reset"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F23
     feature: "Бюджет по доходу: 70%, округление; AI-предложение при ≥30 днях"
@@ -510,6 +625,13 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F23 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Бюджет по доходу: 70%, округление; AI-предложение при ≥30 днях"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F24
     feature: "Алерты 90%/100%, остаток, прогноз месяца, темп"
@@ -535,6 +657,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Local synthetic Compose tests cover Core-backed monthly remainder, exact RU/EN pace and forecast, unavailable values, disabled limits and localized threshold alerts; live authenticated Android-to-Core OIDC E2E remains unverified."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: Алерты 90%/100%, остаток, прогноз месяца, темп"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram shows thresholds, remaining budget, and spend pace, but monthly forecast is incomplete."
     intentional_differences: []
   - id: F25
     feature: "Недельный food limit и скользящие 7 дней; `services/forecast.py`"
@@ -558,6 +687,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
         - "apps/android/app/src/test/java/com/decorix/finance/FinanceReportResponsePolicyTest.kt"
       gap: "Local UI parity is verified; live authenticated Android-to-Core OIDC E2E remains unverified."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Недельный food limit и скользящие 7 дней; `services/forecast.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F26
     feature: "«Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"
@@ -582,10 +718,17 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
       evidence: "Android displays exact Core income basis and amount, monthly expenses, horizon/date span, reserve, promised payments, safe total and per-day value in RU/EN. Null guidance is hidden; dashboard scrolls. Targeted instrumentation 4/4; full API 27 suite 215/215; JVM 35/35; debug/test APK builds pass; installed/launched on isolated Android 8.1/API 27. APK SHA-256 6FE1C8B85008FE0597AA7B2F7E3B0CA685D107CF5D80195B6F551EFDB8B91627."
       gap: "Live authenticated Android-to-Core OIDC E2E and tenant-isolation verification remain outstanding."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: «Безопасно тратить»: план/доход, резерв 10%, зарплата, обещанные списания"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F27
     feature: "Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
-    target: "J debts; P/W screens"
+    target: "J debts; P/Android/Telegram screens"
     acceptance: "Платёж и изменение долга атомарны; повторное сообщение не уменьшает долг дважды"
     status: complete
     tests:
@@ -604,6 +747,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
       evidence: "Android renders Core rate/minimum in RU/EN with the Web null-rate fallback; tests cover exact payment, adjustment and forecast callback IDs/versions, viewer and closed-debt write gating. MockWebServer verifies tenant-scoped create/pay/adjust/forecast requests, exact normalized values, If-Match, distinct UUID idempotency keys, and forecast states. Full API 27 instrumentation 220/220 plus focused F27/API checks 8/8; Android unit/build gates pass."
       gap: "Live authenticated Android-to-Core OIDC and tenant-isolation E2E remain unverified; API tests use synthetic MockWebServer responses."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: Общие долги: карточки, остаток, ставка, минимум, погашение, закрытие"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram lists debts and can draft a payment through /add; debt-card CRUD and close flow are absent."
     intentional_differences: []
   - id: F28
     feature: "Правка остатка долга через панель, возврат при отмене платежа"
@@ -624,6 +774,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
       evidence: "Android shows the void action for a posted debt-payment transaction and forwards that exact Core transaction to the handler. MockWebServer verifies tenant/transaction-scoped void endpoint, quoted If-Match, UUID Idempotency-Key, and the returned voided transaction. Existing Core PostgreSQL acceptance verifies exact principal restoration, including capped overpayment. Focused API 27 Android UI/API checks 2/2 pass."
       gap: "MockWebServer does not verify live Android-to-Core authentication or observe debt balance restoration after a real payment reversal; live authenticated OIDC/tenant E2E remains unverified."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: Правка остатка долга через панель, возврат при отмене платежа"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram debt-balance adjustment and verified payment reversal are absent."
     intentional_differences: []
   - id: F29
     feature: "Прогноз погашения с процентами; `services/analytics.py`"
@@ -644,11 +801,15 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       evidence: "Compose tests with synthetic Core forecast state cover an 18-month horizon and localized basis in RU/EN, preserve zero and null horizons, and verify unknown server basis text uses a safe localized fallback."
       gap: "Compose coverage uses synthetic state; MockWebServer forecast fixtures verify transport only and do not prove the live Core response-to-screen path, actual zero/null boundary mapping, or authenticated OIDC integration. Core/PostgreSQL tests remain authoritative for interest math and the 600-month boundary. Android localizes only the currently recognized Core basis sentence; other values intentionally fall back to an unavailable label."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Прогноз погашения с процентами; `services/analytics.py`"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F30
     feature: "Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"
     target: "J reporting API; G длинные выборки"
-    acceptance: "Фильтры/границы дат идентичны для web/Telegram; доходы и debt payments отделены"
+    acceptance: "Фильтры и границы дат одинаковы в Android и Telegram; доходы и debt payments отделены"
     status: complete
     tests:
       - services/core/src/test/java/com/decorix/finance/core/api/TransactionApiPostgresTest.java
@@ -668,10 +829,17 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
       evidence: "Android tests verify month/week/90-day/custom personal and family report route/query mapping, exact custom boundaries, disabled reversed date ranges, and RU/EN rendering of Core weekend-share values while omitting null."
       gap: "These checks use synthetic Compose state and MockWebServer fixtures; live authenticated Android-to-Core period/scope E2E and parity against real database boundary fixtures remain unverified."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Месяц, неделя, 90 дней, произвольный период, family report, доли выходных"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F31
     feature: "Графики категорий, лимитов, дней, цен, необязательного"
-    target: "W charts; P PNG renderer из готового DTO"
+    target: "Android/Telegram charts; P PNG renderer из готового DTO"
     acceptance: "Данные одни; при недоступном renderer остаётся текст; экспорт PNG читаем"
     status: complete
     tests:
@@ -689,6 +857,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       evidence: "Android report screens render Core category/day/optional-spend values as bars; personal price trend now visualizes Core changePercent for rising and falling products in RU/EN. Tests check exact signed percentages and prices remain visible, positive/negative bar magnitude, and no chart for insufficient history."
       gap: "Chart acceptance uses synthetic DTOs; live authenticated Android-to-Core OIDC remains unverified. Product-by-product confirmed purchase history charts/catalog remain tracked as missing Android F34 parity."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: Графики категорий, лимитов, дней, цен, необязательного"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram renders report and price charts, but does not cover the full chart set."
     intentional_differences: []
   - id: F32
     feature: "Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
@@ -716,6 +891,15 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       evidence: "Android UI tests cover independent daily/weekly switches, malformed local time and incomplete quiet-hours rejection in RU/EN, clearing both quiet-hours together, and exact callback values. MockWebServer verifies tenant-scoped GET/PATCH, Bearer auth, schedule/language fields, explicit nulls, server-owned timezone, and If-Match versions."
       gap: "Settings UI and wire contract use synthetic state/MockWebServer; live authenticated Android-to-Core OIDC roundtrip remains unverified. Durable scheduling, retry, deduplication, quiet-hours, and no-data behavior are covered by Core/PostgreSQL and Python worker tests above."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Ежедневная сводка и недельный digest; `scheduler.py`, `digest.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+        - services/python/telegram_gateway/tests/test_digest.py
+        - services/python/telegram_gateway/tests/test_digest_worker.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F33
     feature: "Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
@@ -740,10 +924,17 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt"
       evidence: "Confirmed receipt items expose an explicit Core-backed price comparison; Android preserves Core's exact decimal strings, median, signal and history, and renders a localized no-baseline state without inventing values. Drafts and items without valid positive quantity/line sum cannot request comparison. API tests verify tenant/receipt/item scope and Bearer auth; parser tests reject malformed contracts; UI tests cover result, no-history, invalid inputs, errors and retry. Full Android 8.1/API 27 instrumentation passed 246/246 on isolated emulator-5554; JVM tests, debug/test APK builds and 78 parity contracts passed. APK was installed/launched (PID 14157), SHA-256 B67F3AA161ED9B8D95E5A3A3B7AB76BF8DED8AD02E0FAD9E10FB7530D090BD56. Independent review found no blocker."
       gap: "Synthetic DTO/MockWebServer coverage is local only; live authenticated Android-to-Core OIDC roundtrip remains unverified."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Цены: единичная цена, сопоставление товара, медиана, рост/дешевле"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F34
     feature: "Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
-    target: "G product projection; P/W catalog"
+    target: "G product projection; P/Android/Telegram catalog"
     acceptance: "Поиск доступен и для одной покупки; график при ≥2; каталог и поиск имеют разные пороги"
     status: complete
     tests:
@@ -769,6 +960,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceProductCatalogScreenTest.kt"
       evidence: "Android calls only the authenticated tenant Core catalog endpoint and preserves Core's exact six-place prices, count/thresholds, merchants, latest time, baseline and real history. The localized search/catalog screen shows usual/latest/cheapest/spent metrics, accurate insufficient-comparable-history copy, and a chart only for at least two actual points. Token saves serialize with refresh, request token/session-generation snapshots are atomic, and an old request cannot retry with replacement-account credentials. Focused API/model/screen instrumentation passed 21/21 on Android 6/API 23 and 21/21 on Android 7.1/API 25; full isolated Android 8.1/API 27 instrumentation passed 267/267; Android JVM tests 37/37, debug/test APK builds, and 78 parity contracts passed. APK was installed/launched (PID 26857), SHA-256 2AC1DE602C43972DA9D22DABD3BB7F0A530B4074D45B447DD8E7C054C140BFBC."
       gap: "Synthetic DTO and MockWebServer coverage is local only; live authenticated Android-to-Core OIDC roundtrip remains unverified."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Каталог после 3 покупок, поиск `/price`, история, лучший магазин"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F35
     feature: "Покупки по ритму, медиана интервалов, стоимость списка"
@@ -797,10 +995,17 @@ features:
         - "apps/android/app/src/test/java/com/decorix/finance/ShoppingResponsePolicyTest.kt"
         - "apps/android/app/src/test/java/com/decorix/finance/FinancePresentationTest.kt"
       gap: "Live authenticated Android-to-Core OIDC shopping flow remains unverified; synthetic API/UI coverage is GREEN."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Покупки по ритму, медиана интервалов, стоимость списка"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F36
     feature: "«Уже купил», mute/unmute, блокировки, копирование закупки"
-    target: "J shopping decisions; W clipboard; P buttons"
+    target: "J shopping decisions; Android/Telegram clipboard; P buttons"
     acceptance: "Отметка не создаёт расход; устаревает; скрытое перечислено с причиной"
     status: complete
     tests:
@@ -821,10 +1026,17 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F36 acceptance condition or live Core integration."
+    telegram:
+      status: partial
+      scenario: "Telegram supports part of this workflow: «Уже купил», mute/unmute, блокировки, копирование закупки"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      gap: "Telegram supports bought/mute/unmute decisions, but not copying a shopping list."
     intentional_differences: []
   - id: F37
     feature: "Личная инфляция по корзине, окно 90 дней, top rise/fall"
-    target: "G inflation worker; J/P/W выдача"
+    target: "G inflation worker; J/P/Android/Telegram выдача"
     acceptance: "≥3 товара; ≥2 покупки до окна и ≥1 внутри; вес — прежние траты, не официальная инфляция"
     status: complete
     tests:
@@ -849,6 +1061,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F37 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Личная инфляция по корзине, окно 90 дней, top rise/fall"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F38
     feature: "Регулярные расходы/доходы, недельные/месячные серии"
@@ -881,6 +1100,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F38 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Регулярные расходы/доходы, недельные/месячные серии"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F39
     feature: "Отключение/возврат серии; `services/mutelist.py`"
@@ -909,6 +1135,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F39 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Отключение/возврат серии; `services/mutelist.py`"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F40
     feature: "Сумма/доля необязательного, источники verdict, исправленные позиции"
@@ -935,6 +1168,13 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
       gap: "Existing Android test reference does not prove every F40 acceptance condition or live Core integration."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Сумма/доля необязательного, источники verdict, исправленные позиции"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F41
     feature: "«Не брать», отдельные догадки модели, подтверждение/разрешение"
@@ -960,6 +1200,13 @@ features:
       evidence:
         - "F59.50: API-27 Compose checks separate rule-backed evidence and model guesses, explicit member allow/revoke callbacks, and hidden confirm/allow/revoke controls for viewer and unknown roles. Isolated MockWebServer check confirms tenant-scoped authenticated `confirm` maps to Core decision `confirmed` and reads the confirmed product key back; existing API checks cover allow/revoke refresh and Core 403. Tests use synthetic UI/API state and make no live Core or persistence claim."
       gap: "Live authenticated Android-to-Core/OIDC integration, persisted decision refresh, and end-to-end tenant isolation are not verified."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: «Не брать», отдельные догадки модели, подтверждение/разрешение"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F42
     feature: "Пересчёт старых verdict по текущим правилам и отчёт изменений"
@@ -981,6 +1228,13 @@ features:
       gap: "MockWebServer and API 27 UI acceptance pass; live authenticated Android-to-Core OIDC preview/apply/history remains unverified."
       evidence:
         - "API 27 direct instrumentation: F42 API 9/9, F42 screen 9/9, FinanceScreensTest 85/85, FinanceModelsTest 31/31 (134/134 combined). Contracts 60 passed. Previews render at most 100 changes until expanded; cursor appends preserve expanded rows for the same run; line sums use report currency. The preview is never auto-replayed after 401; final pages accept omitted nextCursor; null impact is not displayed as zero; viewers have no actions/history. Live authenticated Android-to-Core OIDC remains unverified."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Пересчёт старых verdict по текущим правилам и отчёт изменений"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F43
     feature: "Потолок экономии, недельный trend, эффект советов по частоте"
@@ -1005,6 +1259,10 @@ features:
       evidence:
         - "Android adds strict exact-decimal/null DTO parsing, latest-job GET, explicit writer-only POST enqueue with 401 replay disabled, and UUID-scoped job polling. Reports localizes RU/EN theoretical savings, real weekly buckets, observational effects, and separate F42 recalculation evidence; viewer can read but cannot enqueue. Polling stops on terminal state, tenant/session/request guards reject stale responses, and the F43 section follows existing report totals to preserve prior report visibility."
         - "Observed RED: AndroidTest compilation failed before F43 DTO/API/Reports UI existed; a USD screen test also failed to compile before currency was passed from the member profile/report. Fixed invalid fixtures to model partial/unavailable Core responses faithfully. GREEN: API 7/7 and F43 screen 10/10 direct instrumentation on isolated Android 8.1/API 27; combined F43 plus F42/report/model regression 151/151; contracts 60/60; debug and AndroidTest APK builds pass; git diff --check passes. Live authenticated OIDC/Core remains unverified."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Потолок экономии, недельный trend, эффект советов по частоте"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences:
       - "F43 analytics is exposed in Web; the Telegram report endpoint cannot consume the stored F43 DTO without a new Core route and Telegram UI contract."
   - id: F44
@@ -1033,6 +1291,10 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceGoalsScreensTest.kt"
         - "apps/android/app/src/test/java/com/decorix/finance/GoalResponsePolicyTest.kt"
       gap: "Synthetic Android 8.1/API 27 API/UI tests pass. Live authenticated Android-to-Core OIDC accept/cancel and real tenant-isolation remain unverified."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Цель на товар или группу, count/sum, кандидаты, минимальный шаг"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F45
     feature: "Ход цели, заметка при покупке, завершение, история, следующий кандидат"
@@ -1055,6 +1317,10 @@ features:
       gap: "Synthetic Android 8.1/API 27 progress/history and cache-policy tests pass. Live authenticated Android-to-Core OIDC and real tenant-isolation remain unverified; legacy SQLite history rehearsal remains the separate E8 gate."
       evidence:
         - "F45.5 renders Core activeProgress and all returned history rows in Core order, preserves unknown amounts/verdicts, reads candidates without auto-accept and hides mutations for viewers. Confirmed receipt clears only a matching tenant goal cache after existing session/tenant/receipt guards; request generation fences stale GET responses. Local API 27 direct instrumentation: 178 regression tests plus RU count-progress check 1/1; GoalResponsePolicy JVM tests pass; contracts 60/60; debug and AndroidTest APK builds pass. Live OIDC and production SQLite rehearsal remain unverified."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Ход цели, заметка при покупке, завершение, история, следующий кандидат"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F46
     feature: "Однократное сообщение исхода цели после успешной отправки"
@@ -1077,6 +1343,15 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
       evidence:
         - "F45.5 Android shows all returned Core outcomes in order, including unknown legacy history; weekly digest controls are covered by existing F32 Android tests. No separate Android F46 delivery flow is in approved scope."
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Однократное сообщение исхода цели после успешной отправки"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+        - services/python/telegram_gateway/tests/test_digest.py
+        - services/python/telegram_gateway/tests/test_digest_worker.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F47
     feature: "PDF Т-Банка: операции, даты, merchant/card, сверка итогов"
@@ -1100,10 +1375,14 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportScreensTest.kt
       evidence:
         - "Android F47 upload/preview and F48 row selection/explicit confirmation are covered by API and screen tests. F49 deduplication/undo remain out of scope. Live Android Core/OIDC E2E pending."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: PDF Т-Банка: операции, даты, merchant/card, сверка итогов"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F48
     feature: "Preview импорта, подтверждение, покупки/доходы/refund, skipped"
-    target: "J import policy; W/P preview"
+    target: "J import policy; Android/Telegram/P preview"
     acceptance: "Видны включённые/пропущенные типы и суммы; комиссии не исчезают под неверной подписью"
     status: complete
     tests:
@@ -1126,6 +1405,10 @@ features:
         - tools/contracts/test_contracts.py
       evidence:
         - "F48 Android mutation API/UI instrumentation passes 29/29; combined Android API 27 regression passes 208/208; JVM tests and debug/AndroidTest APK builds pass; parity contracts pass 62/62. Installed debug APK SHA-256 62463BD6D4933A2AD08E448E971E9D5EB6B28A893AF02B71A9412596D7A948B3."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Preview импорта, подтверждение, покупки/доходы/refund, skipped"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F49
     feature: "Дедупликация импорта, bulk insert, undo именно партии"
@@ -1153,10 +1436,14 @@ features:
         - apps/android/app/src/test/java/com/decorix/finance/FinanceSessionRequestPolicyTest.kt
       evidence:
         - "Previously recorded Android F47/F48/F49 API/UI baseline passes 54/54 on isolated API 27. With a synthetic Core-shaped preview DTO (state=reverted), Compose renders localized terminal status after transient undo response loss and offers no batch-undo action; that baseline does not prove OS process-death recovery. Separately, the host-verified API-27 force-stop/relaunch test passes all 3 seed/recovery/cleanup phases: synthetic import UUIDs for two tenants and deterministic undo keys survive; another tenant reads no pointer. A distinct same-process MockWebServer test in the updated FinanceBankImportApiTest passes as part of 11/11 API tests; it saves/loads a pointer and verifies only the tenant/import-scoped preview GET occurs, with no upload/confirm/undo mutation. JVM suite and debug/AndroidTest APK builds pass. Live Core/OIDC and real tenant-isolation E2E remain unverified."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Дедупликация импорта, bulk insert, undo именно партии"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F50
     feature: "Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"
-    target: "J merchant mappings; P classification; W/P clarification"
+    target: "J merchant mappings; P classification; Android/Telegram/P clarification"
     acceptance: "Личные соответствия переживают рестарт; уточнения по умолчанию до 6, порог 300 RUB"
     status: complete
     tests:
@@ -1179,6 +1466,10 @@ features:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportClassificationScreensTest.kt
       evidence:
         - "Android API 27 import regression F47-F50 passes 57/57 on isolated emulator-5554; parity contracts pass 63/63; debug and AndroidTest APKs build; installed app launches. APK SHA-256 F2DF93FC648DC7D83088F441A0380C5F36FCB447645A93FE6E508A56F14404C3. Local Core-shaped responses do not prove live OIDC/Core or production AI."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F51
     feature: "Уточнение магазина меняет ранее импортированные подходящие записи"
@@ -1203,11 +1494,15 @@ features:
       evidence:
         - "F51 Android strict preview/apply DTO, API, explicit UI apply, stale 412, manual-row exclusion, localized errors, and viewer/busy gates: 15 focused instrumentation tests pass; combined F47-F51 bank-import instrumentation 72/72 passes on isolated Android 8.1/API 27; Android JVM unit suite 69/69 and parity contracts 66/66 pass."
         - "Debug and AndroidTest APKs build; fresh debug APK installed and launched on isolated emulator-5554. Synthetic/mock Core only; no live OIDC, deployment, or tenant-isolation claim."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Уточнение магазина меняет ранее импортированные подходящие записи"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F52
     feature: "CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
-    target: "J export contract; G large export; W download"
-    acceptance: "Совместимый legacy формат и безопасные строки; текущая точка входа — панель, не Telegram"
+    target: "J export contract; G large export; Android/Telegram download"
+    acceptance: "Совместимый legacy формат и безопасные строки; экспорт доступен в Android и Telegram"
     status: in_progress
     tests: []
     evidence: []
@@ -1234,11 +1529,15 @@ features:
         - "F59.41 delayed MainActivity response integration: focused `FinanceFlowTest` passes 7/7 on isolated Android 8.1/API 27; full API 27 instrumentation passed 505/505 on the immediately preceding test revision; final focused rerun passed 7/7. Android JVM passes 92/92 through `C:\\fbtest`; debug and AndroidTest APKs build. Synthetic `ready` responses are delayed across tenant-only and session-only replacement while export ID and request generation stay fixed; tests prove the replacement `processing` state remains, no signed-link chooser launches, and a separate create-busy owner remains busy. No live Core/OIDC, worker/S3, resolver UI, browser transfer, downloaded bytes or elapsed wall-clock cadence were exercised."
         - "F59.44 elapsed polling follow-up: `FinanceExportsScreensTest#activeExportWaitsAboutFiveRealSecondsBeforeFirstAutomaticRefresh` uses a real five-second test timer and monotonic timestamps; it proves no refresh during the first four seconds and a first refresh no earlier than five seconds after the delay begins. The focused API-27 test passes 1/1 in 6.337s. The combined F52 model/API/screen/flow set passes 50/50 on isolated Android 8.1/API 27 `emulator-5554`. This is synthetic UI timing evidence; live Core/OIDC, worker/S3, resolver UI, browser transfer and downloaded bytes remain open."
         - "F59.45 system chooser/download follow-up: `FinanceExportDownloadHandoffTest` proves Android 8.1/API 27 chooser selection of a disabled-by-default debug-only receiver and exact local HTTPS fixture transfer. It verifies the synthetic CSV bytes and SHA-256, exact loopback host/port/path, empty GET body, and no Core Authorization header; a negative case rejects an unexpected path before network access. Combined F52 model/API/screen/flow/chooser instrumentation passes 45/45. This is not a live export URL or real browser transfer; OIDC/Core roles, worker/S3, and actual browser download remain open."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F53
-    feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
-    target: "W routes/components; J единое API"
-    acceptance: "Восемь вкладок имеют эквиваленты; refresh/F5, переход к тратам пользователя, правка профиля"
+    feature: "Навигация: обзор, операции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
+    target: "Android + Telegram navigation; J единое API"
+    acceptance: "Переходы к профильным финансовым сценариям доступны через Android и Telegram; обновление повторяет текущий запрос, переход к операциям сохраняет профиль"
     status: complete
     tests:
       - apps/web/src/MembersPanel.test.tsx
@@ -1255,10 +1554,16 @@ features:
         - "FinanceScreensTest passes 87/87 on isolated Android 8.1/API 27 emulator-5554, including owner/admin member-navigation, viewer visibility, existing member-filter and own-profile checks. The existing Core-supplied transactionMembers list and filter callback are reused. No live Core/OIDC authorization is claimed."
         - "Follow-up FinanceScreensTest passes 89/89 on emulator-5554: Overview is initially selected, selection follows the visible route, and member navigation marks Transactions selected while retaining the member filter label and exact callback ID. Active state is exposed with selected semantics and a distinct Material color treatment."
         - "Android refresh reuses the existing Core filter callback with the current search, type, date range and member ID. F53 instrumentation verifies member navigation followed by refresh sends the same exact query; invalid date ranges remain blocked in RU/EN. This uses synthetic screen state and does not prove live Core/OIDC authorization."
+    telegram:
+      status: not_applicable
+      scenario: "No Telegram user action for this operator, developer, or legacy UI feature: Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
+      na_scope: legacy_ui_layout
+      approved_by: "docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md section M3 Telegram N/A policy"
+      reason: "Legacy Tkinter/Web tab navigation is a client layout, not a Telegram financial workflow. Financial workflows are mapped by their own feature IDs."
     intentional_differences: []
   - id: F54
     feature: "Статус Ollama/Vision/Tesseract; `services/health.py`"
-    target: "P health; J sanitized status; W/P settings"
+    target: "P health; J sanitized status; Android/Telegram/P settings"
     acceptance: "Пользователь видит доступность функций, оператор — диагностику без секретов"
     status: complete
     tests:
@@ -1279,6 +1584,10 @@ features:
       gap: "Live authenticated Android-to-Core OIDC and real tenant-membership authorization are not verified; provider runtime status remains deployment evidence."
       evidence:
         - "Health model/API/screen tests pass 13/13 and FinanceScreensTest passes 88/88 on isolated Android 8.1/API 27 emulator-5554. Mock data proves strict sanitization and local presentation only, not real provider status."
+    telegram:
+      status: missing
+      scenario: "Telegram workflow not implemented: Статус Ollama/Vision/Tesseract; `services/health.py`"
+      gap: "Telegram has no command/callback flow for this workflow yet. Add a Telegram adapter over the existing Core API; add a Core route only if the current API cannot serve it."
     intentional_differences: []
   - id: F55
     feature: "Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"
@@ -1296,8 +1605,14 @@ features:
     android:
       status: not_applicable
       scenario: "Android uses Core capabilities; provider policy and model inventory remain operator configuration."
-      approved_by: "PLAN.md F55 deployment ownership; CONTINUATION.md §B keeps /ops on Web"
+      approved_by: "docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md sections 4 and 9: operator controls remain config/API, no Web UI"
       reason: "Cloud opt-in, provider credentials and model management are deployment/operator controls, not end-user actions. Android exposes safe capability availability through F54 and never receives provider credentials or model inventory."
+    telegram:
+      status: not_applicable
+      scenario: "No Telegram user action for this operator, developer, or legacy UI feature: Локальный AI, cloud opt-in, fallback без Ollama, управление моделями"
+      na_scope: operator_only
+      approved_by: "docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md section M3 Telegram N/A policy"
+      reason: "Provider selection and model credentials are operator configuration. Telegram exposes AI actions, not provider administration."
     intentional_differences: []
   - id: F56
     feature: "Проверки receipt inventory, synthetic/private samples, CI"
@@ -1315,10 +1630,16 @@ features:
       scenario: "Android counterpart for F56: Проверки receipt inventory, synthetic/private samples, CI"
       approved_by: "PLAN.md and CONTINUATION.md platform-specific N/A allowance"
       reason: "Developer/CI evaluation tooling has no mobile user flow; source feature is a receipt inventory CLI."
+    telegram:
+      status: not_applicable
+      scenario: "No Telegram user action for this operator, developer, or legacy UI feature: Проверки receipt inventory, synthetic/private samples, CI"
+      na_scope: developer_only
+      approved_by: "docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md section M3 Telegram N/A policy"
+      reason: "Receipt inventory and CI are developer workflows, not Telegram user actions."
     intentional_differences: []
   - id: F57
     feature: "Русское форматирование, escaping Telegram, шрифты, текстовый fallback"
-    target: "P/W presentation libraries; J semantic DTO"
+    target: "P/Android/Telegram presentation libraries; J semantic DTO"
     acceptance: "Кириллица, Markdown-символы, суммы/склонения, длинные строки, разные ОС"
     status: complete
     tests:
@@ -1337,6 +1658,13 @@ features:
       tests:
         - "apps/android/app/src/test/java/com/decorix/finance/FinancePresentationTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
+    telegram:
+      status: implemented
+      scenario: "Telegram supports this workflow: Русское форматирование, escaping Telegram, шрифты, текстовый fallback"
+      tests:
+        - services/python/telegram_gateway/tests/test_commands.py
+        - services/python/telegram_gateway/tests/test_core_client.py
+      evidence: "Static audit found matching gateway commands/callbacks and test references; live deployment E2E remains a separate release gate."
     intentional_differences: []
   - id: F58
     feature: "Конфигурация/секреты/Windows launch scripts/документация/MIT"
@@ -1354,18 +1682,24 @@ features:
       scenario: "Android counterpart for F58: Конфигурация/секреты/Windows launch scripts/документация/MIT"
       approved_by: "PLAN.md and CONTINUATION.md platform-specific N/A allowance"
       reason: "Build configuration, developer launch instructions, and license notices are repository operations, not mobile product behavior."
+    telegram:
+      status: not_applicable
+      scenario: "No Telegram user action for this operator, developer, or legacy UI feature: Конфигурация/секреты/Windows launch scripts/документация/MIT"
+      na_scope: developer_only
+      approved_by: "docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md section M3 Telegram N/A policy"
+      reason: "Secrets, launch scripts, and release documentation belong to backend operations, not Telegram user features."
     intentional_differences: []
   - id: F59
-    feature: Android Kotlin Compose client parity F01-F58 RU/EN
-    target: apps/android + Java Core API
-    acceptance: Every F01-F58 flow has Android behavior or approved N/A; emulator install and E2E pass
+    feature: Android + Telegram client parity F01-F58 RU/EN
+    target: Android + Telegram Gateway + Java Core API
+    acceptance: Every F01-F58 workflow has Android and Telegram behavior or approved platform N/A; authenticated two-user Core/PostgreSQL E2E passes
     status: in_progress
     tests:
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt
       - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt
     evidence:
-      - "Current registry maps all F01-F58: 52 partial, 0 missing, 5 justified platform-specific N/A, and 1 implemented. Android local evidence covers F11 receipt Vision provenance/fallback display, F31-F34, member navigation and selected-route indication; full parity and live authenticated Core/OIDC E2E remain incomplete."
-      - "Real OIDC login, live Java/Core operation, and PostgreSQL tenant-isolation E2E remain required before F59 completion."
+      - "Android registry maps all F01-F58: 52 partial, 0 missing, 5 N/A, and 1 implemented. Telegram static audit maps 22 implemented, 8 partial, 24 missing, and 4 N/A. This is a channel-by-channel gap baseline; full parity remains in progress."
+      - "Real OIDC login, Telegram allowlist-to-canonical-account mapping, live Java/Core operations, and PostgreSQL two-user tenant-isolation E2E remain required before F59 completion."
     intentional_differences: []
   - id: F60
     feature: Python AI Gateway capability routing and Vertex AI adapter seam

@@ -2,6 +2,8 @@
 
 Версия: 1.1, 2026-10-01. Нормативное дополнение к `../PLAN.md`.
 
+> **Приоритет scope 2026-10-12:** продуктовая часть этого дополнения заменена [`ANDROID_TELEGRAM_SAAS_ROADMAP.md`](ANDROID_TELEGRAM_SAAS_ROADMAP.md). Остаются применимы технические инварианты backend/tenant/RLS, OIDC, точных сумм и AI provider boundary, кроме явно отменённых Web UI и link-кодов. Новые требования пользователя имеют приоритет.
+
 ## Основание и приоритет
 
 Пользователь поручил продолжить два чата «План перехода на удаленку», затем
@@ -21,14 +23,15 @@
 
 ## A. Авторизация — принято пользователем 2026-10-01
 
-ADR-007: **Keycloak + OIDC**. Пользователь выбрал этот вариант в текущем чате.
-Вход по логину/паролю и восстановление выполняются через Keycloak.
-Java хранит membership и бизнес-права, Keycloak — identity и учётные данные.
-Browser использует BFF/session согласно плану; Android — системный браузер,
-Authorization Code + PKCE и отдельный public client без client secret.
-Токены не записываются в логи. Android хранит refresh credentials с защитой
-Android Keystore; logout/revoke очищает локальную сессию. Приложение обрабатывает
-истечение токена, отмену входа, потерю сети и отзыв membership.
+ADR-007: **Keycloak + OIDC** для Android. Вход по логину/паролю и восстановление
+учётной записи выполняются через Keycloak. Java хранит membership и бизнес-права;
+Keycloak хранит OIDC identity и учётные данные. Android использует системный
+браузер, Authorization Code + PKCE и public client без client secret. Telegram
+проверяет серверный allowlist Telegram ID и использует отдельную Telegram identity;
+склеивание профилей с Android выполняется только через проверенное действие
+оператора. Токены не пишутся в логи. Android хранит refresh credentials с защитой
+Android Keystore; logout/revoke очищает локальную сессию. Клиенты обрабатывают
+истечение сессии, потерю сети и отзыв доступа.
 
 Приёмка: два tenant, смена/отзыв membership, повторный вход, refresh и logout;
 неверные issuer/audience/expired tokens отклоняются; callback/state/PKCE проверены.
@@ -37,19 +40,23 @@ Android Keystore; logout/revoke очищает локальную сессию. 
 ## B. Android — обязательная часть продукта
 
 `apps/android/`: Kotlin + Jetpack Compose, RU/EN, финтех-интерфейс.
-Клиент обращается к тому же Java API, что React. Бизнес-правила, тарифные лимиты
+Android и Telegram обращаются к общему Java API. Бизнес-правила, тарифные лимиты
 и финансовые вычисления принадлежат Java. FastAPI/Flutter не становятся backend
 или целевым клиентом v2; их сценарии служат дополнительным источником parity.
 
 Экраны: вход, onboarding, dashboard, счета, операции и история, чеки и редактор
 позиций, импорт/preview/confirm/undo, бюджеты, долги, отчёты, товары/цены, покупки,
 аналитика, цели, AI assistant, семья, экспорт, настройки и billing.
-Операторская инфраструктура `/ops` остаётся web-интерфейсом; все пользовательские
-сценарии должны быть доступны на Android. Фото через камеру/выбор файла; PDF
+Операторская инфраструктура управляется конфигурацией, CLI и API, без отдельного
+пользовательского интерфейса. Все пользовательские сценарии должны быть доступны
+на Android и в Telegram. Фото через камеру/выбор файла; PDF
 через системный picker; состояния отказа permission, отмены и повторной отправки.
 
-В registry для каждого Fxx фиксируется Android acceptance либо обоснованное N/A
-для Telegram protocol/desktop-specific действия. Функциональный эквивалент обязателен.
+В registry для каждого Fxx фиксируется Android и Telegram acceptance либо
+обоснованное N/A. Telegram N/A допустим только для `legacy_ui_layout`,
+`operator_only`, `developer_only` или `protocol_specific` функций без пользовательского
+сценария; причина и источник утверждения обязательны. Финансовые сценарии должны
+оставаться отображены отдельными feature ID. Функциональный эквивалент обязателен.
 Все пользовательские строки и форматирование проверяются в RU и EN.
 
 Этапы дополняются без исключения существующих gates:
@@ -68,7 +75,7 @@ SHA-256 артефакта, `adb install`, запуск на эмуляторе,
 ## C. AI Gateway и будущий Vertex AI
 
 Путь: Java jobs/API — Python intelligence gateway — provider adapter.
-React, Android и Telegram не получают credentials провайдеров.
+Android и Telegram не получают credentials провайдеров.
 Текущие модели и детерминированные алгоритмы сохраняются как поведенческий
 baseline; production-код v2 следует правилу rewrite из исходного плана.
 
@@ -111,8 +118,8 @@ Vertex после unit tests запрещено: необходим отдель
 
 ## D. Проверки дополнения
 
-- A01: Keycloak OIDC web/Android, login/password, refresh/logout и tenant denial.
-- A02: Android parity, RU/EN, APK build/install и E2E на эмуляторе.
+- A01: Android OIDC, Telegram allowlist/identity, login/password, refresh/logout и tenant denial.
+- A02: Android и Telegram parity, RU/EN, APK build/install и E2E на эмуляторе плюс gateway integration.
 - A03: local-only fail-closed, включая cloud fallback и remote Ollama.
 - A04: capabilities routing, invalid JSON, timeout/cancellation и provenance.
 - A05: одинаковые golden fixtures для текущего и нового provider; честные skips.
@@ -125,7 +132,7 @@ Vertex после unit tests запрещено: необходим отдель
 
 | ID | Требование | Приёмка |
 |---|---|---|
-| F59 | Android-клиент Kotlin/Compose, общий Java API и функциональный RU/EN паритет v1 | F01–F58 отображены на Android; каждый сценарий реализован либо имеет утверждённый platform-specific N/A; APK установлен на эмуляторе и прошёл E2E |
+| F59 | Android + Telegram клиенты, общий Java API и функциональный RU/EN паритет v1 | F01–F58 отображены в обоих клиентах; каждый сценарий реализован либо имеет утверждённый platform-specific N/A; Android APK установлен на эмуляторе и прошёл E2E, Telegram gateway integration проверена |
 | F60 | Python AI Gateway, capability-based routing, текущие adapters и extension point Vertex AI | Локальный режим закрыт для внешней передачи; output/provider/prompt provenance сохранён; новые adapters проходят общие evals без изменения бизнес-кода |
 
 `F59` и `F60` добавляют объём к исходным F01–F58 и включаются в

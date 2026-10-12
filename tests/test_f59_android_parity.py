@@ -5,6 +5,13 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 VALID_ANDROID_STATES = {"implemented", "partial", "missing", "not_applicable"}
+VALID_TELEGRAM_STATES = {"implemented", "partial", "missing", "not_applicable"}
+VALID_TELEGRAM_NA_SCOPES = {
+    "legacy_ui_layout",
+    "operator_only",
+    "developer_only",
+    "protocol_specific",
+}
 
 
 def _features():
@@ -224,3 +231,59 @@ def test_f41_android_registry_records_decision_controls_and_remaining_live_gate(
     gap = android["gap"].lower()
     assert "live authenticated android-to-core/oidc" in gap
     assert "viewer" not in gap, "viewer control visibility now has a direct Android UI test"
+
+
+def test_every_legacy_feature_has_explicit_telegram_parity_mapping():
+    features = {feature["id"]: feature for feature in _features()}
+
+    for number in range(1, 59):
+        feature_id = f"F{number:02}"
+        telegram = features[feature_id].get("telegram")
+        assert isinstance(telegram, dict), f"{feature_id} needs a Telegram status and scenario"
+        assert telegram.get("status") in VALID_TELEGRAM_STATES, f"{feature_id} needs valid Telegram status"
+        assert telegram.get("scenario"), f"{feature_id} needs a concrete Telegram scenario or gap"
+
+
+def test_telegram_mapping_has_evidence_or_approved_platform_exception():
+    for feature in _features():
+        number = int(feature["id"][1:])
+        if number > 58:
+            continue
+
+        telegram = feature.get("telegram") or {}
+        status = telegram.get("status")
+        if status == "not_applicable":
+            assert telegram.get("approved_by"), f"{feature['id']} Telegram N/A needs plan authority"
+            assert telegram.get("reason"), f"{feature['id']} Telegram N/A needs a reason"
+            assert telegram.get("na_scope") in VALID_TELEGRAM_NA_SCOPES, (
+                f"{feature['id']} Telegram N/A needs an approved non-user-flow scope"
+            )
+            continue
+        if status == "missing":
+            assert telegram.get("gap"), f"{feature['id']} needs a concrete missing-work statement"
+            continue
+
+        assert telegram.get("tests"), f"{feature['id']} needs Telegram test evidence"
+        if status == "partial":
+            assert telegram.get("gap"), f"{feature['id']} partial mapping needs a concrete gap"
+        for test in telegram["tests"]:
+            assert (ROOT / test).is_file(), f"{feature['id']} references missing Telegram test: {test}"
+
+
+def test_legacy_acceptance_does_not_require_retired_web_client_or_tabs():
+    features = {feature["id"]: feature for feature in _features()}
+
+    for number in range(1, 59):
+        feature_id = f"F{number:02}"
+        acceptance = features[feature_id]["acceptance"].lower()
+        assert "web" not in acceptance, f"{feature_id} acceptance must not require a Web client"
+        assert "не telegram" not in acceptance, f"{feature_id} acceptance must include current product channels"
+        assert "вкладк" not in acceptance, f"{feature_id} acceptance must describe workflows, not Web tabs"
+
+
+def test_continuation_keeps_only_android_and_telegram_as_product_clients():
+    continuation = (ROOT / "docs/specs/CONTINUATION.md").read_text(encoding="utf-8").lower()
+
+    assert "keycloak oidc web/android" not in continuation
+    assert "клиент обращается к тому же java api, что react" not in continuation
+    assert "остаётся web-интерфейсом" not in continuation

@@ -4,7 +4,11 @@ Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850e
 
 ## Global plan
 
-- Plan: `PLAN.md`, SHA-256 `8A52BC8C8B36869447E260DDE5376B299979DEA358F41D489016E92F167E9030`; original specification from the planning chat. Public-access paragraph reconciled on 2026-10-12 with the user's explicit public HTTPS choice and rejection of Tailscale.
+- Historical plan: `PLAN.md`, SHA-256 `DB50881DB9B0481BC94F4F454188D19CA32BC789486E40A8F9C4828A97620142`; original specification from the planning chat with the 2026-10-12 product-scope pointer. Public HTTPS remains required; Tailscale remains rejected.
+- Current product addendum: `docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md` (2026-10-12). User-directed scope: API-only backend; Android + Telegram full feature parity; same person's data shared; manually distributed APK with self-registration; Telegram ID allowlist; empty production DB; synthetic test data; Gemini model routing and a temporary-unavailable state. This addendum supersedes conflicting Web UI, personal-only MVP, and user-entered link-code requirements.
+- Implementation plan: `docs/superpowers/plans/2026-10-12-android-telegram-mvp.md`. User supplied the missing product decisions and directly asked to continue implementation. Status: active; no new MVP goal is complete yet.
+- Current checkout at planning: branch `feat/saas-rewrite`, HEAD `db10403`; Android test modifications and user-owned untracked paths are preserved and excluded from this task.
+- Gemini production gate: the user's selected Gemini route is recorded. Current official documentation does not list Russia for Gemini Developer API, and unpaid Gemini terms prohibit sending sensitive/personal information. No region circumvention or unpaid personal-data processing is planned; see roadmap section 6.
 - Mandatory supplement: `docs/specs/CONTINUATION.md`, version 1.1.
 - Approval: user requested continuation of the approved rewrite, Android and
   future provider abstraction in the referenced chats; current user explicitly
@@ -16,7 +20,18 @@ Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850e
 - E1.2 commit: `4f0c5e50efbcc5714d2a14809034bb3dc5a2a924`.
 - Original main and separate existing checkout are preserved.
 
+## Previous project progress (historical; not MVP acceptance)
+
+The F59 and M2.1 entries below record earlier Android/rewrite work. They do not prove Android + Telegram MVP completion. The active product goal is the closed friends MVP in the current addendum.
+
 ## Current goal
+
+- Deliver closed friends MVP in Russia: API-only backend, Android + Telegram full financial flows, shared canonical account, Android self-registration, operator-managed Telegram allowlist, empty production DB, Gemini-backed AI with bounded fallback and safe unavailable state.
+- Work plan: `docs/superpowers/plans/2026-10-12-android-telegram-mvp.md`; roadmap: `docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md`; isolated branch: `codex/friends-mvp` at `db10403`.
+- Current gate: Task 1 / M0 documentation and Android/Telegram parity baseline is locally GREEN; proceed to Task 2 server-side allowlist, Telegram-native profile and verified account attachment. User-owned changes in the original checkout remain untouched.
+- Telegram F01–F58 static audit: 22 implemented, 8 partial, 24 missing, 4 operator/developer/legacy-UI N/A; F59 remains `in_progress`. RED observed for missing Telegram mappings, unclassified N/A and stale Web acceptance. GREEN: `python -m pytest tests/test_f59_android_parity.py -q` — 16 passed; `python -m pytest tools/contracts/test_contracts.py -q` — 63 passed. N/A scopes use a closed set. Static audit only; no live service or user flow was run.
+
+## Prior rewrite goal
 
 - F59 Android parity remains IN PROGRESS. Current registry: 52 partial, 0 missing, 5 justified N/A, 1 implemented (58 mappings total). F11 has synthetic Android provenance/fallback acceptance; live authenticated OIDC/Core remains open.
 - M2.1 Core/PostgreSQL/Keycloak Compose bootstrap is CODE COMPLETE and locally GREEN; actual Compose build/start, readiness, persistence/restart, and auto-start are NOT_RUN because Docker/Podman are unavailable. Preserve user constraints: no unsafe system/network changes, public HTTPS required, no Tailscale.
@@ -40,6 +55,10 @@ Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850e
 - F03.2 Android repeat setup from profile is locally GREEN; implementation commit `018084d` is pushed and remote branch is verified at `f390ab4`. F03 Android remains partial pending authenticated Core/OIDC end-to-end proof. F15 and F59 remain partial; production/OIDC E2E and full F01–F60 parity remain.
 
 ## Plan corrections
+
+- 2026-10-12 — Task 1 reviewer found Telegram N/A lacked a closed scope taxonomy and `CONTINUATION.md` still required a Web OIDC client. Added `na_scope` (`legacy_ui_layout`, `operator_only`, `developer_only`, `protocol_specific`), limited M3 exclusions to those non-user workflows, and aligned active continuation requirements to Android OIDC + Telegram identity. RED: new parity and continuation checks failed on F53's missing scope and stale A01. GREEN: 16 parity tests and 63 contract tests; reviewer confirmed no blockers.
+
+- 2026-10-12 — Product scope update from user's direct decisions. Before: web-facing React client, personal-only MVP, link-code Telegram binding, migration-oriented production data and local/provider AI assumptions. After: API-only backend, Android + Telegram parity, shared user data, Android self-registration without invite codes, Telegram ID allowlist/config mapping, empty production DB, synthetic test data, Gemini with model fallback and temporary-unavailable state, RU-first data placement. Evidence: user messages in this task; live audit in `docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md`. Current code remains partially incompatible; no runtime or tests were run during this documentation update. Gemini availability and cross-border processing remain release gates, not resolved claims.
 
 - 2026-10-12 — Before: `PLAN.md` recommended Tailscale Funnel. After: public HTTPS is required and Tailscale is explicitly rejected; no ingress provider is treated as configured. Necessity: the approved global plan contradicted the user's later explicit delivery choice. Evidence: conversation decisions on public HTTPS/no Tailscale and `docs/specs/PERSONAL_MVP_PLAN.md` M2/M3. Alternatives checked: continue Funnel (conflicts with user's choice) or leave contradictory docs (misleads implementation); neither is valid. RED: the approved plan specified Funnel while the current personal MVP plan explicitly excluded it. GREEN: `.venv\\Scripts\\python.exe -m pytest tools\\contracts\\test_contracts.py` — 63 passed; `git diff --check` clean; `PLAN.md` hash is recorded above. Commit/push: `8ca8321d92616c3755bc568904dd9265983c4f30` (`docs(plan): require public HTTPS without Tailscale`), remote SHA verified. No DNS, firewall, router or system settings changed.
 
