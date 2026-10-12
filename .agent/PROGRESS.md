@@ -2327,7 +2327,7 @@ Updated: 2026-10-12, Europe/Moscow.
 - Limits: F52 Android remains PARTIAL; preserve the separate delayed-HTTP integration, live OIDC/Core, worker/S3, resolver, browser-transfer, downloaded-byte, and wall-clock cadence gates.
 - Commit/push: `c5943ea` (`fix(F52): guard stale Android export completions`) pushed to `origin/feat/saas-rewrite`; progress record is committed separately.
 
-## F60.3 Vertex shared golden evaluation — GREEN; COMMIT_PENDING — 2026-10-12
+## F60.3 Vertex shared golden evaluation — GREEN; COMMITTED/PUSHED — 2026-10-12
 
 - Authority: approved V1 `PLAN.md` F60, `docs/specs/CONTINUATION.md` §C and A05–A06; bounded plan `docs/superpowers/plans/2026-10-12-f60-3-vertex-shared-evaluation.md`.
 - TDD RED: explicit candidate tests first failed as expected (`2 failed, 2 passed, 10 deselected`). Reviewer-driven mock-transport guard then failed before implementation; provenance response/config canaries and ordinary-provider provenance assertions also failed before their fixes. Invalid model configuration is covered by a fail-closed test.
