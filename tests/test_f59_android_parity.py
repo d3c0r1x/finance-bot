@@ -114,6 +114,14 @@ def test_f08_android_registry_records_os_process_death_evidence_and_remaining_li
     assert any(path.endswith("MainActivityMutationRecoveryTest.kt") for path in android["tests"])
     assert "authenticated mainactivity restoration" not in android["gap"].lower()
     assert "startup" in android["evidence"].lower() and "no mutation post" in android["evidence"].lower()
+    storage_test = (
+        ROOT
+        / "apps/android/app/src/androidTest/java/com/decorix/finance/AndroidEncryptedMutationCheckpointStorageTest.kt"
+    )
+    assert "missingkeystorekeycannotreadorreplaceexistingencryptedcheckpoint" in storage_test.read_text(
+        encoding="utf-8"
+    ).lower()
+    assert "missing keystore key" in android["evidence"].lower()
     assert "live authenticated android-to-core/oidc" in android["gap"].lower()
 
 

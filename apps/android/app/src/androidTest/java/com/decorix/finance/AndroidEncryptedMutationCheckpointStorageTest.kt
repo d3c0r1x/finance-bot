@@ -9,6 +9,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.security.KeyStore
 import java.util.UUID
 
 @RunWith(AndroidJUnit4::class)
@@ -60,6 +61,29 @@ class AndroidEncryptedMutationCheckpointStorageTest {
         }
     }
 
+    @Test fun missingKeystoreKeyCannotReadOrReplaceExistingEncryptedCheckpoint(): Unit =
+        withMissingKeyStorage { context, preferences ->
+            val storage = AndroidEncryptedMutationCheckpointStorage(
+                context,
+                MISSING_KEY_PREFERENCES_NAME,
+                MISSING_KEY_ALIAS,
+            )
+            storage.write(listOf(checkpoint(MutationAction.REPEAT, "missing-key-original")))
+            val originalBlob = preferences.all.toMap()
+            assertEquals(setOf(IV_KEY, CIPHERTEXT_KEY), originalBlob.keys)
+
+            KeyStore.getInstance(ANDROID_KEYSTORE).apply {
+                load(null)
+                deleteEntry(MISSING_KEY_ALIAS)
+            }
+
+            assertThrows(Exception::class.java) { storage.read() }
+            assertThrows(Exception::class.java) {
+                storage.write(listOf(checkpoint(MutationAction.VOID, "must-not-replace-original")))
+            }
+            assertEquals("unreadable encrypted user intent must remain unchanged", originalBlob, preferences.all)
+        }
+
     private fun checkpoint(action: MutationAction, marker: String): MutationCheckpoint {
         val id = UUID.randomUUID().toString()
         val tenantId = UUID.randomUUID().toString()
@@ -109,9 +133,31 @@ class AndroidEncryptedMutationCheckpointStorageTest {
         }
     }
 
+    private inline fun <T> withMissingKeyStorage(block: (Context, android.content.SharedPreferences) -> T): T {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val preferences = context.getSharedPreferences(MISSING_KEY_PREFERENCES_NAME, Context.MODE_PRIVATE)
+        check(preferences.edit().clear().commit())
+        KeyStore.getInstance(ANDROID_KEYSTORE).apply {
+            load(null)
+            deleteEntry(MISSING_KEY_ALIAS)
+        }
+        return try {
+            block(context, preferences)
+        } finally {
+            check(preferences.edit().clear().commit())
+            KeyStore.getInstance(ANDROID_KEYSTORE).apply {
+                load(null)
+                deleteEntry(MISSING_KEY_ALIAS)
+            }
+        }
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "finance_transaction_mutations"
         const val IV_KEY = "iv"
         const val CIPHERTEXT_KEY = "ciphertext"
+        const val ANDROID_KEYSTORE = "AndroidKeyStore"
+        const val MISSING_KEY_PREFERENCES_NAME = "finance_transaction_mutations_missing_key_test"
+        const val MISSING_KEY_ALIAS = "finance-transaction-mutations-missing-key-test"
     }
 }

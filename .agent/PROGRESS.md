@@ -2395,4 +2395,16 @@ Updated: 2026-10-12, Europe/Moscow.
 - Change: debug-only receiver is disabled in its manifest by default and enabled only during instrumentation. It accepts only HTTPS `127.0.0.1` at the exact CSV fixture path; its OkHttp trust is pinned to the generated fixture certificate. The actual Android chooser starts the receiver, which fetches a deterministic MockWebServer CSV. No production source or release dependency changed.
 - GREEN/regression: focused chooser/download passed 1/1; negative path guard passed 1/1; combined F52 models/API/screens/flows/chooser suite passed 45/45 on isolated Android 8.1/API 27 `emulator-5554`. The handoff verifies exact CSV bytes/SHA-256, no `Authorization`, correct loopback host/port/path, and empty GET request body. `git diff --check` passed before parity/progress updates.
 - Limits: this uses a local synthetic export fixture and test receiver; live Core/OIDC authorization, worker/S3 signed URL, and real browser download remain unverified. F52 Android remains PARTIAL.
-- Status: final independent review found no blockers. Android JVM 92/92; parity 11/11; contract suite 81 passed, 2 skipped; API-27 F52 suite 45/45; debug and AndroidTest APK assembly passed; `git diff --check` is clean. Commit/push pending.
+- Status: final independent review found no blockers. Android JVM 92/92; parity 11/11; contract suite 81 passed, 2 skipped; API-27 F52 suite 45/45; debug and AndroidTest APK assembly passed; `git diff --check` is clean. Feature commit `520623d45dbab89210fd88f6b8dc5f55cff8ef88` is pushed; `git ls-remote` confirmed the branch at this SHA.
+
+## F59.46 F08 missing Android Keystore key preservation — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F08, user-approved encrypted owner/tenant-bound explicit retry design, and `docs/superpowers/plans/2026-10-12-f08-android-durable-retry.md` fail-closed storage criterion.
+- Goal: prove a missing non-exportable Keystore key cannot make retry storage appear empty or overwrite its existing encrypted checkpoint blob.
+- RED: added the parity regression first; `tests/test_f59_android_parity.py` failed because the registry did not yet record the missing-key preservation case.
+- Change: added an isolated instrumentation fixture with a dedicated preferences file and Keystore alias. The test writes a synthetic repeat checkpoint, deletes only its dedicated key, asserts both `read()` and replacement `write()` fail, and compares the original IV/ciphertext unchanged. Updated F08 parity evidence; production code and behavior did not change.
+- GREEN/regression: `AndroidEncryptedMutationCheckpointStorageTest` passed 4/4 on dedicated Android 8.1/API 27 `CodexFinanceBotApi27`; parity plus contracts passed 75/75; `git diff --check` passed. An initial parity run passed 10 tests and failed only on the deliberately missing evidence phrase.
+- Review: independent read-only review approved the isolated fixture and fail-closed assertions; wording corrected to claim unchanged ciphertext, not recovery after key deletion.
+- Limits: this verifies ciphertext preservation and refusal to replace an unreadable checkpoint, not decryption recovery after permanent key loss. F08 Android remains PARTIAL for live Core/OIDC idempotency and production tenant-isolation E2E.
+- Status: COMMIT_PENDING.
+- Next: commit this bounded test/parity/progress slice, push it, and verify the remote SHA; continue with the next V1 runtime/bootstrap gate.
