@@ -189,6 +189,34 @@ class FinanceExportsModelsTest {
         }
     }
 
+    @Test fun downloadChooserLaunchesOnlyTheValidatedUrlWithoutCoreCredentials() {
+        val launched = mutableListOf<Intent>()
+
+        val started = FinanceExportDownloadIntents.launchChooser(DOWNLOAD_URL, russian = true, launch = launched::add)
+
+        assertTrue(started)
+        assertEquals(1, launched.size)
+        val chooser = launched.single()
+        assertEquals(Intent.ACTION_CHOOSER, chooser.action)
+        assertEquals("Скачать CSV", chooser.getCharSequenceExtra(Intent.EXTRA_TITLE))
+        val view = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+        assertEquals(Intent.ACTION_VIEW, view?.action)
+        assertEquals(Uri.parse(DOWNLOAD_URL), view?.data)
+        assertNull(view?.extras)
+        assertNull(chooser.getStringExtra("Authorization"))
+    }
+
+    @Test fun invalidDownloadUrlDoesNotLaunchChooser() {
+        val launched = mutableListOf<Intent>()
+
+        val started = FinanceExportDownloadIntents.launchChooser(
+            "http://files.example.test/export.csv", russian = false, launch = launched::add,
+        )
+
+        assertTrue(!started)
+        assertTrue(launched.isEmpty())
+    }
+
     private fun assertJobRejected(mutate: (JSONObject) -> Unit) {
         val json = jobJson("ready").put("downloadUrl", DOWNLOAD_URL)
         mutate(json)

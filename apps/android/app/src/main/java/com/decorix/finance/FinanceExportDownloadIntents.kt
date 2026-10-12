@@ -8,4 +8,10 @@ internal object FinanceExportDownloadIntents {
         FinanceExportModels.requireSafeDownloadUrl(url)
         Intent(Intent.ACTION_VIEW, Uri.parse(url))
     }.getOrNull()
+
+    fun launchChooser(url: String, russian: Boolean, launch: (Intent) -> Unit): Boolean {
+        val externalView = externalView(url) ?: return false
+        launch(Intent.createChooser(externalView, if (russian) "Скачать CSV" else "Download CSV"))
+        return true
+    }
 }

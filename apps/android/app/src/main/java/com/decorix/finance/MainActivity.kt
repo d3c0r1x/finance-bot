@@ -3427,18 +3427,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openExportDownload(url: String) {
-        val intent = FinanceExportDownloadIntents.externalView(url)
-        if (intent == null) {
-            Toast.makeText(this, if (language == "ru") "Ссылка экспорта недействительна." else
-                "The export link is invalid.", Toast.LENGTH_SHORT).show()
-            return
-        }
-        runCatching { startActivity(Intent.createChooser(intent, if (language == "ru") "Скачать CSV" else "Download CSV")) }
-            .onFailure {
-                Toast.makeText(this, if (language == "ru") "Не удалось открыть ссылку. Обновите статус." else
-                    "Could not open the link. Refresh the status.", Toast.LENGTH_SHORT).show()
+    internal fun openExportDownload(url: String, launch: (Intent) -> Unit = ::startActivity) {
+        try {
+            val launched = FinanceExportDownloadIntents.launchChooser(url, language == "ru", launch)
+            if (!launched) {
+                Toast.makeText(this, if (language == "ru") "Ссылка экспорта недействительна." else
+                    "The export link is invalid.", Toast.LENGTH_SHORT).show()
             }
+        } catch (_: Exception) {
+            Toast.makeText(this, if (language == "ru") "Не удалось открыть ссылку. Обновите статус." else
+                "Could not open the link. Refresh the status.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun applyRecurringDecision(seriesId: String, muted: Boolean) {
