@@ -2357,3 +2357,14 @@ Updated: 2026-10-12, Europe/Moscow.
 - Change: removed the stale F45 Android-missing statement while preserving F45's live OIDC/tenant-isolation and legacy SQLite gates. Updated F52's gap/evidence: delayed completion is now synthetic local coverage; live OIDC/Core, worker/S3, resolver/browser transfer, byte integrity and elapsed wall-clock checks remain open.
 - GREEN: `tests/test_f59_android_parity.py` 9/9; `git diff --check` passed. No runtime code changed.
 - Next: inspect the approved F08 authenticated MainActivity restoration gap; keep process-death and live Core/OIDC claims separate.
+
+## F59.43 F08 authenticated Android retry restoration — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F08 and user's explicit approval for encrypted, owner/tenant-bound, explicit-only retries; bounded plan `docs/superpowers/plans/2026-10-12-f08-android-durable-retry.md`.
+- TDD RED: new API-27 `MainActivityMutationRecoveryTest` did not compile because authenticated launch lacked isolated API/storage injection and state inspection seams. New parity assertion also failed because F08 registry did not list authenticated launch evidence.
+- Change: null-by-default internal factories inject a MockWebServer-backed `FinanceApi` and isolated encrypted mutation store. `TokenVault.isolatedForTesting` uses dedicated preferences and Keystore alias; normal constructor retains production defaults. Authenticated `MainActivity` relaunch tests prove matching Core userId+tenant restores only its checkpoint, mismatched owner sees none, and startup performs only GET requests with zero mutation POSTs.
+- GREEN/regression: API-27 F08 integration/regression set 22/22; final post-refactor MainActivity restore rerun 2/2; Android JVM suite 92/92 via `C:\fbtest`; `tests/test_f59_android_parity.py` 9/9; contracts 81 passed, 2 skipped; debug and AndroidTest APK assembly pass; installed debug APK launched on isolated API-27 AVD with live process and no recent fatal exception; `git diff --check` clean.
+- Review: independent read-only review found no blocker. Test uses synthetic tokens/IDs and separate preferences/aliases; production factories remain null and resolve to prior constructors.
+- Limits: all startup/API responses are synthetic through MockWebServer. Live OIDC/Core, real server idempotency, production tenant isolation and physical-device process death remain open; Android F08 stays PARTIAL.
+- Files: MainActivity, FinanceApi, TokenVault, new authenticated restore instrumentation test, F08 parity test/registry and bounded plan. User-owned untracked paths remain excluded.
+- Next: commit and push this bounded evidence slice; then assess V1 deployment/live-Core gates before adding further client behavior.
