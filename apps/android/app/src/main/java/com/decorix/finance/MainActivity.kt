@@ -87,6 +87,12 @@ import java.util.concurrent.atomic.AtomicLong
 private val ambiguousExportCreateErrors = setOf("network", "unavailable")
 
 class MainActivity : ComponentActivity() {
+    internal companion object {
+        @Volatile var financeApiFactoryForTesting: ((android.content.Context) -> FinanceApi)? = null
+        @Volatile var mutationCheckpointStorageFactoryForTesting:
+            ((android.content.Context) -> MutationCheckpointStorage)? = null
+    }
+
     private data class PendingExportCompletion(
         val tenantId: String,
         val sessionGeneration: Long,
@@ -95,8 +101,11 @@ class MainActivity : ComponentActivity() {
     )
 
     private lateinit var authService: AuthorizationService
-    private val api by lazy { FinanceApi(this) }
-    private val mutationAttempts by lazy { TransactionMutationAttempts(AndroidEncryptedMutationCheckpointStorage(this)) }
+    private val api by lazy { financeApiFactoryForTesting?.invoke(this) ?: FinanceApi(this) }
+    private val mutationAttempts by lazy {
+        TransactionMutationAttempts(mutationCheckpointStorageFactoryForTesting?.invoke(this)
+            ?: AndroidEncryptedMutationCheckpointStorage(this))
+    }
     private val receiptCheckpointStore by lazy { ReceiptUploadCheckpointStore(this) }
     private val bankImportCheckpointStore by lazy { BankImportCheckpointStore(this) }
     private val budgetIdempotencyKeyStore by lazy { BudgetIdempotencyKeyStore(this) }
@@ -3474,6 +3483,8 @@ class MainActivity : ComponentActivity() {
     internal fun enqueueExportStatusTestBarrier(barrier: () -> Unit) = executor.execute(barrier)
 
     internal fun exportStatusUiForTesting(): FinanceUiState = ui
+
+    internal fun mutationRecoveryUiForTesting(): FinanceUiState = ui
 
     private fun requestExportDownload(exportId: String) {
         val tenant = ui.tenants.firstOrNull() ?: return

@@ -24,6 +24,7 @@ class FinanceApi internal constructor(
     context: Context,
     private val endpoints: FinanceApiEndpoints,
     private val client: OkHttpClient,
+    private val tokens: TokenVault = TokenVault(context),
 ) {
     constructor(context: Context) : this(
         context,
@@ -31,7 +32,6 @@ class FinanceApi internal constructor(
         OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build(),
     )
 
-    private val tokens = TokenVault(context)
     private val tokenRefreshLock = Any()
     private val sessionGeneration = AtomicLong(0L)
     internal val authSessionGeneration: Long get() = sessionGeneration.get()

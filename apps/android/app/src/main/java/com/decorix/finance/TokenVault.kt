@@ -12,9 +12,19 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Encrypts access and refresh tokens with a non-exportable Android Keystore key. */
-class TokenVault(context: Context) {
-    private val preferences = context.getSharedPreferences("finance_session", Context.MODE_PRIVATE)
-    private val keyAlias = "finance-oidc-session-v1"
+class TokenVault private constructor(
+    context: Context,
+    preferencesName: String,
+    private val keyAlias: String,
+) {
+    constructor(context: Context) : this(context, "finance_session", "finance-oidc-session-v1")
+
+    private val preferences = context.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
+
+    internal companion object {
+        fun isolatedForTesting(context: Context, preferencesName: String, keyAlias: String) =
+            TokenVault(context, preferencesName, keyAlias)
+    }
 
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

@@ -111,8 +111,10 @@ def test_f08_android_registry_records_os_process_death_evidence_and_remaining_li
     evidence = android["evidence"].lower()
     assert "force-stopped" in evidence and "api-27" in evidence
     assert "recovered exact synthetic" in evidence
-    assert "authenticated mainactivity restoration" in android["gap"].lower()
-    assert "live authenticated core/oidc" in android["gap"].lower()
+    assert any(path.endswith("MainActivityMutationRecoveryTest.kt") for path in android["tests"])
+    assert "authenticated mainactivity restoration" not in android["gap"].lower()
+    assert "startup" in android["evidence"].lower() and "no mutation post" in android["evidence"].lower()
+    assert "live authenticated android-to-core/oidc" in android["gap"].lower()
 
 
 def test_f49_android_registry_records_tenant_checkpoint_process_death_and_preview_evidence():
