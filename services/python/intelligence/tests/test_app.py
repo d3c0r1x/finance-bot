@@ -679,6 +679,7 @@ def test_receipt_vision_model_failover_is_typed_and_returns_actual_model(monkeyp
 
     class VisionModel:
         name = "ollama"
+        requires_cloud_opt_in = False
         capabilities = frozenset({"text", "structured_output", "vision"})
         supported_tasks = frozenset({"receipt-vision"})
 

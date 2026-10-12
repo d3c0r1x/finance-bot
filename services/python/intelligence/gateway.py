@@ -83,6 +83,9 @@ class ProviderAdapter(Protocol):
     def name(self) -> str: ...
 
     @property
+    def requires_cloud_opt_in(self) -> bool: ...
+
+    @property
     def capabilities(self) -> frozenset[str]: ...
 
     @property
@@ -193,6 +196,10 @@ class OllamaProvider:
         return "ollama"
 
     @property
+    def requires_cloud_opt_in(self) -> bool:
+        return not is_local_endpoint(self.endpoint)
+
+    @property
     def supported_tasks(self) -> frozenset[str]:
         return frozenset({"budget-proposal", "transaction-draft", "receipt-basket-review", "merchant-classification"})
 
@@ -236,6 +243,10 @@ class VertexAIProvider:
     @property
     def name(self) -> str:
         return "vertex_ai"
+
+    @property
+    def requires_cloud_opt_in(self) -> bool:
+        return True
 
     @property
     def enabled(self) -> bool:
@@ -377,10 +388,9 @@ class ProviderRouter:
             raise UnsupportedCapability("No enabled provider supports all required capabilities")
         allowed = [provider for provider in capable
                    if execution_policy == "cloud-opt-in"
-                   or not getattr(provider, "endpoint", None)
-                   or is_local_endpoint(provider.endpoint)]
+                   or getattr(provider, "requires_cloud_opt_in", None) is False]
         if not allowed:
-            raise PolicyDenied("Execution policy blocks all capable providers")
+            raise PolicyDenied("Execution policy blocks external or unclassified providers")
         return allowed[0]
 
 

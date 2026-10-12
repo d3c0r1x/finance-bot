@@ -13,7 +13,8 @@ from services.python.intelligence.gateway import (
     authorize_provider,
     require_capabilities,
 )
-from services.python.intelligence.vision import OllamaVisionProvider
+from services.python.intelligence.vision import OllamaVisionPoolProvider, OllamaVisionProvider
+from services.python.intelligence.tesseract import TesseractProvider
 from services.python.intelligence.transaction_drafts import (
     PROMPT_VERSION as TRANSACTION_DRAFT_PROMPT_VERSION,
     build_draft_prompt,
@@ -76,6 +77,116 @@ def test_capability_router_rejects_remote_match_under_local_only():
 
     with pytest.raises(PolicyDenied):
         ProviderRouter([remote]).select({"vision", "structured_output"}, "local-only", "receipt-vision")
+
+
+def test_builtin_provider_adapters_declare_cloud_locality_explicitly():
+    local_text = OllamaProvider("http://ollama:11434", "qwen-text")
+    cloud_text = OllamaProvider("https://ollama.example", "qwen-text")
+    local_ocr = TesseractProvider()
+    vertex = VertexAIProvider()
+
+    assert local_text.requires_cloud_opt_in is False
+    assert cloud_text.requires_cloud_opt_in is True
+    assert local_ocr.requires_cloud_opt_in is False
+    assert vertex.requires_cloud_opt_in is True
+
+
+def test_vision_pool_requires_cloud_opt_in_if_any_child_is_remote():
+    local = OllamaVisionProvider("http://ollama:11434", "local-vlm")
+    remote = OllamaVisionProvider("https://ollama.example", "remote-vlm")
+
+    assert OllamaVisionPoolProvider([local]).requires_cloud_opt_in is False
+    assert OllamaVisionPoolProvider([remote]).requires_cloud_opt_in is True
+    assert OllamaVisionPoolProvider([local, remote]).requires_cloud_opt_in is True
+
+
+def test_local_only_fails_closed_when_provider_has_no_locality_classification():
+    class UnclassifiedEndpointlessProvider:
+        name = "unclassified"
+        enabled = True
+        capabilities = frozenset({"text", "structured_output"})
+        supported_tasks = frozenset({"transaction-draft"})
+
+        async def execute(self, *_args, **_kwargs):
+            pytest.fail("Unclassified provider must never execute")
+
+    with pytest.raises(PolicyDenied, match="external or unclassified"):
+        ProviderRouter([UnclassifiedEndpointlessProvider()]).select(
+            {"text", "structured_output"}, "local-only", "transaction-draft",
+        )
+
+
+def test_local_only_rejects_endpointless_cloud_provider_before_execute():
+    class EndpointlessCloudProvider:
+        name = "cloud"
+        enabled = True
+        requires_cloud_opt_in = True
+        capabilities = frozenset({"text", "structured_output"})
+        supported_tasks = frozenset({"transaction-draft"})
+
+        async def execute(self, *_args, **_kwargs):
+            pytest.fail("Cloud provider must not execute under local-only")
+
+    provider = EndpointlessCloudProvider()
+    with pytest.raises(PolicyDenied, match="external or unclassified"):
+        ProviderRouter([provider]).select(
+            {"text", "structured_output"}, "local-only", "transaction-draft",
+        )
+
+
+def test_cloud_opt_in_allows_endpointless_cloud_provider_selection():
+    class EndpointlessCloudProvider:
+        name = "cloud"
+        enabled = True
+        requires_cloud_opt_in = True
+        capabilities = frozenset({"text", "structured_output"})
+        supported_tasks = frozenset({"transaction-draft"})
+
+        async def execute(self, *_args, **_kwargs):
+            return {"modelVersion": "cloud-test"}
+
+    provider = EndpointlessCloudProvider()
+    selected = ProviderRouter([provider]).select(
+        {"text", "structured_output"}, "cloud-opt-in", "transaction-draft",
+    )
+
+    assert selected is provider
+
+
+def test_local_provider_failure_does_not_trigger_cloud_fallback():
+    calls = []
+
+    class LocalProvider:
+        name = "local"
+        enabled = True
+        requires_cloud_opt_in = False
+        capabilities = frozenset({"text", "structured_output"})
+        supported_tasks = frozenset({"transaction-draft"})
+
+        async def execute(self, *_args, **_kwargs):
+            calls.append("local")
+            raise RuntimeError("local provider failed")
+
+    class CloudProvider:
+        name = "cloud"
+        enabled = True
+        requires_cloud_opt_in = True
+        capabilities = frozenset({"text", "structured_output"})
+        supported_tasks = frozenset({"transaction-draft"})
+
+        async def execute(self, *_args, **_kwargs):
+            calls.append("cloud")
+            return {"modelVersion": "cloud-test"}
+
+    selected = ProviderRouter([LocalProvider(), CloudProvider()]).select(
+        {"text", "structured_output"}, "local-only", "transaction-draft",
+    )
+    assert selected.name == "local"
+
+    with pytest.raises(RuntimeError, match="local provider failed"):
+        asyncio.run(selected.execute("transaction-draft", {}, timeout=1))
+
+    assert calls == ["local"]
 
 
 @pytest.mark.parametrize("policy", ["local-only", "cloud-opt-in"])

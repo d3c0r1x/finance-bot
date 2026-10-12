@@ -50,6 +50,10 @@ class TesseractProvider:
         return "tesseract"
 
     @property
+    def requires_cloud_opt_in(self) -> bool:
+        return False
+
+    @property
     def supported_tasks(self) -> frozenset[str]:
         return frozenset({"receipt-ocr"})
 

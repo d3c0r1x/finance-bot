@@ -63,6 +63,10 @@ class OllamaVisionProvider:
         return "ollama"
 
     @property
+    def requires_cloud_opt_in(self) -> bool:
+        return not is_local_endpoint(self.endpoint)
+
+    @property
     def capabilities(self) -> frozenset[str]:
         return frozenset({"text", "structured_output", "vision"})
 
@@ -174,6 +178,11 @@ class OllamaVisionPoolProvider:
         self.providers = tuple(providers)
         if not 1 <= len(self.providers) <= MAX_VISION_MODELS:
             raise ValueError("Vision model pool size is invalid")
+
+    @property
+    def requires_cloud_opt_in(self) -> bool:
+        return any(getattr(provider, "requires_cloud_opt_in", None) is not False
+                   for provider in self.providers)
 
     async def execute(self, task_kind: str, context: dict, timeout: float, api_key: str = "") -> dict:
         if task_kind != "receipt-vision":

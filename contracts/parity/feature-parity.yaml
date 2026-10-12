@@ -1342,4 +1342,5 @@ features:
       - services/python/intelligence/tests/test_app.py
     evidence:
       - "Local-only policy, capability routing, Tesseract, Vision and shared synthetic evaluations pass offline; live model comparison and Vertex canary are pending."
+      - "F60.2 closes endpoint-shape bypass: every built-in adapter declares cloud opt-in; local-only rejects endpointless cloud and unclassified providers before execution; remote or mixed Vision pools require opt-in; local failure has no cloud fallback. Full intelligence and contract regression: 206 passed, 1 skipped; compileall and diff check pass. Live quality evaluation and Vertex canary remain pending."
     intentional_differences: []

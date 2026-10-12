@@ -8,6 +8,7 @@ import httpx
 
 class FixedProvider:
     name = "fixture-provider"
+    requires_cloud_opt_in = False
     capabilities = frozenset({"text", "structured_output"})
     supported_tasks = frozenset({"transaction-draft"})
 
@@ -26,6 +27,7 @@ class FixedProvider:
 
 class DatasetProvider:
     name = "dataset-provider"
+    requires_cloud_opt_in = False
     capabilities = frozenset({"text", "structured_output", "vision"})
     supported_tasks = frozenset({"budget-proposal", "transaction-draft", "receipt-ocr", "receipt-vision",
                                  "merchant-classification"})
@@ -131,6 +133,7 @@ def test_local_only_evaluation_blocks_remote_provider_before_call():
                   "occurredAt": "2026-10-01T11:00:00+02:00"},
     )
     provider = FixedProvider({**case.expected}, endpoint="https://remote.example")
+    provider.requires_cloud_opt_in = True
 
     report = evaluate_providers([provider], [case], execution_policy="local-only", minimum_pass_rate=1.0)
 
