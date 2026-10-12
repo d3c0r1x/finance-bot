@@ -2315,3 +2315,14 @@ Updated: 2026-10-12, Europe/Moscow.
 - Review: initial independent review approved identity-bound cancellation and stale-busy ownership. This update includes the later passing Compose regression and MainActivity propagation. A delayed MainActivity HTTP response across identity replacement still lacks a direct integration test.
 - Limits: F52 Android remains PARTIAL. Live OIDC/Core roles, worker/S3, resolver UI, browser transfer, file bytes and elapsed wall-clock cadence remain unverified. MainActivity delayed-response integration remains a local evidence gap.
 - Commit/push: `c42eb07654bec625911e0b86f3696a91e847f65f` (`fix(F52): bind Android export polling to tenant session`) pushed to `origin/feat/saas-rewrite`; `git ls-remote` confirmed the same SHA. Progress record is committed separately.
+
+## F59.40 F52 stale Android export completion policy — GREEN JVM/build; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F52 Task 10, `.agent/specs/F52-android-csv-export.md`, and the bounded plan `docs/superpowers/plans/2026-10-12-f52-android-tenant-session-polling.md`.
+- TDD RED: the new delayed-ready policy test failed compilation because `FinanceExportStatusPolicy.completion` did not exist.
+- Change: MainActivity success and failure callbacks now use the same pure completion decision. It checks request generation, tenant/session, screen, authentication, and export identity. Stale ready responses cannot publish or open their URL; stale requests clear busy only when they still own status busy. Download URL still passes the existing fresh-link validation before launch.
+- GREEN: focused `FinanceExportStatusLifecyclePolicyTest` passed 6/6 via temporary ASCII junction. `:app:assembleDebug :app:assembleDebugAndroidTest` passed. `git diff --check` passed.
+- Instrumentation: repeated `FinanceExportsScreensTest` reported 14/18, 0 skipped, 0 failed, then stopped emitting output while Gradle remained active. ADB showed no instrumentation runner, app process, ANR, crash, or recent runner log. Only the bounded Gradle test process was stopped; result is UNVERIFIED, not failed or GREEN. The preceding code commit's combined F52 instrumentation remains 47/47 but predates this small completion-policy extraction.
+- Review: independent read-only review found no policy wiring blocker. The pure policy test does not simulate delayed MainActivity HTTP completion; it verifies the decision used by both callbacks. Live OIDC/Core and production export delivery remain untested.
+- Limits: F52 Android remains PARTIAL; preserve the separate delayed-HTTP integration, live OIDC/Core, worker/S3, resolver, browser-transfer, downloaded-byte, and wall-clock cadence gates.
+- Commit/push: `c5943ea` (`fix(F52): guard stale Android export completions`) pushed to `origin/feat/saas-rewrite`; progress record is committed separately.
