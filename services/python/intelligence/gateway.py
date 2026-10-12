@@ -282,7 +282,7 @@ class GeminiProvider:
                 or not isinstance(response_parts[0].get("text"), str)):
             raise GeminiTemporaryFailure("invalid_output")
         try:
-            raw_result = json.loads(response_parts[0]["text"])
+            raw_result = json.loads(response_parts[0]["text"], object_pairs_hook=self._unique_object_keys)
             result, prompt_version = self._validate_output(task_kind, raw_result, normalized_context)
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise GeminiTemporaryFailure("invalid_output") from error
@@ -298,6 +298,15 @@ class GeminiProvider:
             "capabilities": sorted(self.capabilities),
             "usage": self._usage(usage),
         }
+
+    @staticmethod
+    def _unique_object_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Gemini structured output has duplicate keys")
+            result[key] = value
+        return result
 
     @staticmethod
     def _raise_http_failure(status_code: int, body: bytes) -> None:

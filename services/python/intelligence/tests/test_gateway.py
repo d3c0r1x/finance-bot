@@ -754,6 +754,25 @@ def test_gemini_malformed_json_falls_back_once():
     assert result["fallbackReason"] == "invalid_output"
 
 
+def test_gemini_duplicate_structured_keys_are_rejected_before_finance_draft():
+    api = _gemini_api()
+    draft = valid_transaction_draft()
+    duplicate = json.dumps(draft, ensure_ascii=False).replace(
+        '"type": "expense",', '"type": "expense", "type": "income",', 1,
+    )
+    assert duplicate != json.dumps(draft, ensure_ascii=False)
+    response = _gemini_response(draft)
+    response["candidates"][0]["content"]["parts"][0]["text"] = duplicate
+    provider = api.GeminiProvider(
+        _gemini_route(api, "duplicate-output-model"), "key",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=response)),
+        rate_limiter=api.GeminiRateLimiter(),
+    )
+
+    with pytest.raises(api.GeminiTemporaryFailure, match="invalid_output"):
+        asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=3))
+
+
 @pytest.mark.parametrize(("task_kind", "context", "output"), [
     ("budget-proposal", {
         "monthlyIncome": "100000.00", "historyDays": 45, "categoryCodes": ["еда", "транспорт"],
