@@ -2336,4 +2336,5 @@ Updated: 2026-10-12, Europe/Moscow.
 - Review: independent read-only review approved final diff; no remaining finding. Synthetic golden, fake token and `MockTransport` only; no cloud credentials or live request.
 - Limits: F60 remains partial. Real model/holdout quality, usage/cost, cloud consent/configuration, credentials, quotas/safety controls, canary, rollback and production activation remain separate gates. Vertex stays off.
 - Files: `services/python/intelligence/evaluation.py`, `services/python/intelligence/tests/test_evaluation.py`, `contracts/parity/feature-parity.yaml`, and bounded plan. User-owned untracked paths remain excluded.
-- Status: COMMIT_PENDING. Next: stage only these F60.3 files plus this progress entry; commit feature, then record SHA/COMPLETE in separate progress commit and push both.
+- Feature commit: `5d035b00340c251808d7dafc49bceec9507d9ca8` (`feat(F60): add safe shared Vertex evaluation`); inspected commit contains only the five intended F60.3 files.
+- Status: locally COMPLETE; commit `5d035b00340c251808d7dafc49bceec9507d9ca8` is one commit ahead of `origin/feat/saas-rewrite`. Next: commit final progress/plan status, push, and verify remote SHA.
