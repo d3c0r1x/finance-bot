@@ -2338,3 +2338,14 @@ Updated: 2026-10-12, Europe/Moscow.
 - Files: `services/python/intelligence/evaluation.py`, `services/python/intelligence/tests/test_evaluation.py`, `contracts/parity/feature-parity.yaml`, and bounded plan. User-owned untracked paths remain excluded.
 - Feature commit: `5d035b00340c251808d7dafc49bceec9507d9ca8` (`feat(F60): add safe shared Vertex evaluation`); inspected commit contains only the five intended F60.3 files.
 - Status: COMPLETE. Feature commit `5d035b00340c251808d7dafc49bceec9507d9ca8` and progress commit `868fd972fa282324f87607a3a46f85c5bf597a92` were pushed; `git ls-remote` confirmed origin at `868fd972fa282324f87607a3a46f85c5bf597a92`. This verification predates the final progress-only update. Next: continue the remaining approved V1 gates; F60 remains partial until real quality/holdout, usage/cost, consent, quota, canary and rollback gates pass.
+
+## F59.41 F52 delayed Android status integration — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F52, `.agent/specs/F52-android-csv-export.md` acceptance 8 and 11, and the F52 stale-completion policy from F59.40.
+- TDD RED: added an instrumentation test around the existing MainActivity async status path; initial compilation failed because the activity had no controlled status/chooser test seams. The behavior under test is an integration evidence gap; the pure identity policy already existed.
+- Change: minimal internal null-by-default hooks let instrumentation hold the real executor request and capture its chooser call. The test uses synthetic IDs and a synthetic HTTPS URL only. It keeps the export ID and request generation constant across the identity switch, so rejection specifically proves tenant/session validation. A queued executor barrier verifies completion before assertions. A separate simulated create-busy owner proves stale status cleanup cannot clear unrelated work.
+- GREEN: final focused `FinanceFlowTest` 7/7; full API 27 instrumentation 505/505 on the immediately preceding test revision; Android JVM suite 92/92 via the existing ASCII junction `C:\fbtest`; `:app:assembleDebug` and `:app:assembleDebugAndroidTest` passed after the final test changes; `git diff --check` passed. The direct Cyrillic-path JVM run produced 24 `ClassNotFoundException` initialization errors; the same suite passed via the ASCII junction.
+- Review: independent read-only reviewer found no blocking issue; noted null-by-default hooks leave production behavior unchanged and recommended keeping the test-only seam narrow.
+- Limits: local synthetic execution only. No live Core/OIDC, real bearer URL, worker/S3, browser transfer, downloaded-byte integrity, or elapsed wall-clock test was run. F52 Android remains PARTIAL and the server deployment gates remain open.
+- Commit/push: pending after final review and verification.
+- Next: continue the next approved V1 gate; do not mark F52 complete based on this local integration test.

@@ -133,6 +133,8 @@ class MainActivity : ComponentActivity() {
     @Volatile private var pendingExportDownload: FinanceExportDownloadAttempt? = null
     @Volatile private var pendingExportCompletion: PendingExportCompletion? = null
     @Volatile private var exportBusyKind: String? = null
+    internal var exportStatusCallForTesting: ((String, String, Long) -> FinanceExportJob)? = null
+    internal var exportDownloadLaunchForTesting: ((Intent) -> Unit)? = null
     @Volatile private var bankImportScreenActive = false
     @Volatile private var bankImportUploadInProgress = false
     @Volatile private var bankImportMutationInProgress = false
@@ -3452,6 +3454,27 @@ class MainActivity : ComponentActivity() {
         refreshExportStatus(exportId, null)
     }
 
+    internal fun prepareExportStatusIntegrationTest(
+        tenant: FinanceTenant,
+        job: FinanceExportJob,
+        busyOwner: String? = null,
+    ) {
+        ui = FinanceUiState(authenticated = true, tenants = listOf(tenant), exportJob = job,
+            exportJobTenantId = tenant.id, exportBusy = busyOwner != null)
+        exportBusyKind = busyOwner
+        exportScreenActive = true
+    }
+
+    internal fun requestExportDownloadForTesting(exportId: String) = requestExportDownload(exportId)
+
+    internal fun clearExportSessionForTesting() = api.clearSession()
+
+    internal fun authSessionGenerationForExportTest(): Long = api.authSessionGeneration
+
+    internal fun enqueueExportStatusTestBarrier(barrier: () -> Unit) = executor.execute(barrier)
+
+    internal fun exportStatusUiForTesting(): FinanceUiState = ui
+
     private fun requestExportDownload(exportId: String) {
         val tenant = ui.tenants.firstOrNull() ?: return
         val job = ui.exportJob?.takeIf { it.id == exportId && it.status == "ready" } ?: return
@@ -3474,7 +3497,10 @@ class MainActivity : ComponentActivity() {
         exportBusyKind = "status"
         ui = ui.copy(exportBusy = true, exportError = null)
         executor.execute {
-            runCatching { api.exportStatus(tenant.id, exportId, sessionGeneration) }
+            runCatching {
+                exportStatusCallForTesting?.invoke(tenant.id, exportId, sessionGeneration)
+                    ?: api.exportStatus(tenant.id, exportId, sessionGeneration)
+            }
                 .onSuccess { job ->
                     val completion = exportStatusCompletion(request, exportId, job.status, job.downloadUrl)
                     if (completion.publishStatus) {
@@ -3498,7 +3524,7 @@ class MainActivity : ComponentActivity() {
                                 downloadAttempt, context, job.status, job.downloadUrl,
                             )
                             if (completion.openDownload && freshUrl != null) {
-                                openExportDownload(freshUrl)
+                                openExportDownload(freshUrl, exportDownloadLaunchForTesting ?: ::startActivity)
                             } else if (FinanceExportDownloadPolicy.isCurrent(downloadAttempt, context)) {
                                 Toast.makeText(this, if (language == "ru") "Ссылка больше недоступна. Обновите статус." else
                                     "The download link is no longer available. Refresh the status.", Toast.LENGTH_SHORT).show()
