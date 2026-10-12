@@ -18,10 +18,17 @@ import org.springframework.web.server.ResponseStatusException;
 public class TenantService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transaction;
+    private final TelegramAccessPolicy telegramAccess;
 
-    public TenantService(JdbcTemplate jdbc, TransactionTemplate transaction) {
+    public TenantService(JdbcTemplate jdbc, TransactionTemplate transaction, TelegramAccessPolicy telegramAccess) {
         this.jdbc = jdbc;
         this.transaction = transaction;
+        this.telegramAccess = telegramAccess;
+    }
+
+    public TenantResponse create(String subject, boolean emailVerified, CreateTenantRequest request) {
+        requireVerifiedEmail(subject, emailVerified);
+        return create(subject, request);
     }
 
     public TenantResponse create(String subject, CreateTenantRequest request) {
@@ -45,6 +52,7 @@ public class TenantService {
         String validatedTimezone = timezone;
         String validatedMemberName = memberDisplayName;
         return transaction.execute(status -> {
+            attachConfiguredTelegramIdentity(subject);
             UUID userId = identityFor(subject);
             UUID tenantId = UUID.randomUUID();
             setTenantContext(tenantId);
@@ -65,24 +73,88 @@ public class TenantService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
         }
         return transaction.execute(status -> {
+            attachConfiguredTelegramIdentity(subject);
             jdbc.queryForObject("SELECT set_config('app.subject', ?, true)", String.class, subject);
+            UUID userId = existingIdentity(subject);
+            if (userId == null) return List.of();
+            jdbc.queryForObject("SELECT set_config('app.user_id', ?, true)", String.class, userId.toString());
             List<Membership> memberships = jdbc.query(
-                    "SELECT tenant_id, user_id, role FROM memberships WHERE subject = ? AND status = 'active' ORDER BY created_at",
+                    "SELECT tenant_id, user_id, role FROM memberships WHERE user_id = ? AND status = 'active' ORDER BY created_at",
                     (rs, row) -> new Membership(rs.getObject("tenant_id", UUID.class),
-                            rs.getObject("user_id", UUID.class), rs.getString("role")), subject);
+                            rs.getObject("user_id", UUID.class), rs.getString("role")), userId);
             List<TenantResponse> result = new ArrayList<>();
             for (Membership membership : memberships) {
                 setTenantContext(membership.tenantId());
                 result.addAll(jdbc.query("SELECT t.display_name, COALESCE(p.timezone, 'UTC') AS timezone "
                                 + "FROM tenants t LEFT JOIN member_profiles p ON p.tenant_id = t.id "
-                                + "AND p.user_id = (SELECT user_id FROM memberships WHERE tenant_id = t.id AND subject = ?) "
+                                + "AND p.user_id = ? "
                                 + "WHERE t.id = ?",
                         (rs, row) -> new TenantResponse(membership.tenantId(), rs.getString("display_name"),
-                                membership.role(), rs.getString("timezone"), membership.userId()), subject, membership.tenantId()));
+                                membership.role(), rs.getString("timezone"), membership.userId()), userId, membership.tenantId()));
             }
             return result;
         });
     }
+
+    public List<TenantResponse> list(String subject, boolean emailVerified) {
+        requireVerifiedEmail(subject, emailVerified);
+        return list(subject);
+    }
+
+    private void attachConfiguredTelegramIdentity(String subject) {
+        if (subject == null || subject.isBlank()) return;
+        Long telegramId = telegramAccess.telegramUserIdForAccount(subject).orElse(null);
+        if (telegramId == null) return;
+        telegramAccess.requireAllowed(telegramId);
+        jdbc.query("SELECT pg_advisory_xact_lock(?)", rs -> null, telegramId);
+        List<LinkedUser> linked = jdbc.query("""
+                SELECT identity.user_id, users.status FROM external_identities identity
+                JOIN users ON users.id = identity.user_id
+                WHERE identity.provider = 'telegram' AND identity.subject = ?
+                """, (rs, row) -> new LinkedUser(rs.getObject("user_id", UUID.class), rs.getString("status")),
+                Long.toString(telegramId));
+        if (linked.isEmpty()) return; // Android registered first; Telegram will bind when first used.
+        LinkedUser target = linked.get(0);
+        if (!"active".equals(target.status())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Telegram account is inactive");
+        }
+        UUID subjectUser = existingIdentity(subject);
+        if (subjectUser != null && !subjectUser.equals(target.userId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Android identity belongs to another account");
+        }
+        List<String> otherSubjects = jdbc.query("""
+                SELECT subject FROM external_identities WHERE provider='keycloak' AND user_id=?
+                """, (rs, row) -> rs.getString(1), target.userId());
+        if (!otherSubjects.isEmpty() && !otherSubjects.get(0).equals(subject)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Telegram account already has an Android identity");
+        }
+        if (subjectUser == null) {
+            int inserted = jdbc.update("""
+                    INSERT INTO external_identities (user_id, provider, subject)
+                    VALUES (?, 'keycloak', ?) ON CONFLICT DO NOTHING
+                    """, target.userId(), subject);
+            if (inserted != 1) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Android identity attachment conflicts");
+            }
+        }
+    }
+
+    private UUID existingIdentity(String subject) {
+        List<UUID> identities = jdbc.query("""
+                SELECT identity.user_id FROM external_identities identity
+                JOIN users ON users.id=identity.user_id AND users.status='active'
+                WHERE identity.provider='keycloak' AND identity.subject=?
+                """, (rs, row) -> rs.getObject(1, UUID.class), subject);
+        return identities.isEmpty() ? null : identities.get(0);
+    }
+
+    private void requireVerifiedEmail(String subject, boolean verified) {
+        if (!verified && telegramAccess.telegramUserIdForAccount(subject).isPresent()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Email verification is required");
+        }
+    }
+
+    private record LinkedUser(UUID userId, String status) {}
 
     private UUID identityFor(String subject) {
         List<UUID> existing = jdbc.query("SELECT user_id FROM external_identities WHERE provider = 'keycloak' AND subject = ?",

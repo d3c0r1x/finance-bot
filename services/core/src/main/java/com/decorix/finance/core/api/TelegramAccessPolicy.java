@@ -37,6 +37,13 @@ public final class TelegramAccessPolicy {
         return Optional.ofNullable(accountSubjects.get(telegramUserId));
     }
 
+    public Optional<Long> telegramUserIdForAccount(String keycloakSubject) {
+        if (keycloakSubject == null) return Optional.empty();
+        return accountSubjects.entrySet().stream()
+                .filter(entry -> entry.getValue().equals(keycloakSubject))
+                .map(Map.Entry::getKey).findFirst();
+    }
+
     static Set<Long> parseIds(String configuredIds) {
         Set<Long> result = new LinkedHashSet<>();
         if (configuredIds == null || configuredIds.isBlank()) return Set.of();
@@ -78,6 +85,10 @@ public final class TelegramAccessPolicy {
             }
             if (result.putIfAbsent(telegramUserId, subject) != null) {
                 throw new IllegalArgumentException("Telegram account mappings contain a duplicate ID");
+            }
+            if (result.entrySet().stream().anyMatch(mapping -> mapping.getKey() != telegramUserId
+                    && mapping.getValue().equals(subject))) {
+                throw new IllegalArgumentException("Telegram account mappings contain a duplicate Android subject");
             }
         }
         return Map.copyOf(result);

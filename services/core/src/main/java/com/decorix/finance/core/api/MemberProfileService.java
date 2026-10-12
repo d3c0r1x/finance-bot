@@ -116,8 +116,15 @@ public class MemberProfileService {
     private void setContext(UUID tenantId, String subject) {
         jdbc.queryForObject("SELECT set_config('app.subject', ?, true)", String.class, subject);
         jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
-        if (jdbc.queryForObject("SELECT count(*) FROM memberships WHERE tenant_id = ? AND subject = ? AND status = 'active'",
-                Integer.class, tenantId, subject) == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Profile not found");
+        if (jdbc.queryForObject("""
+                SELECT count(*) FROM memberships membership
+                JOIN external_identities identity ON identity.user_id = membership.user_id
+                JOIN users ON users.id = membership.user_id AND users.status = 'active'
+                WHERE membership.tenant_id = ? AND identity.provider = 'keycloak'
+                  AND identity.subject = ? AND membership.status = 'active'
+                """, Integer.class, tenantId, subject) == 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Profile not found");
+        }
     }
 
     private static void validate(UUID tenantId, String subject, UpdateProfileRequest request) {

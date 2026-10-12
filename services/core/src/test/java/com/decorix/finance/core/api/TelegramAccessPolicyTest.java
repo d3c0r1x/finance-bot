@@ -26,6 +26,8 @@ class TelegramAccessPolicyTest {
                 () -> new TelegramAccessPolicy("42,42", ""));
         assertThrows(IllegalArgumentException.class,
                 () -> new TelegramAccessPolicy("42", "42=first,42=second"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new TelegramAccessPolicy("42,73", "42=same-subject,73=same-subject"));
     }
 
     @Test

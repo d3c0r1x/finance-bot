@@ -35,13 +35,13 @@ public class TenantController {
     @PostMapping("/tenants")
     ResponseEntity<TenantResponse> create(@RequestBody CreateTenantRequest request,
                                           @AuthenticationPrincipal Jwt jwt) {
-        TenantResponse created = tenants.create(jwt.getSubject(), request);
+        TenantResponse created = tenants.create(jwt.getSubject(), Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified")), request);
         return ResponseEntity.created(URI.create("/api/v1/tenants/" + created.tenantId())).body(created);
     }
 
     @GetMapping("/me/tenants")
     List<TenantResponse> list(@AuthenticationPrincipal Jwt jwt) {
-        return tenants.list(jwt.getSubject());
+        return tenants.list(jwt.getSubject(), Boolean.TRUE.equals(jwt.getClaimAsBoolean("email_verified")));
     }
 
     @GetMapping("/tenants/{tenantId}/members")

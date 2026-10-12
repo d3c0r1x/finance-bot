@@ -239,7 +239,16 @@ class TransactionApiPostgresTest {
         grantAppPrivileges();
         subject = "keycloak|integration-" + UUID.randomUUID();
         lenient().when(telegramAccessPolicy.accountSubject(anyLong()))
-                .thenAnswer(invocation -> java.util.Optional.of(subject));
+                .thenAnswer(invocation -> {
+                    long telegramId = invocation.getArgument(0);
+                    List<String> linked = jdbc.query("""
+                            SELECT keycloak.subject FROM external_identities telegram
+                            JOIN external_identities keycloak ON keycloak.user_id = telegram.user_id
+                                AND keycloak.provider = 'keycloak'
+                            WHERE telegram.provider = 'telegram' AND telegram.subject = ?
+                            """, (rs, row) -> rs.getString(1), Long.toString(telegramId));
+                    return java.util.Optional.of(linked.isEmpty() ? subject : linked.get(0));
+                });
         tenantId = transactions.execute(status -> {
             UUID id = UUID.randomUUID();
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, id.toString());
@@ -1407,7 +1416,7 @@ class TransactionApiPostgresTest {
                         .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
                         .contentType("application/json")
                         .content("{\"telegramUserId\":" + telegramUserId + "}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk());
     }
 
     @Test
@@ -4494,10 +4503,10 @@ class TransactionApiPostgresTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tenants[0].tenantId").value(tenantId.toString()))
                 .andReturn().getResponse().getContentAsString();
-        assertEquals(userIdFor(subject), jdbc.queryForObject(
+        org.junit.jupiter.api.Assertions.assertEquals(userIdFor(subject), jdbc.queryForObject(
                 "SELECT user_id FROM external_identities WHERE provider = 'telegram' AND subject = ?",
                 UUID.class, Long.toString(telegramUserId)));
-        assertTrue(tenants.contains("API test"));
+        org.junit.jupiter.api.Assertions.assertTrue(tenants.contains("API test"));
 
         String context = mvc.perform(post("/internal/v1/telegram/actor-contexts")
                         .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
@@ -4561,7 +4570,7 @@ class TransactionApiPostgresTest {
                         .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
                         .contentType("application/json")
                         .content("{\"telegramUserId\":" + unmappedTelegramUserId + "}"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk());
     }
 
     @Test
