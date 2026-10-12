@@ -37,16 +37,41 @@ public class ReportService {
         this.adviceWaste = adviceWaste;
     }
 
+    /** Native actors are authorized by their canonical user ID; the legacy membership subject is an internal lookup. */
+    public Report get(UUID tenantId, UUID userId, String period, YearMonth requestedMonth,
+                      LocalDate from, LocalDate to, boolean family) {
+        if (tenantId == null || userId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid report request");
+        }
+        String subject = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForList("SELECT subject FROM memberships WHERE tenant_id = ? AND user_id = ? "
+                            + "AND status = 'active'", String.class, tenantId, userId)
+                    .stream().findFirst().orElse(null);
+        });
+        if (subject == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        return getResolved(tenantId, userId, subject, period, requestedMonth, from, to, family);
+    }
+
     public Report get(UUID tenantId, String subject, String period, YearMonth requestedMonth,
                       LocalDate from, LocalDate to, boolean family) {
         if (tenantId == null || subject == null || subject.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid report request");
         }
+        UUID userId = transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return jdbc.queryForList("SELECT user_id FROM memberships WHERE tenant_id = ? AND subject = ? "
+                            + "AND status = 'active'", UUID.class, tenantId, subject)
+                    .stream().findFirst().orElse(null);
+        });
+        if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        return getResolved(tenantId, userId, subject, period, requestedMonth, from, to, family);
+    }
+
+    private Report getResolved(UUID tenantId, UUID userId, String subject, String period,
+                               YearMonth requestedMonth, LocalDate from, LocalDate to, boolean family) {
         Report report = transaction.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
-            UUID userId = jdbc.queryForList("SELECT user_id FROM memberships WHERE tenant_id = ? AND subject = ? "
-                            + "AND status = 'active'", UUID.class, tenantId, subject).stream().findFirst().orElse(null);
-            if (userId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
             String timezone = jdbc.queryForObject("SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?",
                     String.class, tenantId, userId);
             ZoneId zone = ZoneId.of(timezone);
@@ -108,7 +133,7 @@ public class ReportService {
             }, timezone, tenantId, personalOwner, personalOwner, Timestamp.from(start), Timestamp.from(end));
 
             Integer weekendShare = weekendShare(totals.weekendTotal(), totals.weekdayTotal());
-            BudgetApi.Overview currentBudget = budgets.get(tenantId, subject);
+            BudgetApi.Overview currentBudget = budgets.get(tenantId, userId);
             String monthlyLimit = null;
             String monthlyRemaining = null;
             if ("month".equals(window.period())) {
@@ -117,7 +142,7 @@ public class ReportService {
                 monthlyRemaining = new BigDecimal(monthlyLimit).subtract(netSpend).setScale(2, RoundingMode.HALF_EVEN).toPlainString();
             }
             BudgetApi.RollingFoodStatus foodStatus = family
-                    ? budgets.rollingFoodStatus(tenantId, subject, true) : currentBudget.rolling7FoodStatus();
+                    ? budgets.rollingFoodStatus(tenantId, userId, true) : currentBudget.rolling7FoodStatus();
             return new Report(window.period(), scope, window.from(), window.to(), today, timezone, "RUB",
                     totals.incomeTotal(), totals.expenseTotal(), totals.debtPaymentTotal(), totals.refundTotal(),
                     totals.transactionCount(), Collections.unmodifiableMap(categoryTotals),

@@ -610,42 +610,52 @@ public class TransactionService {
     public DashboardSummary summary(UUID tenantId, String subject, YearMonth requestedMonth) {
         return transaction.execute(status -> {
             setTenantContext(tenantId);
-            UUID userId = resolveUser(subject);
-            if (userId == null || !isMember(tenantId, userId)) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
-            }
-            ZoneId memberZone = ZoneId.of(jdbc.queryForObject(
-                    "SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?",
-                    String.class, tenantId, userId));
-            YearMonth month = requestedMonth == null ? YearMonth.now(memberZone) : requestedMonth;
-            Instant start = month.atDay(1).atStartOfDay(memberZone).toInstant();
-            Instant end = month.plusMonths(1).atDay(1).atStartOfDay(memberZone).toInstant();
-            DashboardSummary totals = jdbc.queryForObject("""
-                    SELECT ? AS month,
-                           COALESCE(sum(amount) FILTER (WHERE type = 'income'), 0.00)::numeric(20,2)::text AS income_total,
-                           COALESCE(sum(amount) FILTER (WHERE type = 'expense'), 0.00)::numeric(20,2)::text AS expense_total,
-                           count(*)::integer AS transaction_count
-                    FROM transactions
-                    WHERE tenant_id = ? AND owner_user_id = ? AND status = 'posted'
-                      AND type IN ('income', 'expense') AND occurred_at >= ? AND occurred_at < ?
-                    """, (rs, row) -> new DashboardSummary(rs.getString("month"), "RUB",
-                     rs.getString("income_total"), rs.getString("expense_total"), rs.getInt("transaction_count"),
-                     null, 0, 0, 0, null, null, null, null),
-                    month.toString(), tenantId, userId, Timestamp.from(start), Timestamp.from(end));
-            LocalDate today = LocalDate.now(memberZone);
-            YearMonth currentMonth = YearMonth.from(today);
-            int daysInMonth = month.lengthOfMonth();
-            int daysElapsed = month.isBefore(currentMonth) ? daysInMonth
-                    : month.isAfter(currentMonth) ? 0 : today.getDayOfMonth();
-            String dailyPace = MonthlyPacePolicy.averageDailySpend(totals.expenseTotal(), daysElapsed);
-            String projection = month.equals(currentMonth)
-                    ? MonthlyPacePolicy.projectedSpend(totals.expenseTotal(), daysElapsed, daysInMonth) : null;
-            var safeToSpend = cashPlanning.safeToSpend(tenantId, userId, memberZone, today, month,
-                    totals.incomeTotal(), totals.expenseTotal());
-            return new DashboardSummary(totals.month(), totals.currency(), totals.incomeTotal(), totals.expenseTotal(),
-                    totals.transactionCount(), today, daysElapsed, daysInMonth, Math.max(0, daysInMonth - daysElapsed),
-                    dailyPace, projection, budgets.get(tenantId, subject).rolling7FoodStatus(), safeToSpend);
+            return summaryForUser(tenantId, resolveUser(subject), requestedMonth);
         });
+    }
+
+    public DashboardSummary summary(UUID tenantId, UUID userId, YearMonth requestedMonth) {
+        return transaction.execute(status -> {
+            setTenantContext(tenantId);
+            return summaryForUser(tenantId, userId, requestedMonth);
+        });
+    }
+
+    private DashboardSummary summaryForUser(UUID tenantId, UUID userId, YearMonth requestedMonth) {
+        if (userId == null || !isMember(tenantId, userId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+        ZoneId memberZone = ZoneId.of(jdbc.queryForObject(
+                "SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?",
+                String.class, tenantId, userId));
+        YearMonth month = requestedMonth == null ? YearMonth.now(memberZone) : requestedMonth;
+        Instant start = month.atDay(1).atStartOfDay(memberZone).toInstant();
+        Instant end = month.plusMonths(1).atDay(1).atStartOfDay(memberZone).toInstant();
+        DashboardSummary totals = jdbc.queryForObject("""
+                SELECT ? AS month,
+                       COALESCE(sum(amount) FILTER (WHERE type = 'income'), 0.00)::numeric(20,2)::text AS income_total,
+                       COALESCE(sum(amount) FILTER (WHERE type = 'expense'), 0.00)::numeric(20,2)::text AS expense_total,
+                       count(*)::integer AS transaction_count
+                FROM transactions
+                WHERE tenant_id = ? AND owner_user_id = ? AND status = 'posted'
+                  AND type IN ('income', 'expense') AND occurred_at >= ? AND occurred_at < ?
+                """, (rs, row) -> new DashboardSummary(rs.getString("month"), "RUB",
+                 rs.getString("income_total"), rs.getString("expense_total"), rs.getInt("transaction_count"),
+                 null, 0, 0, 0, null, null, null, null),
+                month.toString(), tenantId, userId, Timestamp.from(start), Timestamp.from(end));
+        LocalDate today = LocalDate.now(memberZone);
+        YearMonth currentMonth = YearMonth.from(today);
+        int daysInMonth = month.lengthOfMonth();
+        int daysElapsed = month.isBefore(currentMonth) ? daysInMonth
+                : month.isAfter(currentMonth) ? 0 : today.getDayOfMonth();
+        String dailyPace = MonthlyPacePolicy.averageDailySpend(totals.expenseTotal(), daysElapsed);
+        String projection = month.equals(currentMonth)
+                ? MonthlyPacePolicy.projectedSpend(totals.expenseTotal(), daysElapsed, daysInMonth) : null;
+        var safeToSpend = cashPlanning.safeToSpend(tenantId, userId, memberZone, today, month,
+                totals.incomeTotal(), totals.expenseTotal());
+        return new DashboardSummary(totals.month(), totals.currency(), totals.incomeTotal(), totals.expenseTotal(),
+                totals.transactionCount(), today, daysElapsed, daysInMonth, Math.max(0, daysInMonth - daysElapsed),
+                dailyPace, projection, budgets.get(tenantId, userId).rolling7FoodStatus(), safeToSpend);
     }
 
     private static List<BudgetAlertPolicy.Alert> crossedBudgetAlerts(BudgetApi.Overview before,

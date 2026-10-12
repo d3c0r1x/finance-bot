@@ -54,17 +54,29 @@ public class TransactionDraftService {
     }
 
     public DraftResponse create(UUID tenantId, String subject, String key, TransactionDraftApi.CreateRequest request) {
+        return createInternal(tenantId, subject, null, key, request);
+    }
+
+    /** Called only after the Telegram actor context has authenticated the canonical user. */
+    public DraftResponse createForUser(UUID tenantId, UUID userId, String key, TransactionDraftApi.CreateRequest request) {
+        return createInternal(tenantId, null, userId, key, request);
+    }
+
+    private DraftResponse createInternal(UUID tenantId, String subject, UUID nativeUserId, String key,
+                                         TransactionDraftApi.CreateRequest request) {
         validateKey(key);
-        if (tenantId == null || subject == null || subject.isBlank() || request == null || request.text() == null
+        if (tenantId == null || nativeUserId == null && (subject == null || subject.isBlank())
+                || request == null || request.text() == null
                 || request.text().isBlank() || request.text().trim().length() > 500) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid transaction draft text");
         }
         String text = request.text().trim();
         String hash = sha256(text);
-        MemberProfileApi.ProfileResponse profile = profiles.get(tenantId, subject);
+        MemberProfileApi.ProfileResponse profile = nativeUserId == null
+                ? profiles.get(tenantId, subject) : profileForUser(tenantId, nativeUserId);
         DraftResponse existing = transaction.execute(status -> {
-            setContext(tenantId, subject);
-            UUID userId = userId(subject);
+            setActorContext(tenantId, subject, nativeUserId);
+            UUID userId = nativeUserId == null ? userId(subject) : nativeUserId;
             return findByCreateKey(tenantId, userId, key, hash);
         });
         if (existing != null) return existing;
@@ -75,8 +87,8 @@ public class TransactionDraftService {
         validateAdvice(advice);
 
         return transaction.execute(status -> {
-            setContext(tenantId, subject);
-            UUID userId = userId(subject);
+            String ownerSubject = setActorContext(tenantId, subject, nativeUserId);
+            UUID userId = nativeUserId == null ? userId(subject) : nativeUserId;
             DraftResponse duplicate = findByCreateKey(tenantId, userId, key, hash);
             if (duplicate != null) return duplicate;
             UUID id = UUID.randomUUID();
@@ -87,7 +99,7 @@ public class TransactionDraftService {
                        create_idempotency_key, create_request_hash)
                     VALUES (?, ?, ?, ?, ?, ?, 'RUB', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (tenant_id, owner_user_id, create_idempotency_key) DO NOTHING RETURNING id
-                    """, (rs, row) -> rs.getObject("id", UUID.class), id, tenantId, userId, subject,
+                    """, (rs, row) -> rs.getObject("id", UUID.class), id, tenantId, userId, ownerSubject,
                     advice.type(), MoneyAmount.parse(advice.amount()).value(),
                     advice.categoryCode(), advice.subcategoryCode(), advice.description(),
                     Timestamp.from(OffsetDateTime.parse(advice.occurredAt()).toInstant()), advice.provider(),
@@ -145,19 +157,36 @@ public class TransactionDraftService {
     }
 
     public DraftResponse get(UUID tenantId, String subject, UUID id) {
+        return getInternal(tenantId, subject, null, id);
+    }
+
+    public DraftResponse getForUser(UUID tenantId, UUID userId, UUID id) {
+        return getInternal(tenantId, null, userId, id);
+    }
+
+    private DraftResponse getInternal(UUID tenantId, String subject, UUID nativeUserId, UUID id) {
         return transaction.execute(status -> {
-            setContext(tenantId, subject);
-            UUID userId = userId(subject);
+            setActorContext(tenantId, subject, nativeUserId);
+            UUID userId = nativeUserId == null ? userId(subject) : nativeUserId;
             return getWithinTransaction(tenantId, userId, id, false);
         });
     }
 
     public DraftResponse update(UUID tenantId, String subject, UUID id, long expectedVersion, UpdateRequest request) {
+        return updateInternal(tenantId, subject, null, id, expectedVersion, request);
+    }
+
+    public DraftResponse updateForUser(UUID tenantId, UUID userId, UUID id, long expectedVersion, UpdateRequest request) {
+        return updateInternal(tenantId, null, userId, id, expectedVersion, request);
+    }
+
+    private DraftResponse updateInternal(UUID tenantId, String subject, UUID nativeUserId, UUID id,
+                                         long expectedVersion, UpdateRequest request) {
         validateUpdate(request);
         if (expectedVersion < 1) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid draft version");
         return transaction.execute(status -> {
-            setContext(tenantId, subject);
-            UUID userId = userId(subject);
+            setActorContext(tenantId, subject, nativeUserId);
+            UUID userId = nativeUserId == null ? userId(subject) : nativeUserId;
             DraftResponse before = getWithinTransaction(tenantId, userId, id, true);
             requirePending(before, expectedVersion);
             if (request.debtId() != null && jdbc.queryForObject("SELECT count(*) FROM debts WHERE tenant_id = ? AND id = ?",
@@ -176,13 +205,22 @@ public class TransactionDraftService {
     }
 
     public DraftResponse updateAmount(UUID tenantId, String subject, UUID id, long expectedVersion, String amount) {
+        return updateAmountInternal(tenantId, subject, null, id, expectedVersion, amount);
+    }
+
+    public DraftResponse updateAmountForUser(UUID tenantId, UUID userId, UUID id, long expectedVersion, String amount) {
+        return updateAmountInternal(tenantId, null, userId, id, expectedVersion, amount);
+    }
+
+    private DraftResponse updateAmountInternal(UUID tenantId, String subject, UUID nativeUserId, UUID id,
+                                               long expectedVersion, String amount) {
         if (expectedVersion < 1 || amount == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid draft amount update");
         }
         var parsedAmount = MoneyAmount.parse(amount).value();
         return transaction.execute(status -> {
-            setContext(tenantId, subject);
-            UUID userId = userId(subject);
+            setActorContext(tenantId, subject, nativeUserId);
+            UUID userId = nativeUserId == null ? userId(subject) : nativeUserId;
             DraftResponse before = getWithinTransaction(tenantId, userId, id, true);
             requirePending(before, expectedVersion);
             jdbc.update("UPDATE transaction_drafts SET amount = ?, version = version + 1, updated_at = now() "
@@ -233,10 +271,18 @@ public class TransactionDraftService {
     }
 
     public void cancel(UUID tenantId, String subject, UUID id, long expectedVersion) {
+        cancelInternal(tenantId, subject, null, id, expectedVersion);
+    }
+
+    public void cancelForUser(UUID tenantId, UUID userId, UUID id, long expectedVersion) {
+        cancelInternal(tenantId, null, userId, id, expectedVersion);
+    }
+
+    private void cancelInternal(UUID tenantId, String subject, UUID nativeUserId, UUID id, long expectedVersion) {
         if (expectedVersion < 1) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid draft version");
         transaction.executeWithoutResult(status -> {
-            setContext(tenantId, subject);
-            UUID userId = userId(subject);
+            setActorContext(tenantId, subject, nativeUserId);
+            UUID userId = nativeUserId == null ? userId(subject) : nativeUserId;
             DraftResponse draft = getWithinTransaction(tenantId, userId, id, true);
             requirePending(draft, expectedVersion);
             jdbc.update("UPDATE transaction_drafts SET state = 'cancelled', version = version + 1, updated_at = now() "
@@ -274,6 +320,43 @@ public class TransactionDraftService {
                 (rs, row) -> rs.getObject(1, UUID.class), subject);
         if (ids.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
         return ids.get(0);
+    }
+
+    private String setActorContext(UUID tenantId, String subject, UUID nativeUserId) {
+        if (nativeUserId == null) {
+            setContext(tenantId, subject);
+            return subject;
+        }
+        if (tenantId == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+        jdbc.queryForObject("SELECT set_config('app.user_id', ?, true)", String.class, nativeUserId.toString());
+        List<String> subjects = jdbc.query("""
+                SELECT membership.subject FROM memberships membership
+                JOIN users ON users.id = membership.user_id AND users.status = 'active'
+                JOIN external_identities telegram ON telegram.user_id = users.id AND telegram.provider = 'telegram'
+                WHERE membership.tenant_id = ? AND membership.user_id = ? AND membership.status = 'active'
+                """, (rs, row) -> rs.getString(1), tenantId, nativeUserId);
+        if (subjects.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        String actorSubject = subjects.get(0);
+        jdbc.queryForObject("SELECT set_config('app.subject', ?, true)", String.class, actorSubject);
+        String role = jdbc.queryForObject("SELECT role FROM memberships WHERE tenant_id = ? AND user_id = ? AND status = 'active'",
+                String.class, tenantId, nativeUserId);
+        if ("viewer".equals(role)) throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Viewer access is read-only");
+        return actorSubject;
+    }
+
+    private MemberProfileApi.ProfileResponse profileForUser(UUID tenantId, UUID userId) {
+        return transaction.execute(status -> {
+            setActorContext(tenantId, null, userId);
+            List<MemberProfileApi.ProfileResponse> profiles = jdbc.query("""
+                    SELECT display_name, planned_income, onboarding_state, timezone, currency
+                    FROM member_profiles WHERE tenant_id = ? AND user_id = ?
+                    """, (rs, row) -> new MemberProfileApi.ProfileResponse(rs.getString("display_name"),
+                    rs.getBigDecimal("planned_income"), rs.getString("onboarding_state"), rs.getString("timezone"),
+                    rs.getString("currency")), tenantId, userId);
+            if (profiles.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Profile not found");
+            return profiles.get(0);
+        });
     }
 
     private void setContext(UUID tenantId, String subject) {

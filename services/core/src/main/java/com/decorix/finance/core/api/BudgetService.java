@@ -55,132 +55,152 @@ public class BudgetService {
     public Overview get(UUID tenantId, String subject) {
         return transaction.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
-            UUID userId = resolveUser(subject);
-            if (userId == null || !isMember(tenantId, userId)) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
-            }
-            Map<String, String> family = new LinkedHashMap<>(DEFAULT_LIMITS);
-            Map<String, String> personal = new LinkedHashMap<>();
-            Map<String, Long> familyVersions = new LinkedHashMap<>();
-            Map<String, Long> personalVersions = new LinkedHashMap<>();
-            DEFAULT_LIMITS.keySet().forEach(key -> familyVersions.put(key, 0L));
-            Map<String, StoredBudget> rows = jdbc.query("""
-                    SELECT budget_key, owner_user_id::text AS owner_id, amount::numeric(20,2)::text AS amount,
-                           version, active
-                    FROM tenant_budgets
-                    WHERE tenant_id = ? AND period = 'monthly' AND (owner_user_id IS NULL OR owner_user_id = ?)
-                    """, rs -> {
-                Map<String, StoredBudget> stored = new LinkedHashMap<>();
-                while (rs.next()) {
-                    String key = rs.getString("budget_key");
-                    String owner = rs.getString("owner_id");
-                    stored.put((owner == null ? "family:" : "personal:") + key,
-                            new StoredBudget(null, key, rs.getString("amount"), rs.getLong("version"), rs.getBoolean("active")));
-                }
-                return stored;
-            }, tenantId, userId);
-            String personalTotal = null;
-            long familyTotalVersion = 0;
-            long personalTotalVersion = 0;
-            for (var entry : rows.entrySet()) {
-                String[] parts = entry.getKey().split(":", 2);
-                StoredBudget stored = entry.getValue();
-                if ("family".equals(parts[0])) {
-                    if ("__total__".equals(parts[1])) familyTotalVersion = stored.version();
-                    else familyVersions.put(parts[1], stored.version());
-                    if (stored.active()) family.put(parts[1], stored.amount());
-                } else {
-                    if ("__total__".equals(parts[1])) personalTotalVersion = stored.version();
-                    else personalVersions.put(parts[1], stored.version());
-                    if (stored.active()) {
-                        if ("__total__".equals(parts[1])) personalTotal = stored.amount();
-                        else personal.put(parts[1], stored.amount());
-                    }
-                }
-            }
-            String familyTotal = family.getOrDefault("__total__", "55000.00");
-            family.remove("__total__");
-            Map<String, String> effective = new LinkedHashMap<>(family);
-            effective.putAll(personal);
-            ZoneId zone = ZoneId.of(jdbc.queryForObject(
-                    "SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?", String.class, tenantId, userId));
-            YearMonth month = YearMonth.now(zone);
-            Instant start = month.atDay(1).atStartOfDay(zone).toInstant();
-            Instant end = month.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant();
-            Map<String, String> spent = jdbc.query("""
-                    SELECT category_code, (COALESCE(sum(amount) FILTER (WHERE type = 'expense'), 0)
-                           - COALESCE(sum(amount) FILTER (WHERE type = 'refund'), 0))::numeric(20,2)::text AS spent
-                    FROM transactions WHERE tenant_id = ? AND owner_user_id = ? AND status = 'posted'
-                      AND type IN ('expense', 'refund') AND occurred_at >= ? AND occurred_at < ?
-                    GROUP BY category_code
-                    """, rs -> {
-                Map<String, String> totals = new LinkedHashMap<>();
-                while (rs.next()) totals.put(rs.getString("category_code"), rs.getString("spent"));
-                return totals;
-            }, tenantId, userId, java.sql.Timestamp.from(start), java.sql.Timestamp.from(end));
-            BigDecimal totalSpent = spent.values().stream().map(BigDecimal::new)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            Map<String, String> limitStatus = new LinkedHashMap<>();
-            for (String category : effective.keySet()) {
-                BigDecimal amount = new BigDecimal(spent.getOrDefault(category, "0.00"));
-                limitStatus.put(category, budgetStatus(amount, new BigDecimal(effective.get(category))));
-            }
-            String totalLimit = personalTotal == null ? familyTotal : personalTotal;
-            Map<String, StoredBudget> rollingRows = jdbc.query("""
-                    SELECT id, owner_user_id::text AS owner_id, amount::numeric(20,2)::text AS amount, version, active
-                    FROM tenant_budgets WHERE tenant_id = ? AND budget_key = 'еда' AND period = 'rolling7'
-                      AND (owner_user_id IS NULL OR owner_user_id = ?)
-                    """, rs -> {
-                Map<String, StoredBudget> stored = new LinkedHashMap<>();
-                while (rs.next()) {
-                    String owner = rs.getString("owner_id");
-                    stored.put(owner == null ? "family" : "personal", new StoredBudget(rs.getObject("id", UUID.class),
-                            "еда", "rolling7", rs.getString("amount"), rs.getLong("version"), rs.getBoolean("active")));
-                }
-                return stored;
-            }, tenantId, userId);
-            String familyRollingLimit = "0.00";
-            String personalRollingLimit = null;
-            long familyRollingVersion = 0;
-            long personalRollingVersion = 0;
-            for (var rollingEntry : rollingRows.entrySet()) {
-                StoredBudget rolling = rollingEntry.getValue();
-                if ("personal".equals(rollingEntry.getKey())) {
-                    personalRollingVersion = rolling.version();
-                    if (rolling.active()) personalRollingLimit = rolling.amount();
-                } else {
-                    familyRollingVersion = rolling.version();
-                    if (rolling.active()) familyRollingLimit = rolling.amount();
-                }
-            }
-            String effectiveRollingLimit = personalRollingLimit == null ? familyRollingLimit : personalRollingLimit;
-            LocalDate today = java.time.LocalDate.now(zone);
-            BudgetApi.RollingFoodStatus foodStatus = calculateRollingFoodStatus(
-                    tenantId, userId, zone, today, effectiveRollingLimit);
-            String rollingSpent = foodStatus.spent();
-            return new Overview("RUB", month.toString(), Map.copyOf(family), Map.copyOf(personal), Map.copyOf(effective),
-                    Map.copyOf(spent), Map.copyOf(limitStatus), Map.copyOf(familyVersions), Map.copyOf(personalVersions),
-                    familyTotal, personalTotal, totalLimit, totalSpent.setScale(2).toPlainString(),
-                    budgetStatus(totalSpent, new BigDecimal(totalLimit)), familyTotalVersion, personalTotalVersion,
-                    familyRollingLimit, personalRollingLimit, effectiveRollingLimit, rollingSpent,
-                    foodStatus.limitStatus(), familyRollingVersion, personalRollingVersion, foodStatus);
+            return getForUser(tenantId, resolveUser(subject));
         });
+    }
+
+    public Overview get(UUID tenantId, UUID userId) {
+        return transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return getForUser(tenantId, userId);
+        });
+    }
+
+    private Overview getForUser(UUID tenantId, UUID userId) {
+        if (userId == null || !isMember(tenantId, userId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+        Map<String, String> family = new LinkedHashMap<>(DEFAULT_LIMITS);
+        Map<String, String> personal = new LinkedHashMap<>();
+        Map<String, Long> familyVersions = new LinkedHashMap<>();
+        Map<String, Long> personalVersions = new LinkedHashMap<>();
+        DEFAULT_LIMITS.keySet().forEach(key -> familyVersions.put(key, 0L));
+        Map<String, StoredBudget> rows = jdbc.query("""
+                SELECT budget_key, owner_user_id::text AS owner_id, amount::numeric(20,2)::text AS amount,
+                       version, active
+                FROM tenant_budgets
+                WHERE tenant_id = ? AND period = 'monthly' AND (owner_user_id IS NULL OR owner_user_id = ?)
+                """, rs -> {
+            Map<String, StoredBudget> stored = new LinkedHashMap<>();
+            while (rs.next()) {
+                String key = rs.getString("budget_key");
+                String owner = rs.getString("owner_id");
+                stored.put((owner == null ? "family:" : "personal:") + key,
+                        new StoredBudget(null, key, rs.getString("amount"), rs.getLong("version"), rs.getBoolean("active")));
+            }
+            return stored;
+        }, tenantId, userId);
+        String personalTotal = null;
+        long familyTotalVersion = 0;
+        long personalTotalVersion = 0;
+        for (var entry : rows.entrySet()) {
+            String[] parts = entry.getKey().split(":", 2);
+            StoredBudget stored = entry.getValue();
+            if ("family".equals(parts[0])) {
+                if ("__total__".equals(parts[1])) familyTotalVersion = stored.version();
+                else familyVersions.put(parts[1], stored.version());
+                if (stored.active()) family.put(parts[1], stored.amount());
+            } else {
+                if ("__total__".equals(parts[1])) personalTotalVersion = stored.version();
+                else personalVersions.put(parts[1], stored.version());
+                if (stored.active()) {
+                    if ("__total__".equals(parts[1])) personalTotal = stored.amount();
+                    else personal.put(parts[1], stored.amount());
+                }
+            }
+        }
+        String familyTotal = family.getOrDefault("__total__", "55000.00");
+        family.remove("__total__");
+        Map<String, String> effective = new LinkedHashMap<>(family);
+        effective.putAll(personal);
+        ZoneId zone = ZoneId.of(jdbc.queryForObject(
+                "SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?", String.class, tenantId, userId));
+        YearMonth month = YearMonth.now(zone);
+        Instant start = month.atDay(1).atStartOfDay(zone).toInstant();
+        Instant end = month.plusMonths(1).atDay(1).atStartOfDay(zone).toInstant();
+        Map<String, String> spent = jdbc.query("""
+                SELECT category_code, (COALESCE(sum(amount) FILTER (WHERE type = 'expense'), 0)
+                       - COALESCE(sum(amount) FILTER (WHERE type = 'refund'), 0))::numeric(20,2)::text AS spent
+                FROM transactions WHERE tenant_id = ? AND owner_user_id = ? AND status = 'posted'
+                  AND type IN ('expense', 'refund') AND occurred_at >= ? AND occurred_at < ?
+                GROUP BY category_code
+                """, rs -> {
+            Map<String, String> totals = new LinkedHashMap<>();
+            while (rs.next()) totals.put(rs.getString("category_code"), rs.getString("spent"));
+            return totals;
+        }, tenantId, userId, java.sql.Timestamp.from(start), java.sql.Timestamp.from(end));
+        BigDecimal totalSpent = spent.values().stream().map(BigDecimal::new)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        Map<String, String> limitStatus = new LinkedHashMap<>();
+        for (String category : effective.keySet()) {
+            BigDecimal amount = new BigDecimal(spent.getOrDefault(category, "0.00"));
+            limitStatus.put(category, budgetStatus(amount, new BigDecimal(effective.get(category))));
+        }
+        String totalLimit = personalTotal == null ? familyTotal : personalTotal;
+        Map<String, StoredBudget> rollingRows = jdbc.query("""
+                SELECT id, owner_user_id::text AS owner_id, amount::numeric(20,2)::text AS amount, version, active
+                FROM tenant_budgets WHERE tenant_id = ? AND budget_key = 'еда' AND period = 'rolling7'
+                  AND (owner_user_id IS NULL OR owner_user_id = ?)
+                """, rs -> {
+            Map<String, StoredBudget> stored = new LinkedHashMap<>();
+            while (rs.next()) {
+                String owner = rs.getString("owner_id");
+                stored.put(owner == null ? "family" : "personal", new StoredBudget(rs.getObject("id", UUID.class),
+                        "еда", "rolling7", rs.getString("amount"), rs.getLong("version"), rs.getBoolean("active")));
+            }
+            return stored;
+        }, tenantId, userId);
+        String familyRollingLimit = "0.00";
+        String personalRollingLimit = null;
+        long familyRollingVersion = 0;
+        long personalRollingVersion = 0;
+        for (var rollingEntry : rollingRows.entrySet()) {
+            StoredBudget rolling = rollingEntry.getValue();
+            if ("personal".equals(rollingEntry.getKey())) {
+                personalRollingVersion = rolling.version();
+                if (rolling.active()) personalRollingLimit = rolling.amount();
+            } else {
+                familyRollingVersion = rolling.version();
+                if (rolling.active()) familyRollingLimit = rolling.amount();
+            }
+        }
+        String effectiveRollingLimit = personalRollingLimit == null ? familyRollingLimit : personalRollingLimit;
+        LocalDate today = java.time.LocalDate.now(zone);
+        BudgetApi.RollingFoodStatus foodStatus = calculateRollingFoodStatus(
+                tenantId, userId, zone, today, effectiveRollingLimit);
+        String rollingSpent = foodStatus.spent();
+        return new Overview("RUB", month.toString(), Map.copyOf(family), Map.copyOf(personal), Map.copyOf(effective),
+                Map.copyOf(spent), Map.copyOf(limitStatus), Map.copyOf(familyVersions), Map.copyOf(personalVersions),
+                familyTotal, personalTotal, totalLimit, totalSpent.setScale(2).toPlainString(),
+                budgetStatus(totalSpent, new BigDecimal(totalLimit)), familyTotalVersion, personalTotalVersion,
+                familyRollingLimit, personalRollingLimit, effectiveRollingLimit, rollingSpent,
+                foodStatus.limitStatus(), familyRollingVersion, personalRollingVersion, foodStatus);
     }
 
     public BudgetApi.RollingFoodStatus rollingFoodStatus(UUID tenantId, String subject, boolean family) {
         return transaction.execute(status -> {
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
-            UUID userId = resolveUser(subject);
-            if (userId == null || !isMember(tenantId, userId)) {
-                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
-            }
-            Overview overview = get(tenantId, subject);
-            String timezone = jdbc.queryForObject("SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?",
-                    String.class, tenantId, userId);
-            ZoneId zone = ZoneId.of(timezone);
-            return calculateRollingFoodStatus(tenantId, family ? null : userId, zone, LocalDate.now(zone),
-                    family ? overview.rolling7FoodLimit() : overview.effectiveRolling7FoodLimit());
+            return rollingFoodStatusForUser(tenantId, resolveUser(subject), family);
         });
+    }
+
+    public BudgetApi.RollingFoodStatus rollingFoodStatus(UUID tenantId, UUID userId, boolean family) {
+        return transaction.execute(status -> {
+            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
+            return rollingFoodStatusForUser(tenantId, userId, family);
+        });
+    }
+
+    private BudgetApi.RollingFoodStatus rollingFoodStatusForUser(UUID tenantId, UUID userId, boolean family) {
+        if (userId == null || !isMember(tenantId, userId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant not found");
+        }
+        Overview overview = getForUser(tenantId, userId);
+        String timezone = jdbc.queryForObject("SELECT timezone FROM member_profiles WHERE tenant_id = ? AND user_id = ?",
+                String.class, tenantId, userId);
+        ZoneId zone = ZoneId.of(timezone);
+        return calculateRollingFoodStatus(tenantId, family ? null : userId, zone, LocalDate.now(zone),
+                family ? overview.rolling7FoodLimit() : overview.effectiveRolling7FoodLimit());
     }
 
     private BudgetApi.RollingFoodStatus calculateRollingFoodStatus(UUID tenantId, UUID ownerId, ZoneId zone,

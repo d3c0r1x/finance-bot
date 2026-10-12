@@ -115,6 +115,23 @@ class TelegramNativeIdentityPostgresTest {
     }
 
     @Test
+    void disabledConfiguredAndroidAccountDoesNotCreateASecondTelegramProfile() {
+        long id = syntheticId();
+        String subject = "synthetic-disabled-android-" + UUID.randomUUID();
+        UUID userId = new TenantService(jdbc, tx, new TelegramAccessPolicy("", ""))
+                .create(subject, new TenantApi.CreateTenantRequest("Synthetic", "Europe/Moscow", "Friend", null))
+                .userId();
+        assertEquals(1, jdbc.update("UPDATE users SET status='disabled' WHERE id=?", userId));
+
+        TelegramAccessPolicy mapped = new TelegramAccessPolicy(Long.toString(id), id + "=" + subject);
+        assertThrows(ResponseStatusException.class,
+                () -> service(mapped).listTenants(id, "Synthetic friend"));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT count(*) FROM external_identities WHERE provider='telegram' AND subject=?",
+                Integer.class, Long.toString(id)));
+    }
+
+    @Test
     void nativeTelegramReadsOnlyItsOwnRecentTransactionsByCanonicalUserId() {
         long id = syntheticId();
         TelegramActorContextService contexts = service(new TelegramAccessPolicy(Long.toString(id), ""));

@@ -239,12 +239,17 @@ public class TelegramActorContextService {
     }
 
     private UUID existingAccountUser(String keycloakSubject) {
-        List<UUID> users = jdbc.query("""
-                SELECT identity.user_id FROM external_identities identity
-                JOIN users ON users.id = identity.user_id AND users.status = 'active'
+        List<LinkedUser> users = jdbc.query("""
+                SELECT identity.user_id, users.status FROM external_identities identity
+                JOIN users ON users.id = identity.user_id
                 WHERE identity.provider = 'keycloak' AND identity.subject = ?
-                """, (rs, row) -> rs.getObject("user_id", UUID.class), keycloakSubject);
-        return users.isEmpty() ? null : users.get(0);
+                """, (rs, row) -> new LinkedUser(rs.getObject("user_id", UUID.class), rs.getString("status")),
+                keycloakSubject);
+        if (users.isEmpty()) return null;
+        if (!"active".equals(users.get(0).status())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Configured Android account is inactive");
+        }
+        return users.get(0).userId();
     }
 
     private UUID configuredAccountUser(String keycloakSubject) {

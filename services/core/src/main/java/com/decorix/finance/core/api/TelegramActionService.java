@@ -84,7 +84,7 @@ public class TelegramActionService {
     public DashboardSummary dashboardSummary(String actorToken) {
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(actorToken, "report.read");
-            return transactions.summary(actor.tenantId(), actor.keycloakSubject(), null);
+            return transactions.summary(actor.tenantId(), actor.userId(), null);
         });
     }
 
@@ -100,7 +100,7 @@ public class TelegramActionService {
         }
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "report.read");
-            return reports.get(actor.tenantId(), actor.keycloakSubject(), request.period(), request.month(),
+            return reports.get(actor.tenantId(), actor.userId(), request.period(), request.month(),
                     request.from(), request.to(), family);
         });
     }
@@ -224,7 +224,7 @@ public class TelegramActionService {
         if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Draft request is required");
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "transaction.write.own");
-            return drafts.create(actor.tenantId(), actor.keycloakSubject(), request.idempotencyKey(),
+            return drafts.createForUser(actor.tenantId(), actor.userId(), request.idempotencyKey(),
                     new CreateRequest(request.text()));
         });
     }
@@ -246,7 +246,7 @@ public class TelegramActionService {
         }
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "transaction.write.own");
-            return drafts.updateAmount(actor.tenantId(), actor.keycloakSubject(), draftId,
+            return drafts.updateAmountForUser(actor.tenantId(), actor.userId(), draftId,
                     request.version(), request.amount());
         });
     }
@@ -255,7 +255,7 @@ public class TelegramActionService {
         if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Draft lookup is required");
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "transaction.write.own");
-            return drafts.get(actor.tenantId(), actor.keycloakSubject(), draftId);
+            return drafts.getForUser(actor.tenantId(), actor.userId(), draftId);
         });
     }
 
@@ -265,7 +265,7 @@ public class TelegramActionService {
         }
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "transaction.write.own");
-            return drafts.update(actor.tenantId(), actor.keycloakSubject(), draftId, request.version(),
+            return drafts.updateForUser(actor.tenantId(), actor.userId(), draftId, request.version(),
                     new com.decorix.finance.core.api.TransactionDraftApi.UpdateRequest(request.type(), request.amount(),
                             request.currency(), request.categoryCode(), request.subcategoryCode(), request.description(),
                             request.occurredAt(), request.debtId()));
@@ -278,7 +278,7 @@ public class TelegramActionService {
         }
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "transaction.write.own");
-            drafts.cancel(actor.tenantId(), actor.keycloakSubject(), draftId, request.version());
+            drafts.cancelForUser(actor.tenantId(), actor.userId(), draftId, request.version());
             return new DraftCancelledResponse("cancelled");
         });
     }
@@ -296,7 +296,7 @@ public class TelegramActionService {
         if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Budget request is required");
         return transaction.execute(status -> {
             ActorContext actor = actorContexts.require(request.token(), "budget.read");
-            return budgets.get(actor.tenantId(), actor.keycloakSubject());
+            return budgets.get(actor.tenantId(), actor.userId());
         });
     }
 
