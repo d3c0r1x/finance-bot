@@ -62,14 +62,24 @@ internal data class FinanceExportDownloadContext(
     val screenResumed: Boolean,
 )
 
-internal data class FinanceExportStatusRequest(val generation: Long)
+internal data class FinanceExportStatusIdentity(val tenantId: String, val sessionGeneration: Long)
+
+internal data class FinanceExportStatusRequest(
+    val generation: Long,
+    val identity: FinanceExportStatusIdentity,
+)
 
 internal object FinanceExportStatusPolicy {
     fun isCurrent(
         request: FinanceExportStatusRequest,
         currentGeneration: Long,
+        currentIdentity: FinanceExportStatusIdentity?,
         screenActive: Boolean,
-    ): Boolean = screenActive && request.generation == currentGeneration
+    ): Boolean = screenActive && request.generation == currentGeneration &&
+        request.identity == currentIdentity
+
+    fun ownsStatusBusy(request: FinanceExportStatusRequest, currentGeneration: Long, busyKind: String?): Boolean =
+        request.generation == currentGeneration && busyKind == "status"
 }
 
 internal object FinanceExportDownloadPolicy {

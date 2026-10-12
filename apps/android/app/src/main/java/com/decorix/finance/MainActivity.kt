@@ -261,6 +261,9 @@ class MainActivity : ComponentActivity() {
                         onExportDownload = ::requestExportDownload,
                         onExportScreenEnter = ::enterExportScreen,
                         onExportScreenExit = ::leaveExportScreen,
+                        exportPollIdentity = ui.tenants.firstOrNull()?.id?.let {
+                            FinanceExportStatusIdentity(it, api.authSessionGeneration)
+                        },
                         onHealthRefresh = ::loadHealthStatus)
                 }
             }
@@ -3463,14 +3466,21 @@ class MainActivity : ComponentActivity() {
         val tenant = ui.tenants.firstOrNull() ?: return
         if (!ui.authenticated || ui.exportJob?.id != exportId || ui.exportJobTenantId != tenant.id ||
             ui.exportBusy) return
-        val request = FinanceExportStatusRequest(exportStatusGeneration.incrementAndGet())
         val sessionGeneration = api.authSessionGeneration
+        val request = FinanceExportStatusRequest(
+            generation = exportStatusGeneration.incrementAndGet(),
+            identity = FinanceExportStatusIdentity(tenant.id, sessionGeneration),
+        )
         exportBusyKind = "status"
         ui = ui.copy(exportBusy = true, exportError = null)
         executor.execute {
             runCatching { api.exportStatus(tenant.id, exportId, sessionGeneration) }
                 .onSuccess { job ->
-                    if (FinanceExportStatusPolicy.isCurrent(request, exportStatusGeneration.get(), exportScreenActive) &&
+                    if (FinanceExportStatusPolicy.isCurrent(
+                            request, exportStatusGeneration.get(),
+                            ui.tenants.firstOrNull()?.id?.let { FinanceExportStatusIdentity(it, api.authSessionGeneration) },
+                            exportScreenActive,
+                        ) &&
                         api.authSessionGeneration == sessionGeneration && ui.authenticated &&
                         ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
                         exportBusyKind = null
@@ -3499,10 +3509,16 @@ class MainActivity : ComponentActivity() {
                                     "The download link is no longer available. Refresh the status.", Toast.LENGTH_SHORT).show()
                             }
                         }
+                    } else {
+                        clearStaleExportStatusState(request, downloadAttempt)
                     }
                 }
                 .onFailure { error ->
-                    if (FinanceExportStatusPolicy.isCurrent(request, exportStatusGeneration.get(), exportScreenActive) &&
+                    if (FinanceExportStatusPolicy.isCurrent(
+                            request, exportStatusGeneration.get(),
+                            ui.tenants.firstOrNull()?.id?.let { FinanceExportStatusIdentity(it, api.authSessionGeneration) },
+                            exportScreenActive,
+                        ) &&
                         api.authSessionGeneration == sessionGeneration && ui.authenticated &&
                         ui.tenants.firstOrNull()?.id == tenant.id && ui.exportJob?.id == exportId) {
                         exportBusyKind = null
@@ -3511,8 +3527,23 @@ class MainActivity : ComponentActivity() {
                         if (downloadAttempt != null && pendingExportDownload == downloadAttempt) {
                             pendingExportDownload = null
                         }
+                    } else {
+                        clearStaleExportStatusState(request, downloadAttempt)
                     }
                 }
+        }
+    }
+
+    private fun clearStaleExportStatusState(
+        request: FinanceExportStatusRequest,
+        downloadAttempt: FinanceExportDownloadAttempt?,
+    ) {
+        if (downloadAttempt != null && pendingExportDownload == downloadAttempt) {
+            pendingExportDownload = null
+        }
+        if (FinanceExportStatusPolicy.ownsStatusBusy(request, exportStatusGeneration.get(), exportBusyKind)) {
+            exportBusyKind = null
+            ui = ui.copy(exportBusy = false)
         }
     }
 
@@ -4128,6 +4159,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onExportDownload: (String) -> Unit = {},
                           onExportScreenEnter: () -> Unit = {},
                           onExportScreenExit: () -> Unit = {},
+                          exportPollIdentity: FinanceExportStatusIdentity? = null,
                           onHealthRefresh: () -> Unit = {}) {
     val russian = language == "ru"
     var workspace by androidx.compose.runtime.remember { mutableStateOf("") }
@@ -4483,6 +4515,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         onRefresh = onExportRefresh,
                         onDownload = onExportDownload,
                         modifier = Modifier.weight(1f),
+                        pollIdentity = exportPollIdentity,
                     )
                     "imports" -> BankImportPreviewSection(
                         modifier = Modifier.weight(1f),

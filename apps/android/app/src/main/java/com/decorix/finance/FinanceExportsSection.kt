@@ -48,6 +48,7 @@ internal fun FinanceExportsSection(
     onRefresh: (String) -> Unit,
     onDownload: (String) -> Unit,
     modifier: Modifier = Modifier,
+    pollIdentity: FinanceExportStatusIdentity? = null,
     pollDelay: suspend (Long) -> Unit = { delay(it) },
 ) {
     val russian = language == "ru"
@@ -86,8 +87,9 @@ internal fun FinanceExportsSection(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(job?.id, job?.status, screenResumed) {
-        while (FinanceExportPollingPolicy.shouldPoll(job?.status, polls.intValue, screenResumed)) {
+    LaunchedEffect(job?.id, job?.status, screenResumed, pollIdentity) {
+        while (pollIdentity != null &&
+            FinanceExportPollingPolicy.shouldPoll(job?.status, polls.intValue, screenResumed)) {
             pollDelay(FinanceExportPollingPolicy.INTERVAL_MILLIS)
             if (FinanceExportPollingPolicy.shouldPoll(job?.status, polls.intValue, screenResumed)) {
                 polls.intValue += 1

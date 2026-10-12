@@ -6,26 +6,79 @@ import org.junit.Test
 
 class FinanceExportStatusLifecyclePolicyTest {
     @Test fun responseStartedBeforePauseIsRejectedAfterResume() {
-        val request = FinanceExportStatusRequest(generation = 4L)
+        val identity = FinanceExportStatusIdentity(tenantId = "tenant-a", sessionGeneration = 10L)
+        val request = FinanceExportStatusRequest(generation = 4L, identity = identity)
 
         assertFalse(
             FinanceExportStatusPolicy.isCurrent(
                 request = request,
                 currentGeneration = 5L,
+                currentIdentity = identity,
                 screenActive = true,
             ),
         )
     }
 
     @Test fun responseForCurrentLifecycleAndRequestRemainsEligible() {
-        val request = FinanceExportStatusRequest(generation = 4L)
+        val identity = FinanceExportStatusIdentity(tenantId = "tenant-a", sessionGeneration = 10L)
+        val request = FinanceExportStatusRequest(generation = 4L, identity = identity)
 
         assertTrue(
             FinanceExportStatusPolicy.isCurrent(
                 request = request,
                 currentGeneration = 4L,
+                currentIdentity = identity,
                 screenActive = true,
             ),
         )
+    }
+
+    @Test fun responseFromPreviousTenantIsRejected() {
+        val request = FinanceExportStatusRequest(
+            generation = 4L,
+            identity = FinanceExportStatusIdentity(tenantId = "tenant-a", sessionGeneration = 10L),
+        )
+
+        assertFalse(
+            FinanceExportStatusPolicy.isCurrent(
+                request = request,
+                currentGeneration = 4L,
+                currentIdentity = FinanceExportStatusIdentity(tenantId = "tenant-b", sessionGeneration = 10L),
+                screenActive = true,
+            ),
+        )
+    }
+
+    @Test fun responseFromPreviousSessionIsRejected() {
+        val request = FinanceExportStatusRequest(
+            generation = 4L,
+            identity = FinanceExportStatusIdentity(tenantId = "tenant-a", sessionGeneration = 10L),
+        )
+
+        assertFalse(
+            FinanceExportStatusPolicy.isCurrent(
+                request = request,
+                currentGeneration = 4L,
+                currentIdentity = FinanceExportStatusIdentity(tenantId = "tenant-a", sessionGeneration = 11L),
+                screenActive = true,
+            ),
+        )
+    }
+
+    @Test fun staleStatusCompletionMayClearOnlyItsStillOwnedBusyState() {
+        val identity = FinanceExportStatusIdentity(tenantId = "tenant-a", sessionGeneration = 10L)
+        val request = FinanceExportStatusRequest(generation = 4L, identity = identity)
+
+        assertFalse(
+            FinanceExportStatusPolicy.isCurrent(
+                request = request,
+                currentGeneration = 4L,
+                currentIdentity = FinanceExportStatusIdentity(tenantId = "tenant-b", sessionGeneration = 10L),
+                screenActive = true,
+            ),
+        )
+        assertTrue(FinanceExportStatusPolicy.ownsStatusBusy(request, currentGeneration = 4L, busyKind = "status"))
+        assertFalse(FinanceExportStatusPolicy.ownsStatusBusy(request, currentGeneration = 5L, busyKind = "status"))
+        assertFalse(FinanceExportStatusPolicy.ownsStatusBusy(request, currentGeneration = 4L, busyKind = "create"))
     }
 }

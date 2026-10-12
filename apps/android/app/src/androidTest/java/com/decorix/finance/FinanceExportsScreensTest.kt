@@ -154,6 +154,7 @@ class FinanceExportsScreensTest {
                     role = "owner", language = "ru", timezone = "UTC", members = emptyList(),
                     membersLoading = false, job = job("processing"), busy = false, error = null,
                     onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                    pollIdentity = FinanceExportStatusIdentity("tenant-test", 1L),
                     pollDelay = { millis -> waits += millis },
                 )
             }
@@ -179,6 +180,7 @@ class FinanceExportsScreensTest {
                     role = "owner", language = "ru", timezone = "UTC", members = emptyList(),
                     membersLoading = false, job = job("queued"), busy = false, error = null,
                     onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                    pollIdentity = FinanceExportStatusIdentity("tenant-test", 1L),
                     pollDelay = {
                         suspendCancellableCoroutine { continuation ->
                             waitStarted.set(true)
@@ -215,6 +217,7 @@ class FinanceExportsScreensTest {
                         role = "owner", language = "ru", timezone = "UTC", members = emptyList(),
                         membersLoading = false, job = job("processing"), busy = false, error = null,
                         onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                        pollIdentity = FinanceExportStatusIdentity("tenant-test", 1L),
                         pollDelay = {
                             suspendCancellableCoroutine { continuation ->
                                 waitStarted.set(true)
@@ -238,6 +241,64 @@ class FinanceExportsScreensTest {
         compose.waitForIdle()
 
         assertTrue(waitCancelled.get())
+        assertEquals(emptyList<String>(), refreshes)
+    }
+
+    @Test fun tenantAndSessionChangesCancelPendingAutomaticStatusWait() {
+        val identity = mutableStateOf(FinanceExportStatusIdentity("tenant-a", 10L))
+        val waitStartedFor = mutableListOf<FinanceExportStatusIdentity>()
+        val waitCancelledFor = mutableListOf<FinanceExportStatusIdentity>()
+        val refreshes = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                FinanceExportsSection(
+                    role = "owner", language = "en", timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = job("queued"), busy = false, error = null,
+                    onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                    pollIdentity = identity.value,
+                    pollDelay = {
+                        val startedFor = identity.value
+                        suspendCancellableCoroutine { continuation ->
+                            waitStartedFor += startedFor
+                            continuation.invokeOnCancellation { waitCancelledFor += startedFor }
+                        }
+                    },
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        assertEquals(listOf(FinanceExportStatusIdentity("tenant-a", 10L)), waitStartedFor)
+
+        compose.runOnIdle { identity.value = FinanceExportStatusIdentity("tenant-b", 10L) }
+        compose.waitForIdle()
+        assertEquals(
+            listOf(FinanceExportStatusIdentity("tenant-a", 10L)),
+            waitCancelledFor,
+        )
+        assertEquals(
+            listOf(FinanceExportStatusIdentity("tenant-a", 10L), FinanceExportStatusIdentity("tenant-b", 10L)),
+            waitStartedFor,
+        )
+
+        compose.runOnIdle { identity.value = FinanceExportStatusIdentity("tenant-b", 11L) }
+        compose.waitForIdle()
+
+        assertEquals(
+            listOf(
+                FinanceExportStatusIdentity("tenant-a", 10L),
+                FinanceExportStatusIdentity("tenant-b", 10L),
+            ),
+            waitCancelledFor,
+        )
+        assertEquals(
+            listOf(
+                FinanceExportStatusIdentity("tenant-a", 10L),
+                FinanceExportStatusIdentity("tenant-b", 10L),
+                FinanceExportStatusIdentity("tenant-b", 11L),
+            ),
+            waitStartedFor,
+        )
         assertEquals(emptyList<String>(), refreshes)
     }
 
