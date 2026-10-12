@@ -136,7 +136,9 @@ features:
       scenario: "Android counterpart for F07: Добавление дохода и источника операции"
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
-      gap: "Existing Android test reference does not prove every F07 acceptance condition or live Core integration."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceIncomeDraftApiTest.kt"
+      evidence: "MockWebServer Android API test proves income draft fields, stable idempotency key, explicit versioned confirmation, and income history fields including source and offset-bearing date. It checks that draft review sends no confirmation or direct transaction request. Existing PostgreSQL acceptance covers pending income totals and budget spend; live Android-to-Core/OIDC remains unverified."
+      gap: "No authenticated live Android-to-Core/OIDC integration test. MockWebServer test does not prove database persistence."
     intentional_differences: []
   - id: F08
     feature: "История последних операций, повтор траты, отмена последней; `main_menu.py`"
