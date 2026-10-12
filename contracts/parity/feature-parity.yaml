@@ -304,8 +304,8 @@ features:
     android:
       status: partial
       scenario: "Android counterpart for F15: Правка/удаление/добавление позиций, страницы по 8, сумма по позициям"
-      gap: "Android F15.1-F15.4 now supports owner-scoped item paging, exact-value edit and add, and explicit total sync while preserving Core's cash total. Item deletion and the remaining receipt duplicate/review/confirmation flow, plus live authenticated Android-to-Core E2E, remain open."
-      evidence: "API 27 instrumentation and Compose coverage exercise eight-row paging, exact decimal values/version guards, writer-only add/edit/sync, viewer read-only behavior, unchanged cash total, page-two item access, stale/ambiguous outcome recovery, and localized validation. F15.4 full Android instrumentation passed 141/141 locally; its APK was installed and launched on the isolated API 27 emulator."
+      gap: "Android F15.1-F15.5 supports owner-scoped item paging, exact-value edit/add, explicit delete confirmation, and explicit total sync while preserving Core's cash total. Android F15 remains partial only until live authenticated Android-to-Core OIDC E2E; receipt duplicate/review/confirmation is tracked by F16-F19."
+      evidence: "API 27 instrumentation and Compose coverage exercise eight-row paging, exact decimal values/version guards, writer-only add/edit/delete/sync, viewer read-only behavior, unchanged cash total, last-page clamping after deletion, stale-version refresh, and localized validation. F15.5 verification passed FinanceReceiptScreensTest 80/80, FinanceReceiptApiTest 49/49, Android JVM 74/74, parity/contracts 67/67; debug and Android-test APKs built, and the debug APK was installed/launched on the isolated API 27 emulator. APK SHA-256: 6DCAB03B66FACF6013E55B322168B9CCCC7FB26A16C85C3F7867378F33AA7117."
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt

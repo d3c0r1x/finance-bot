@@ -8,6 +8,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReceiptItemUpdateWithPageRefreshTest {
+    @Test fun deletingLastItemClampsToNewLastPageAndEmptyReceiptKeepsPageOne() {
+        assertEquals(1, receiptItemsPageAfterDelete(requestedPage = 2, itemCount = 8))
+        assertEquals(2, receiptItemsPageAfterDelete(requestedPage = 2, itemCount = 9))
+        assertEquals(1, receiptItemsPageAfterDelete(requestedPage = 1, itemCount = 0))
+    }
+
     @Test fun conflictRefreshKeepsUpdatedReceiptAndPreviousPageWhenPageReloadFails() {
         val previousPage = FinanceReceiptItemPage(
             listOf(syntheticReceipt(version = 4).items.single()), page = 2, totalItems = 9, hasMore = true,

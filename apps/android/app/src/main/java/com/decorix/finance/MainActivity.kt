@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -106,6 +107,7 @@ class MainActivity : ComponentActivity() {
     private val receiptItemsGeneration = AtomicLong(0L)
     private val receiptItemEditGeneration = AtomicLong(0L)
     private val receiptItemAddGeneration = AtomicLong(0L)
+    private val receiptItemDeleteGeneration = AtomicLong(0L)
     private val receiptTotalSyncGeneration = AtomicLong(0L)
     private val receiptDuplicateGeneration = AtomicLong(0L)
     private val receiptConfirmGeneration = AtomicLong(0L)
@@ -226,6 +228,7 @@ class MainActivity : ComponentActivity() {
                         onReceiptReading = ::loadReceiptReading,
                         onReceiptItemsPage = ::loadReceiptItems,
                         onReceiptItemUpdate = ::updateReceiptItem,
+                        onReceiptItemDelete = ::deleteReceiptItem,
                         onReceiptItemRefresh = ::refreshReceiptAfterItemConflict,
                         onReceiptItemAdd = ::addReceiptItem,
                         onReceiptItemAddRefresh = ::refreshReceiptItemAdd,
@@ -1724,6 +1727,37 @@ class MainActivity : ComponentActivity() {
                     ui = ui.copy(busy = false,
                         receiptItemEditError = if ((error as? ApiFailure)?.status == 412) "stale_version" else "unavailable")
                 }
+            }
+        }
+    }
+
+    private fun deleteReceiptItem(receiptId: String, itemId: String, receiptVersion: Long) {
+        val tenantId = ui.tenants.firstOrNull()?.id ?: return
+        val receipt = ui.receiptDraft?.takeIf { it.id == receiptId } ?: return
+        if (!ui.authenticated || ui.tenants.firstOrNull()?.role == "viewer" || ui.busy ||
+            receipt.transactionId != null || receipt.state !in setOf("draft", "review_required") ||
+            receipt.version != receiptVersion) return
+        val generation = receiptItemDeleteGeneration.incrementAndGet()
+        val requestedPage = ui.receiptItemsPage?.page?.takeIf { ui.receiptItemsReceiptId == receiptId } ?: 1
+        ui = ui.copy(busy = true, receiptItemDeleteError = null)
+        executor.execute {
+            val deletion = runCatching { api.deleteReceiptItem(tenantId, receiptId, itemId, receiptVersion) }
+            val refreshed = runCatching {
+                val latestReceipt = api.receipt(tenantId, receiptId)
+                val pageNumber = receiptItemsPageAfterDelete(requestedPage, latestReceipt.itemCount)
+                Triple(latestReceipt, api.receiptItems(tenantId, receiptId, pageNumber), pageNumber)
+            }
+            if (receiptItemDeleteGeneration.get() != generation || !ui.authenticated ||
+                ui.tenants.firstOrNull()?.id != tenantId || ui.receiptDraft?.id != receiptId) return@execute
+            refreshed.onSuccess { (latestReceipt, page, pageNumber) ->
+                ui = ui.copy(busy = false, receiptDraft = latestReceipt,
+                    receiptItemsPage = page, receiptItemsReceiptId = receiptId,
+                    receiptItemsRequestedPage = pageNumber, receiptItemsLoading = false,
+                    receiptItemsError = null, receiptItemDeleteError = deletion.exceptionOrNull()?.let {
+                        if ((it as? ApiFailure)?.status == 412) "stale_version" else "unavailable"
+                    })
+            }.onFailure {
+                ui = ui.copy(busy = false, receiptItemDeleteError = "refresh_unavailable")
             }
         }
     }
@@ -3502,6 +3536,7 @@ class MainActivity : ComponentActivity() {
         receiptReadingGeneration.incrementAndGet()
         receiptItemsGeneration.incrementAndGet()
         receiptItemAddGeneration.incrementAndGet()
+        receiptItemDeleteGeneration.incrementAndGet()
         pendingReceiptItemAdd = null
         receiptPickerOperationToken = null
         invalidateReceiptPoll()
@@ -3655,6 +3690,7 @@ data class FinanceUiState(
     val receiptItemAddError: String? = null,
     val receiptItemAddNeedsRefresh: Boolean = false,
     val receiptItemAddSavedToken: String? = null,
+    val receiptItemDeleteError: String? = null,
     val receiptTotalSyncError: String? = null,
     val receiptTotalSyncInProgress: Boolean = false,
     val receiptDuplicateCandidates: FinanceReceiptDuplicateCandidates? = null,
@@ -3886,6 +3922,12 @@ internal fun updateReceiptItemWithPageRefresh(
     }
 }
 
+internal fun receiptItemsPageAfterDelete(requestedPage: Int, itemCount: Int): Int {
+    require(requestedPage >= 1) { "Invalid receipt item page" }
+    require(itemCount >= 0) { "Invalid receipt item count" }
+    return requestedPage.coerceAtMost(maxOf(1, (itemCount + 7) / 8))
+}
+
 data class FinanceTenant(val id: String, val name: String, val role: String, val timezone: String)
 
 internal enum class ReceiptReviewRecoveryAction {
@@ -3949,6 +3991,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onReceiptItemsPage: (String, Int) -> Unit = { _, _ -> },
                           onReceiptItemUpdate: (String, String, Long, String, String, String, String) -> Unit =
                               { _, _, _, _, _, _, _ -> },
+                          onReceiptItemDelete: (String, String, Long) -> Unit = { _, _, _ -> },
                           onReceiptItemRefresh: (String) -> Unit = {},
                           onReceiptTotalSync: (String, Long) -> Unit = { _, _ -> },
                           onReceiptTotalSyncRefresh: (String) -> Unit = {},
@@ -4381,6 +4424,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptItemsPage, state.receiptItemsReceiptId, state.receiptItemsRequestedPage,
                         state.receiptItemsLoading, state.receiptItemsError,
                         state.receiptItemEditError, state.receiptItemEditSavedToken,
+                        state.receiptItemDeleteError,
                         state.receiptTotalSyncError, state.receiptTotalSyncInProgress,
                         state.receiptItemAddError, state.receiptItemAddNeedsRefresh,
                         state.receiptItemAddSavedToken, state.receiptDuplicateCandidates,
@@ -4400,7 +4444,7 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                         state.receiptRepeatWarningsError,
                         canReviewReceiptBasket(state.tenants.firstOrNull()?.role),
                         onReceiptPick, onReceiptRefresh, onReceiptRetry, onReceiptDiscard, onReceiptReading,
-                        onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemRefresh,
+                        onReceiptItemsPage, onReceiptItemUpdate, onReceiptItemDelete, onReceiptItemRefresh,
                         onReceiptTotalSync, onReceiptTotalSyncRefresh, onReceiptItemAdd, onReceiptItemAddRefresh,
                         onReceiptDuplicateCandidates, onReceiptDuplicateDecision, onReceiptConfirm,
                         onReceiptCategorySelect, onReceiptBasketReview,
@@ -4659,6 +4703,7 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 receiptItemsRequestedPage: Int?, receiptItemsLoading: Boolean,
                                 receiptItemsError: String?, receiptItemEditError: String?,
                                 receiptItemEditSavedToken: String?,
+                                receiptItemDeleteError: String?,
                                 receiptTotalSyncError: String?, receiptTotalSyncInProgress: Boolean,
                                 receiptItemAddError: String?, receiptItemAddNeedsRefresh: Boolean,
                                 receiptItemAddSavedToken: String?,
@@ -4681,6 +4726,7 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 onLoadReading: (String) -> Unit,
                                 onLoadItemsPage: (String, Int) -> Unit,
                                 onUpdateItem: (String, String, Long, String, String, String, String) -> Unit,
+                                onDeleteItem: (String, String, Long) -> Unit,
                                 onRefreshItem: (String) -> Unit,
                                 onSyncTotal: (String, Long) -> Unit,
                                 onRefreshTotalSync: (String) -> Unit,
@@ -4710,6 +4756,9 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
         } ?: 1)
     }
     var editingItemId by androidx.compose.runtime.remember(receipt?.id) {
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    }
+    var deletingItemId by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableStateOf<String?>(null)
     }
     var editName by androidx.compose.runtime.remember(receipt?.id) {
@@ -4754,6 +4803,33 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
     }
     androidx.compose.runtime.LaunchedEffect(receiptItemEditSavedToken) {
         if (receiptItemEditSavedToken != null) editingItemId = null
+    }
+    androidx.compose.runtime.LaunchedEffect(receipt?.itemCount, pageNumber) {
+        val lastPage = maxOf(1, ((receipt?.itemCount ?: 0) + 7) / 8)
+        if (pageNumber > lastPage) pageNumber = lastPage
+    }
+    if (deletingItemId != null) {
+        AlertDialog(
+            onDismissRequest = { deletingItemId = null },
+            title = { Text(if (language == "ru") "Удалить позицию?" else "Delete item?") },
+            text = { Text(if (language == "ru")
+                "Позиция будет удалена из чека. Итог по кассе не изменится."
+            else "This item will be removed from the receipt. The cash total will not change.") },
+            confirmButton = {
+                TextButton(modifier = Modifier.testTag("receipt-item-delete-confirm"), enabled = !busy,
+                    onClick = {
+                        val itemId = deletingItemId ?: return@TextButton
+                        deletingItemId = null
+                        receipt?.let { onDeleteItem(it.id, itemId, it.version) }
+                    }) { Text(if (language == "ru") "Удалить" else "Delete") }
+            },
+            dismissButton = {
+                TextButton(modifier = Modifier.testTag("receipt-item-delete-cancel"), enabled = !busy,
+                    onClick = { deletingItemId = null }) {
+                    Text(if (language == "ru") "Отмена" else "Cancel")
+                }
+            },
+        )
     }
     var lastRequestedPage by androidx.compose.runtime.remember(receipt?.id) {
         androidx.compose.runtime.mutableStateOf<Int?>(null)
@@ -5197,6 +5273,24 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                 style = MaterialTheme.typography.titleSmall)
                             Text(if (russian) "Страница $pageNumber" else "Page $pageNumber",
                                 modifier = Modifier.testTag("receipt-items-page"))
+                            receiptItemDeleteError?.let { code ->
+                                Text(if (russian) when (code) {
+                                    "stale_version" -> "Чек изменился. Обновлённые данные загружены; проверьте позицию."
+                                    "refresh_unavailable" -> "Не удалось обновить чек после удаления. Обновите его перед повтором."
+                                    else -> "Не удалось подтвердить удаление. Проверьте позицию в обновлённом чеке."
+                                } else when (code) {
+                                    "stale_version" -> "The receipt changed. Updated data is loaded; check the item."
+                                    "refresh_unavailable" -> "Could not refresh the receipt after deletion. Refresh before retrying."
+                                    else -> "Could not confirm deletion. Check the item in the refreshed receipt."
+                                }, modifier = Modifier.testTag("receipt-item-delete-error"),
+                                    color = MaterialTheme.colorScheme.error)
+                                if (code == "refresh_unavailable") {
+                                    TextButton(modifier = Modifier.testTag("receipt-item-delete-refresh"),
+                                        enabled = !busy, onClick = { onRefreshItem(draft.id) }) {
+                                        Text(if (russian) "Обновить чек" else "Refresh receipt")
+                                    }
+                                }
+                            }
                             currentItemsPage?.items?.forEach { item ->
                                 val quantity = item.quantity?.let { "$it × " }.orEmpty()
                                 val unitPrice = item.unitPrice?.let { "$it · " }.orEmpty()
@@ -5214,6 +5308,13 @@ private fun ReceiptUploadScreen(modifier: Modifier, language: String, canWrite: 
                                             editLineSum = item.lineSum.orEmpty()
                                         }) {
                                         Text(if (russian) "Изменить" else "Edit")
+                                    }
+                                    if (canWrite && draft.transactionId == null &&
+                                        draft.state in setOf("draft", "review_required")) {
+                                        TextButton(modifier = Modifier.testTag("receipt-item-delete-${item.id}"),
+                                            enabled = !busy, onClick = { deletingItemId = item.id }) {
+                                            Text(if (russian) "Удалить" else "Delete")
+                                        }
                                     }
                                 }
                                 if (draft.state == "confirmed") {

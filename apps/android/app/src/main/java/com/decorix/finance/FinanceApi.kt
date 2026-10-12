@@ -471,6 +471,12 @@ class FinanceApi internal constructor(
         )))
     }
 
+    fun deleteReceiptItem(tenantId: String, receiptId: String, itemId: String, version: Long) {
+        require(version > 0) { "Invalid receipt version" }
+        execute("/api/v1/tenants/$tenantId/receipts/$receiptId/items/$itemId", "DELETE",
+            ifMatchVersion = version)
+    }
+
     fun addReceiptItem(tenantId: String, receiptId: String, version: Long, name: String,
                        quantity: String? = "1", unitPrice: String? = null,
                        lineSum: String? = null): FinanceReceipt {

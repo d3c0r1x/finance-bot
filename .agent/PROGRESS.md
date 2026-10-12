@@ -35,7 +35,7 @@ Updated: 2026-10-11 13:54 MSK, Europe/Moscow.
 - Runtime proof: installed fresh `com.decorix.finance.debug` on isolated Android 8.1 `emulator-5558`; `MainActivity` resumed, PID 16317. APK SHA-256 `A5ED96A8C199CB6283E9B1178A8A464B8FD6DE2E1C6A15E50DC3CB66EBC72693`; screenshot SHA-256 `13BCA9B4EAA6F76AEE011E77D5357A3F5A38E166C6118B53739F26EE01EF9DD8`. No live OIDC/Core E2E was exercised.
 - Remote CI: `gh run list --commit 69dcb25 --limit 10` returned no runs; GitHub CI is not confirmed.
 - E4.109 F15.3 Android explicit receipt-total synchronization is GREEN and pushed in `7498080269fa176d41b615bd3fe7aa93fd1aadb0`: exact totals, writer-only explicit action, quoted version guard, Core-authoritative positive/complete validation, localized 409/412 recovery, viewer read-only, no transaction creation. Full API 27 instrumentation 130/130, JVM 15/15; debug APK installed and launched on isolated API 27 emulator. No GitHub workflow run was found for this commit.
-- F15.5 Android receipt-item delete is queued behind the user's unanswered design question; do not invent delete semantics before that answer.
+- F15.5 Android receipt-item delete design is resolved against the approved `PLAN.md` F15 scope: explicit confirmation, Core's version-guarded DELETE, and unchanged cash total. The older “await input” note is superseded; implementation and local evidence are recorded below.
 - F03.2 Android repeat setup from profile is locally GREEN; implementation commit `018084d` is pushed and remote branch is verified at `f390ab4`. F03 Android remains partial pending authenticated Core/OIDC end-to-end proof. F15 and F59 remain partial; production/OIDC E2E and full F01–F60 parity remain.
 
 ## Goals
@@ -2148,3 +2148,14 @@ Updated: 2026-10-11 13:54 MSK, Europe/Moscow.
 - Review: independent read-only review found no concrete defects in filter preservation, date validation or busy-state gating. Review confirms tests exercise Compose callback wiring only, not live Core/OIDC.
 - Commit/push: `88b30c713f9d349e6e7f3cad4f2fd8cfc99059cd` (`feat(F53): refresh Android transaction filters`) pushed to `origin/feat/saas-rewrite`; `git ls-remote` confirmed exact remote SHA. Only `MainActivity.kt`, `FinanceScreensTest.kt`, F53 registry evidence, F53 plan follow-up and progress were committed. User-owned untracked paths remain untouched.
 - Next: continue an independently closable V1 slice. Keep live OIDC/Core and M2 public-runtime blockers explicit.
+
+## F59.26 F15.5 Android receipt-item delete — GREEN locally; LIVE OIDC E2E open
+
+- Source: `PLAN.md` F15 requires receipt item delete, access to any item through eight-row paging, unchanged cash total, and explicit total sync. Core already provides writer authorization, editable-receipt validation, required `If-Match`, atomic recalculation/audit, and a 204 response; no Core changes are needed.
+- Plan correction: earlier notes said to await delete-design input. Rechecked the approved F15 acceptance and existing Core contract; the safe client semantics are explicit user confirmation and unchanged cash total. This resolves the stale question without changing plan scope or requirements.
+- TDD: observed RED at Android instrumentation compilation for the absent `FinanceApi.deleteReceiptItem` and Compose callback. Added protocol tests for 204 empty body and 412 preservation, writer-confirm/cancel and viewer visibility tests, and JVM page-clamp cases for empty, eight-item, and nine-item totals.
+- Implementation: writer-only delete affordance on editable unconfirmed receipt rows; confirmation dialog explains unchanged cash total; sends version-guarded DELETE; reloads authoritative receipt and last available item page; maps stale/failed refresh states with localized guidance; increments request generation on logout; page number clamps after deleting the final row. No optimistic money math, receipt-post, or transaction creation.
+- GREEN/regression: Android 8.1/API 27 `FinanceReceiptScreensTest` 80/80 and `FinanceReceiptApiTest` 49/49; Android JVM 74/74 (0 failures/errors); parity/contracts 67/67; debug and Android-test APK assembly pass; `git diff --check` clean. Independent read-only review found no blockers.
+- Runtime: installed `com.decorix.finance.debug` on isolated `emulator-5554`; `MainActivity` resumed. APK SHA-256: `6DCAB03B66FACF6013E55B322168B9CCCC7FB26A16C85C3F7867378F33AA7117`.
+- Limitation: MockWebServer and emulator tests do not prove live authenticated Android-to-Core/OIDC deletion. Android F15 and global F59 remain partial until real Core/OIDC E2E; M2 public runtime remains blocked separately.
+- Commit/push: 67 parity/contract tests passed after the registry update; commit and push this slice, then record and verify the resulting SHA.

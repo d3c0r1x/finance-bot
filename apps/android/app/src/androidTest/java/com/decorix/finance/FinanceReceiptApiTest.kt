@@ -1028,6 +1028,37 @@ class FinanceReceiptApiTest {
         assertEquals("\"4\"", request.getHeader("If-Match"))
     }
 
+    @Test fun deleteReceiptItemUsesReceiptVersionAndAcceptsEmpty204() {
+        server.enqueue(MockResponse().setResponseCode(204))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        api.deleteReceiptItem("tenant-17", "receipt-42", "item-3", 9)
+
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("DELETE", request.method)
+        assertEquals("/api/v1/tenants/tenant-17/receipts/receipt-42/items/item-3", request.path)
+        assertEquals("Bearer receipt-owner-token", request.getHeader("Authorization"))
+        assertEquals("\"9\"", request.getHeader("If-Match"))
+        assertEquals(0L, request.body.size)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun deleteReceiptItemPreservesStaleVersionFailure() {
+        server.enqueue(MockResponse().setResponseCode(412).setBody("""{"detail":"stale_version"}"""))
+        val api = api()
+        api.saveTokens("receipt-owner-token", "refresh-token", System.currentTimeMillis() + 60_000)
+
+        val failure = runCatching { api.deleteReceiptItem("tenant-17", "receipt-42", "item-3", 9) }
+            .exceptionOrNull()
+
+        assertTrue("412 must remain distinguishable for refresh recovery", failure is ApiFailure)
+        assertEquals(412, (failure as ApiFailure).status)
+        val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+        assertEquals("DELETE", request.method)
+        assertEquals("\"9\"", request.getHeader("If-Match"))
+    }
+
     @Test fun syncReceiptTotalPostsWithCurrentVersionAndParsesExactReturnedTotals() {
         val responseJson = org.json.JSONObject(receiptJson()).apply {
             put("version", 6)

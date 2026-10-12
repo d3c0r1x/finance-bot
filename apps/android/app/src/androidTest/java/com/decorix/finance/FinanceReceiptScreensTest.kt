@@ -687,6 +687,44 @@ class FinanceReceiptScreensTest {
         assertEquals(emptyList<ReceiptItemUpdate>(), updates)
     }
 
+    @Test fun writerMustConfirmReceiptItemDeletionAndCancelLeavesItemUntouched() {
+        val item = receiptDraft().items.single().copy(id = "delete-item", name = "Хлеб")
+        val receipt = receiptDraft().copy(version = 9, cashTotal = "245.70", items = listOf(item), itemCount = 1)
+        val page = receiptItemPage(listOf(item), page = 1, totalItems = 1, hasMore = false)
+        val deletes = mutableListOf<ReceiptItemDelete>()
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            receiptDraft = receipt, receiptItemsPage = page, receiptItemsReceiptId = receipt.id),
+            onReceiptItemDelete = { receiptId, itemId, version ->
+                deletes += ReceiptItemDelete(receiptId, itemId, version)
+            })
+
+        compose.onNodeWithTag("receipt-item-delete-${item.id}").performScrollTo().performClick()
+        compose.onNodeWithTag("receipt-item-delete-confirm").assertIsDisplayed()
+        assertEquals(emptyList<ReceiptItemDelete>(), deletes)
+        compose.onNodeWithTag("receipt-item-delete-cancel").performClick()
+        assertEquals(emptyList<ReceiptItemDelete>(), deletes)
+        compose.onNodeWithTag("receipt-item-${item.id}").assertIsDisplayed()
+
+        compose.onNodeWithTag("receipt-item-delete-${item.id}").performScrollTo().performClick()
+        compose.onNodeWithTag("receipt-item-delete-confirm").performClick()
+
+        assertEquals(listOf(ReceiptItemDelete(receipt.id, item.id, 9)), deletes)
+        compose.onNodeWithTag("receipt-item-${item.id}").assertIsDisplayed()
+        assertEquals("245.70", receipt.cashTotal)
+    }
+
+    @Test fun viewerCannotSeeReceiptItemDeleteAction() {
+        val item = receiptDraft().items.single()
+        val receipt = receiptDraft().copy(items = listOf(item), itemCount = 1)
+        show(FinanceUiState(authenticated = true, tenants = listOf(tenant("viewer")),
+            receiptDraft = receipt,
+            receiptItemsPage = receiptItemPage(listOf(item), page = 1, totalItems = 1, hasMore = false),
+            receiptItemsReceiptId = receipt.id))
+
+        compose.onNodeWithTag("receipt-item-delete-${item.id}").assertDoesNotExist()
+        compose.onNodeWithTag("receipt-item-delete-confirm").assertDoesNotExist()
+    }
+
     @Test fun writerAddsExactItemOnlyAfterSaveThenCanReachNinthItemOnNextPage() {
         val originalItems = (1..8).map { index ->
             receiptDraft().items.single().copy(id = "existing-$index", name = "Existing $index",
@@ -1122,6 +1160,8 @@ class FinanceReceiptScreensTest {
         val unitPrice: String,
         val lineSum: String,
     )
+
+    private data class ReceiptItemDelete(val receiptId: String, val itemId: String, val version: Long)
 
     private data class ReceiptItemAdd(
         val receiptId: String,
@@ -2287,6 +2327,7 @@ class FinanceReceiptScreensTest {
                      onReceiptItemAddRefresh: (String) -> Unit = {},
                      onReceiptItemUpdate: (String, String, Long, String, String, String, String) -> Unit =
                          { _, _, _, _, _, _, _ -> },
+                     onReceiptItemDelete: (String, String, Long) -> Unit = { _, _, _ -> },
                      onReceiptDuplicateDecision: (String, Long, String, String?) -> Unit =
                          { _, _, _, _ -> },
                      onReceiptConfirm: (String, Long, String) -> Unit = { _, _, _ -> },
@@ -2310,6 +2351,7 @@ class FinanceReceiptScreensTest {
                     onReceiptRefresh = onReceiptRefresh, onReceiptItemRefresh = onReceiptItemRefresh,
                     onReceiptDiscard = onReceiptDiscard,
                     onReceiptItemsPage = onReceiptItemsPage, onReceiptItemUpdate = onReceiptItemUpdate,
+                    onReceiptItemDelete = onReceiptItemDelete,
                     onReceiptTotalSync = onReceiptTotalSync,
                     onReceiptTotalSyncRefresh = onReceiptTotalSyncRefresh,
                     onReceiptItemAdd = onReceiptItemAdd,
