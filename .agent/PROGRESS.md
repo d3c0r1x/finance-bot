@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850ee68fe787e`.
+Updated: 2026-10-12, Europe/Moscow; verification snapshot `5eacb60` on `codex/friends-mvp`.
 
 ## Global plan
 
@@ -28,10 +28,10 @@ The F59 and M2.1 entries below record earlier Android/rewrite work. They do not 
 
 - Deliver closed friends MVP in Russia: API-only backend, Android + Telegram full financial flows, shared canonical account, Android self-registration, operator-managed Telegram allowlist, empty production DB, Gemini-backed AI with bounded fallback and safe unavailable state.
 - Work plan: `docs/superpowers/plans/2026-10-12-android-telegram-mvp.md`; roadmap: `docs/specs/ANDROID_TELEGRAM_SAAS_ROADMAP.md`; isolated branch: `codex/friends-mvp` at `db10403`.
-- 2026-10-12 implementation checkpoint: documentation and legal drafts are committed at `71ddddc` and `8861fe7`. Task 2 code is PARTIAL: server allowlist and explicit mapping to an existing Keycloak account are implemented; user-entered Android/TG link-code flow is removed from client surfaces. Telegram-only canonical user provisioning and OIDC attachment are NOT_IMPLEMENTED; Core actions still require a Keycloak subject. Java/Android checks are NOT_RUN because JDK is unavailable. Telegram gateway tests: 97 passed.
-- Task 4 Gemini provider/router code is implemented as a partial slice. Intelligence tests: 175 passed, 1 skipped; contract and parity tests: 79 passed. `git diff --check` is clean. No live Gemini request was made. Production region, billing/data terms and RU cross-border processing remain gates.
+- 2026-10-12 implementation checkpoint: product plan/parity docs `71ddddc`; legal drafts `8861fe7`; Telegram allowlist slice `e67b3d0`; Gemini router slice `5eacb60`. Task 2 remains PARTIAL: server allowlist and explicit mapping to an existing Keycloak account are implemented; user-entered Android/TG link-code flow is removed from client surfaces. Telegram-only canonical user provisioning and OIDC attachment are NOT_IMPLEMENTED; Core actions still require a Keycloak subject. Java/Android checks are NOT_RUN because JDK is unavailable. Telegram gateway tests: 97 passed.
+- Task 4 Gemini provider/router is committed but remains PARTIAL pending full MVP integration. Intelligence tests: 175 passed, 1 skipped; contract and parity tests: 79 passed. `git diff --check` is clean. No live Gemini request was made. Production region, billing/data terms and RU cross-border processing remain gates.
 - A combined test run hit one `MemoryError` while parsing the large core OpenAPI file under aggregate memory pressure. The same contract and parity suites passed separately (79 passed).
-- Next: commit the partial Task 2 and Task 4 slices separately, record commit SHAs, then push `codex/friends-mvp`. Original checkout and its user-owned changes remain untouched.
+- Next: push `codex/friends-mvp`. Original checkout and its user-owned changes remain untouched.
 - Telegram F01–F58 static audit: 22 implemented, 8 partial, 24 missing, 4 operator/developer/legacy-UI N/A; F59 remains `in_progress`. RED observed for missing Telegram mappings, unclassified N/A and stale Web acceptance. GREEN: `python -m pytest tests/test_f59_android_parity.py -q` — 16 passed; `python -m pytest tools/contracts/test_contracts.py -q` — 63 passed. N/A scopes use a closed set. Static audit only; no live service or user flow was run.
 
 ## Prior rewrite goal
