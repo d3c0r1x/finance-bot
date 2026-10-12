@@ -1,0 +1,97 @@
+services:
+  postgres:
+    image: postgres:18.6
+    profiles: [core]
+    environment:
+      POSTGRES_DB: finance
+      POSTGRES_USER: ${POSTGRES_USER:-finance_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.dev}
+      FINANCE_APP_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env.dev}
+      FINANCE_MIGRATOR_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD in .env.dev}
+    ports:
+      - target: 5432
+        published: ${POSTGRES_HOST_PORT:-5432}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  core:
+    profiles: [core]
+    build:
+      context: ../..
+      dockerfile: services/core/Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: jdbc:postgresql://postgres:5432/finance
+      DATABASE_USERNAME: finance_app
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env.dev}
+      DATABASE_MIGRATION_USERNAME: finance_migrator
+      DATABASE_MIGRATION_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD in .env.dev}
+      FINANCE_RECEIPTS_STORAGE_PROVIDER: filesystem
+      FINANCE_RECEIPTS_FILESYSTEM_ROOT: /var/lib/finance/receipts
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/finance
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/finance/protocol/openid-connect/certs
+      KEYCLOAK_WEB_CLIENT_ID: finance-web
+      KEYCLOAK_WEB_CLIENT_SECRET: finance-local-dev-secret-not-for-production
+    ports:
+      - target: 8080
+        published: ${CORE_HOST_PORT:-8080}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - finance_receipts:/var/lib/finance/receipts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, java, -cp, /opt/healthcheck, Healthcheck]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  keycloak:
+    image: finance/keycloak:26.7.5
+    profiles: [core]
+    build:
+      context: ../..
+      dockerfile: infra/keycloak/Dockerfile
+    command: [start-dev, --import-realm]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in .env.dev}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env.dev}
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: http://keycloak:8080
+    ports:
+      - target: 8080
+        published: ${KEYCLOAK_HOST_PORT:-8081}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ../../ops/keycloak/realm-finance.json:/opt/keycloak/data/import/realm-finance.json:ro
+    healthcheck:
+      test: [CMD, java, -cp, /opt/keycloak, Healthcheck]
+      interval: 30s
+      timeout: 8s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  finance_receipts:
+  keycloak_data:

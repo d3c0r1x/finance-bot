@@ -1,0 +1,43 @@
+-- Keep schema ownership in a dedicated migration role. The Core datasource user
+-- receives only runtime DML privileges, so it cannot bypass FORCE ROW LEVEL SECURITY.
+-- Read passwords from the inherited environment instead of exposing them in psql argv.
+\getenv finance_app_password FINANCE_APP_PASSWORD
+\getenv finance_migrator_password FINANCE_MIGRATOR_PASSWORD
+
+SELECT format(
+    'CREATE ROLE finance_migrator LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION PASSWORD %L',
+    :'finance_migrator_password'
+)
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'finance_migrator'
+)
+\gexec
+
+ALTER ROLE finance_migrator
+    WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION
+    PASSWORD :'finance_migrator_password';
+
+SELECT format(
+    'CREATE ROLE finance_app LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION PASSWORD %L',
+    :'finance_app_password'
+)
+WHERE NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'finance_app'
+)
+\gexec
+
+ALTER ROLE finance_app
+    WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION
+    PASSWORD :'finance_app_password';
+
+ALTER DATABASE finance OWNER TO finance_migrator;
+ALTER SCHEMA public OWNER TO finance_migrator;
+
+GRANT CONNECT ON DATABASE finance TO finance_app;
+GRANT USAGE ON SCHEMA public TO finance_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO finance_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO finance_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE finance_migrator IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO finance_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE finance_migrator IN SCHEMA public
+    GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO finance_app;

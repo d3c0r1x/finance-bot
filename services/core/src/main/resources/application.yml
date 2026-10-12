@@ -9,6 +9,8 @@ spring:
     password: ${DATABASE_PASSWORD:}
   flyway:
     enabled: true
+    user: ${DATABASE_MIGRATION_USERNAME:${DATABASE_USERNAME:finance}}
+    password: ${DATABASE_MIGRATION_PASSWORD:${DATABASE_PASSWORD:}}
   security:
     oauth2:
       client:
