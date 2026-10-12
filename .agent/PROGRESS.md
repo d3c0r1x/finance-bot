@@ -2174,7 +2174,7 @@ Updated: 2026-10-12, Europe/Moscow.
 - Commit/push: `28704c67586a3cd4b2c0675398e31b2624fe4efa` (`feat(F52): verify Android CSV chooser handoff`) pushed; `git ls-remote` verified the remote branch at that SHA. GitHub CI remains unconfirmed unless a workflow run is found.
 - Next: continue F59 with an independently closable feature; production runtime/public HTTPS/auth remain release blockers, and no system/network settings have been changed.
 
-## F60.1 Vertex transaction-draft adapter seam — GREEN locally; COMMITTED — 2026-10-12
+## F60.1 Vertex transaction-draft adapter seam — GREEN locally; COMMITTED/PUSHED — 2026-10-12
 
 - Authority: approved V1 F60 and `docs/specs/CONTINUATION.md` §C. Detailed bounded-slice plan: `docs/superpowers/plans/2026-10-12-f60-vertex-transaction-draft-adapter.md`.
 - TDD RED: gateway tests failed before implementation (16 failed, 12 passed); after adding bounded-output assertions, 2 failed, 27 passed. Failures identified the missing Vertex adapter contract, missing `maxOutputTokens`, and missing response-byte cap. No cloud calls or credentials were used.
@@ -2183,4 +2183,5 @@ Updated: 2026-10-12, Europe/Moscow.
 - Limits: no live credentials, cloud request, model capability certification, quality evaluation, quotas/policy rollout, canary, rollback, or provider activation. F60 remains partial.
 - Feature commit: `8f0120472c5900ea1f8f29d519518d91a5c4cfde` (`feat(F60): add disabled Vertex transaction draft adapter`). Commit contains only the F60.1 plan, gateway adapter, tests, and progress evidence.
 - Repository / branch: `feat/saas-rewrite`; previous HEAD `dad4a1f6d0bf5ea6781f3e675eca89a7138e0f38`, current HEAD after feature commit `8f0120472c5900ea1f8f29d519518d91a5c4cfde`.
-- Status: COMPLETE locally; push verification pending. Next: commit the post-commit progress record and push the pending branch commits.
+- Push: `git push origin feat/saas-rewrite` succeeded; `git ls-remote origin refs/heads/feat/saas-rewrite` verified exact SHA `c397cbcc45b5acf6a332bfbdb4d48106baa696fa`, including the feature and progress commits.
+- Status: COMPLETE for this narrow slice locally and on origin. Next: continue another approved V1 slice; keep full F60 and public runtime/auth gates partial or blocked until their separate criteria pass.
