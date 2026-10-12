@@ -38,11 +38,8 @@ services:
       DATABASE_MIGRATION_PASSWORD: ${DATABASE_MIGRATION_PASSWORD:?Set DATABASE_MIGRATION_PASSWORD in .env.dev}
       FINANCE_RECEIPTS_STORAGE_PROVIDER: filesystem
       FINANCE_RECEIPTS_FILESYSTEM_ROOT: /var/lib/finance/receipts
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/finance
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/finance/protocol/openid-connect/certs
-      KEYCLOAK_WEB_CLIENT_ID: finance-web
-      KEYCLOAK_WEB_CLIENT_SECRET: finance-local-dev-secret-not-for-production
       FINANCE_TELEGRAM_ALLOWED_USER_IDS: ${FINANCE_TELEGRAM_ALLOWED_USER_IDS:-}
       FINANCE_TELEGRAM_ACCOUNT_MAPPINGS: ${FINANCE_TELEGRAM_ACCOUNT_MAPPINGS:-}
     ports:

@@ -7,7 +7,6 @@ import com.decorix.finance.core.api.MerchantReclassificationApi.PreviewRequest;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -34,15 +33,4 @@ public class MerchantReclassificationController {
         return reclassifications.apply(tenantId, jwt.getSubject(), idempotencyKey, request);
     }
 
-    @PostMapping("/bff/tenants/{tenantId}/merchant-reclassifications/preview")
-    Preview previewBff(@PathVariable UUID tenantId, @RequestBody PreviewRequest request,
-                       @AuthenticationPrincipal OidcUser user) {
-        return reclassifications.preview(tenantId, user.getSubject(), request);
-    }
-
-    @PostMapping("/bff/tenants/{tenantId}/merchant-reclassifications/apply")
-    ApplyResult applyBff(@PathVariable UUID tenantId, @RequestHeader("Idempotency-Key") String idempotencyKey,
-                         @RequestBody ApplyRequest request, @AuthenticationPrincipal OidcUser user) {
-        return reclassifications.apply(tenantId, user.getSubject(), idempotencyKey, request);
-    }
 }

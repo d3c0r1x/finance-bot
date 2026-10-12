@@ -13,18 +13,6 @@ spring:
     password: ${DATABASE_MIGRATION_PASSWORD:${DATABASE_PASSWORD:}}
   security:
     oauth2:
-      client:
-        registration:
-          keycloak:
-            provider: keycloak
-            client-id: ${KEYCLOAK_WEB_CLIENT_ID:finance-web}
-            client-secret: ${KEYCLOAK_WEB_CLIENT_SECRET:}
-            authorization-grant-type: authorization_code
-            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-            scope: openid
-        provider:
-          keycloak:
-            issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/finance}
       resourceserver:
         jwt:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/finance}
@@ -106,10 +94,3 @@ management:
     web:
       exposure:
         include: health,info
-server:
-  servlet:
-    session:
-      cookie:
-        http-only: true
-        secure: ${COOKIE_SECURE:false}
-        same-site: lax

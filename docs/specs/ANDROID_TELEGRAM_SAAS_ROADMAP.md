@@ -31,7 +31,7 @@ MVP должен покрывать все согласованные финан
 | AI | Python intelligence gateway, Ollama, Tesseract, capabilities/policy, request concurrency limit | Gemini production provider отсутствует; Vertex adapter выключен; usage/cost не учитываются; рабочий ключ и активный баланс не проверены |
 | Файлы | Receipt storage filesystem/S3 adapters, экспорт через private S3 adapter | Локальный Compose выбирает filesystem; cloud bucket и регион РФ не подтверждены |
 | Развёртывание | Compose содержит PostgreSQL, Core и Keycloak | Compose использует Keycloak `start-dev`; нет доказанного полного стека Telegram/AI/storage/HTTPS; Docker/Podman на текущем ПК недоступны |
-| Web UI | `apps/web` содержит полноценный React-клиент, BFF и Web-specific acceptance | Продуктовое требование отменено. API остаётся, Web UI не входит в цель |
+| Web UI | React-клиент и браузерный BFF удалены из активной ветки; исторические записи сохранены в архивных планах | Продуктовое требование отменено. API остаётся, Web UI не входит в цель |
 | Прогресс | Отдельная Android и Telegram parity для F01–F58 | Android: 52 partial, 5 N/A, 1 implemented; Telegram: 22 implemented, 8 partial, 24 missing, 4 N/A. Live authorization/runtime остаются открытыми gates |
 
 Сводка основана на текущем checkout и `.agent/PROGRESS.md`, `contracts/parity/feature-parity.yaml`, `services/core`, `services/python` и `apps/android`. Runtime в этой ревизии не запускался.

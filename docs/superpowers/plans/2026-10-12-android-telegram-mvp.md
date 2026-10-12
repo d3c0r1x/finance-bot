@@ -136,10 +136,10 @@
 
 **Acceptance:** No user-facing React/Vite client or Web-only product route remains. Finance API, OIDC for Android, Telegram, OpenAPI, backend health, and security gates remain functional.
 
-- [ ] Identify Web-only endpoints, dependencies, workflow steps, and docs; retain shared API behavior.
-- [ ] Add failing architecture/contract checks that prevent Web UI references from re-entering product acceptance.
-- [ ] Remove the user-facing Web client and obsolete UI-only backend code with narrow commits.
-- [ ] Search the repository for stale user-facing Web requirements and update each live document.
+- [x] Identify Web-only endpoints, dependencies, workflow steps, and docs; retain shared API behavior.
+- [x] Add failing architecture/contract checks that prevent Web UI references from re-entering product acceptance.
+- [x] Remove the user-facing Web client and obsolete UI-only backend code with narrow commits.
+- [x] Search the repository for stale user-facing Web requirements and update each live document.
 
 ### Task 7: Finish Android and Telegram feature parity
 

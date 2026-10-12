@@ -345,34 +345,6 @@
       "serviceAccountsEnabled": false
     },
     {
-      "clientId": "finance-web",
-      "name": "Finance web BFF",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "publicClient": false,
-      "clientAuthenticatorType": "client-secret",
-      "secret": "finance-local-dev-secret-not-for-production",
-      "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": false,
-      "redirectUris": [
-        "http://localhost:5173/login/oauth2/code/keycloak"
-      ],
-      "webOrigins": [
-        "http://localhost:5173"
-      ],
-      "attributes": {
-        "pkce.code.challenge.method": "S256"
-      },
-      "defaultClientScopes": [
-        "profile",
-        "email",
-        "finance-api-audience",
-        "basic"
-      ]
-    },
-    {
       "clientId": "finance-android",
       "name": "Finance Android",
       "enabled": true,

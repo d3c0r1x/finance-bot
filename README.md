@@ -1,12 +1,12 @@
 # Finance Bot
 
-Finance Bot is a personal-finance product being migrated from a local Telegram/Desktop application to a multi-service SaaS architecture. The repository contains the legacy Python app and newer Java/Core, React/Web, Android, Python, and Go components. The full SaaS deployment is still in development.
+Finance Bot is a personal-finance product being migrated from a local Telegram/Desktop application to an Android and Telegram SaaS architecture. The repository contains the legacy Python app and newer Java/Core, Android, Python, and Go components. The full SaaS deployment is still in development.
 
 ## Current status
 
 - Legacy Telegram bot and desktop panel remain available for local use.
 - SaaS features are implemented incrementally under the approved `PLAN.md` and tracked in `.agent/PROGRESS.md`.
-- Android is a native Kotlin/Compose client; Web is under `apps/web`; the Java business API is under `services/core`.
+- Android is a native Kotlin/Compose client; the Java business API is under `services/core`. Telegram uses the same backend.
 - This repository does not yet include the planned all-service Docker Compose stack or a production deployment. A successful local test or Cloudflare build does not mean the SaaS is live.
 
 ## Start the legacy app
@@ -38,7 +38,6 @@ The legacy app needs its own Telegram token and user configuration. Infisical is
 | `services/core` | Java business API and persistence |
 | `services/analytics-go` | Go analytics and projections |
 | `services/python` | Telegram, AI, and import services |
-| `apps/web` | React Web client |
 | `apps/android` | Kotlin Android client |
 | `contracts` | API and event contracts |
 | `PLAN.md` | Approved feature and delivery plan |

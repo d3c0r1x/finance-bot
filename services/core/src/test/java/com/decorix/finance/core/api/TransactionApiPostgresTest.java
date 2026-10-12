@@ -7,8 +7,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.any;
@@ -1468,15 +1466,6 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.userId").doesNotExist());
     }
 
-    @Test
-    void browserCanIssueTelegramLinkCodeWithCsrfProtection() throws Exception {
-        mvc.perform(post("/bff/me/telegram-link")
-                        .with(oidcLogin().idToken(token -> token.subject(subject)))
-                        .with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").isString())
-                .andExpect(jsonPath("$.expiresAt").isString());
-    }
 
     @Test
     void issuingANewTelegramLinkCodeInvalidatesPreviousAndEnforcesRateLimit() throws Exception {
@@ -1758,12 +1747,6 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.incomeTotal").value("100.00"))
                 .andExpect(jsonPath("$.debtPaymentTotal").value("20.00"))
                 .andExpect(jsonPath("$.transactionCount").value(6))
-                .andExpect(jsonPath("$.weekendSharePercent").value(58));
-        mvc.perform(get("/bff/tenants/{tenantId}/reports/family", tenantId).with(oidcLogin()
-                        .idToken(token -> token.subject(subject)))
-                        .param("period", "custom").param("from", "2026-10-01").param("to", "2026-10-03"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.expenseTotal").value("85.00"))
                 .andExpect(jsonPath("$.weekendSharePercent").value(58));
         mvc.perform(get("/api/v1/tenants/{tenantId}/reports/period", tenantId).with(auth).param("period", "week"))
                 .andExpect(status().isOk())
@@ -2804,7 +2787,7 @@ class TransactionApiPostgresTest {
     }
 
     @Test
-    void browserMerchantReclassificationRequiresCsrfForPreviewAndApply() throws Exception {
+    void merchantReclassificationPreviewAndApplyUseAuthenticatedApi() throws Exception {
         var auth = jwt().jwt(token -> token.subject(subject));
         var file = new MockMultipartFile("file", "statement.pdf", "application/pdf",
                 "%PDF-1.7 browser reclassification".getBytes(StandardCharsets.US_ASCII));
@@ -2819,12 +2802,8 @@ class TransactionApiPostgresTest {
         mvc.perform(put("/api/v1/tenants/{tenantId}/merchant-mappings", tenantId).with(auth)
                         .contentType("application/json").content("{\"merchant\":\"Market\",\"categoryCode\":\"еда\"}"))
                 .andExpect(status().isOk());
-        var browser = oidcLogin().idToken(token -> token.subject(subject));
-        mvc.perform(post("/bff/tenants/{tenantId}/merchant-reclassifications/preview", tenantId).with(browser)
-                        .contentType("application/json").content("{\"merchant\":\"Market\"}"))
-                .andExpect(status().isForbidden());
-        String preview = mvc.perform(post("/bff/tenants/{tenantId}/merchant-reclassifications/preview", tenantId)
-                        .with(browser).with(csrf()).contentType("application/json")
+        String preview = mvc.perform(post("/api/v1/tenants/{tenantId}/merchant-reclassifications/preview", tenantId)
+                        .with(auth).contentType("application/json")
                         .content("{\"merchant\":\"Market\"}"))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String transactionId = com.jayway.jsonpath.JsonPath.read(preview, "$.candidates[0].transactionId");
@@ -2832,12 +2811,8 @@ class TransactionApiPostgresTest {
         String applyBody = "{\"merchant\":\"Market\",\"categoryCode\":\"еда\",\"candidates\":[{"
                 + "\"transactionId\":\"" + transactionId + "\",\"version\":" + versionValue.longValue()
                 + ",\"currentCategoryCode\":\"прочее\"}]}";
-        mvc.perform(post("/bff/tenants/{tenantId}/merchant-reclassifications/apply", tenantId).with(browser)
-                        .header("Idempotency-Key", "browser-reclass-apply-0001")
-                        .contentType("application/json").content(applyBody))
-                .andExpect(status().isForbidden());
-        mvc.perform(post("/bff/tenants/{tenantId}/merchant-reclassifications/apply", tenantId)
-                        .with(browser).with(csrf()).header("Idempotency-Key", "browser-reclass-apply-0001")
+        mvc.perform(post("/api/v1/tenants/{tenantId}/merchant-reclassifications/apply", tenantId)
+                        .with(auth).header("Idempotency-Key", "browser-reclass-apply-0001")
                         .contentType("application/json").content(applyBody))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.changedCount").value(1));
     }
@@ -3056,25 +3031,6 @@ class TransactionApiPostgresTest {
         org.junit.jupiter.api.Assertions.assertNotNull(com.jayway.jsonpath.JsonPath.read(firstCommit, "$.rows[2].transactionId"));
     }
 
-    @Test
-    void browserBankImportConfirmationRequiresCsrfAndUsesTheOwnerScopedBatch() throws Exception {
-        var browser = oidcLogin().idToken(token -> token.subject(subject));
-        var file = new MockMultipartFile("file", "statement.pdf", "application/pdf",
-                "%PDF-1.7 test statement".getBytes(StandardCharsets.US_ASCII));
-        String staged = mvc.perform(multipart("/bff/tenants/{tenantId}/imports", tenantId)
-                        .file(file).with(browser).with(csrf()))
-                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
-        String importId = com.jayway.jsonpath.JsonPath.read(staged, "$.id");
-        mvc.perform(post("/bff/tenants/{tenantId}/imports/{importId}/confirm", tenantId, importId).with(browser)
-                        .header("If-Match", "\"1\"").header("Idempotency-Key", "browser-import-confirm-0001")
-                        .contentType("application/json").content("{\"confirmed\":true}"))
-                .andExpect(status().isForbidden());
-        mvc.perform(post("/bff/tenants/{tenantId}/imports/{importId}/confirm", tenantId, importId).with(browser).with(csrf())
-                        .header("If-Match", "\"1\"").header("Idempotency-Key", "browser-import-confirm-0001")
-                        .contentType("application/json").content("{\"confirmed\":true}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("committed"))
-                .andExpect(jsonPath("$.createdCount").value(1));
-    }
 
     @Test
     void historyProposalRequiresThirtyDaysAndWaitsForExplicitApply() throws Exception {
@@ -3400,13 +3356,11 @@ class TransactionApiPostgresTest {
                 .andExpect(status().isBadRequest());
         mvc.perform(get(path, UUID.randomUUID()).with(auth)).andExpect(status().isNotFound());
 
-        var browser = oidcLogin().idToken(token -> token.subject(subject));
-        String browserPath = "/bff/tenants/{tenantId}/notification-preferences";
-        mvc.perform(get(browserPath, tenantId).with(browser))
+        mvc.perform(get(path, tenantId).with(auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value(1))
                 .andExpect(jsonPath("$.language").value("en"));
-        mvc.perform(patch(browserPath, tenantId).with(browser).with(csrf())
+        mvc.perform(patch(path, tenantId).with(auth)
                         .header("If-Match", "\"1\"")
                         .contentType("application/json")
                         .content("{\"language\":\"ru\",\"dailyEnabled\":false,\"dailyLocalTime\":\"08:30\","
@@ -3867,28 +3821,6 @@ class TransactionApiPostgresTest {
         });
     }
 
-    @Test
-    void webBffCreatesAndReturnsScopedExportJob() throws Exception {
-        var browser = oidcLogin().idToken(token -> token.subject(subject));
-        String created = mvc.perform(post("/bff/tenants/{tenantId}/exports", tenantId).with(browser).with(csrf())
-                        .contentType("application/json")
-                        .content("{\"formatVersion\":\"csv-v1\",\"fromDate\":\"2026-10-01\","
-                                + "\"toDate\":\"2026-10-02\"}"))
-                .andExpect(status().isAccepted())
-                .andExpect(jsonPath("$.status").value("queued"))
-                .andReturn().getResponse().getContentAsString();
-        String exportId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
-        mvc.perform(get("/bff/tenants/{tenantId}/exports/{exportId}", tenantId, exportId).with(browser))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(exportId))
-                .andExpect(jsonPath("$.rowCount").value(0));
-        transactions.executeWithoutResult(status -> {
-            jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, tenantId.toString());
-            org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
-                    "SELECT count(*) FROM audit_log WHERE tenant_id=? AND entity_id=? AND action='export.status_viewed'",
-                    Integer.class, tenantId, UUID.fromString(exportId)));
-        });
-    }
 
     @Test
     void exportWorkerClaimRequiresCredentialAndLeasesEachJobOnce() throws Exception {
@@ -4573,35 +4505,6 @@ class TransactionApiPostgresTest {
                 .andExpect(status().isOk());
     }
 
-    @Test
-    void browserSessionCanUseSameTenantApiThroughBff() throws Exception {
-        mvc.perform(get("/bff/me/tenants").with(oidcLogin()
-                        .idToken(token -> token.subject(subject))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].tenantId").value(tenantId.toString()))
-                .andExpect(jsonPath("$[0].role").value("owner"));
-        mvc.perform(get("/bff/tenants/" + tenantId + "/profile/me").with(oidcLogin()
-                        .idToken(token -> token.subject(subject))))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.displayName").value("API test member"));
-        mvc.perform(patch("/bff/tenants/" + tenantId + "/profile/me").with(oidcLogin()
-                        .idToken(token -> token.subject(subject))).with(csrf()).contentType("application/json")
-                        .content("{\"displayName\":\"Browser Member\",\"plannedIncome\":85000,\"onboardingState\":\"complete\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.displayName").value("Browser Member"));
-
-        String body = "{\"type\":\"expense\",\"amount\":\"7.50\",\"currency\":\"RUB\","
-                + "\"categoryCode\":\"food\",\"description\":\"Coffee\","
-                + "\"occurredAt\":\"2026-10-01T10:00:00Z\"}";
-        mvc.perform(post("/bff/tenants/" + tenantId + "/transactions")
-                        .with(oidcLogin().idToken(token -> token.subject(subject)))
-                        .with(csrf()).header("Idempotency-Key", "web-bff-request-0001")
-                        .contentType("application/json").content(body))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.amount").value("7.50"));
-        mvc.perform(get("/bff/tenants/" + tenantId + "/transactions")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].description").value("Coffee"));
-    }
 
     @Test
     void incomeKeepsSourceAndDoesNotBecomeExpense() throws Exception {
@@ -5145,25 +5048,6 @@ class TransactionApiPostgresTest {
                 "each member must receive only their own shopping rhythm");
     }
 
-    @Test
-    void browserShoppingCandidatesUseAuthenticatedMemberScope() throws Exception {
-        LAST_SHOPPING_REQUEST.set("");
-        mvc.perform(get("/bff/tenants/{tenantId}/shopping", tenantId)
-                        .with(oidcLogin().idToken(token -> token.subject(subject))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.inventoryTracked").value(false));
-        org.junit.jupiter.api.Assertions.assertEquals(userIdFor(subject).toString(),
-                com.jayway.jsonpath.JsonPath.read(LAST_SHOPPING_REQUEST.get(), "$.ownerUserId"));
-
-        String memberSubject = "keycloak|shopping-bff-member-" + UUID.randomUUID();
-        addTenantMember(memberSubject, "Taylor", "member");
-        mvc.perform(get("/bff/tenants/{tenantId}/shopping", tenantId)
-                        .with(oidcLogin().idToken(token -> token.subject(memberSubject))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.inventoryTracked").value(false));
-        org.junit.jupiter.api.Assertions.assertEquals(userIdFor(memberSubject).toString(),
-                com.jayway.jsonpath.JsonPath.read(LAST_SHOPPING_REQUEST.get(), "$.ownerUserId"));
-    }
 
     @Test
     void shoppingBoughtMarkIsMemberScopedAndNeverChangesTheLedger() throws Exception {
@@ -5198,32 +5082,9 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.boughtCandidates").isEmpty());
     }
 
-    @Test
-    void shoppingMuteCanBeReversedAndBffWritesRequireCsrf() throws Exception {
-        String mutePath = "/bff/tenants/" + tenantId + "/suggestions/shopping/freshmilk/mute";
-        var auth = oidcLogin().idToken(token -> token.subject(subject));
-        mvc.perform(put(mutePath).with(auth)).andExpect(status().isForbidden());
-        mvc.perform(put(mutePath).with(auth).with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates").isEmpty())
-                .andExpect(jsonPath("$.mutedCandidates[0].productKey").value("freshmilk"));
-
-        String memberSubject = "keycloak|shopping-mute-member-" + UUID.randomUUID();
-        addTenantMember(memberSubject, "Taylor", "member");
-        mvc.perform(get("/bff/tenants/{tenantId}/shopping", tenantId)
-                        .with(oidcLogin().idToken(token -> token.subject(memberSubject))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates.length()").value(1))
-                .andExpect(jsonPath("$.mutedCandidates").isEmpty());
-
-        mvc.perform(delete(mutePath).with(auth).with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidates.length()").value(1))
-                .andExpect(jsonPath("$.mutedCandidates").isEmpty());
-    }
 
     @Test
-    void personalInflationUsesOnlyAuthenticatedActiveMemberForApiAndBff() throws Exception {
+    void personalInflationUsesOnlyAuthenticatedActiveMemberForApi() throws Exception {
         LAST_PERSONAL_INFLATION_REQUEST.set("");
         mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/personal-inflation", tenantId)
                         .with(jwt().jwt(token -> token.subject(subject))))
@@ -5236,8 +5097,8 @@ class TransactionApiPostgresTest {
 
         String memberSubject = "keycloak|inflation-member-" + UUID.randomUUID();
         addTenantMember(memberSubject, "Taylor", "member");
-        mvc.perform(get("/bff/tenants/{tenantId}/analytics/personal-inflation", tenantId)
-                        .with(oidcLogin().idToken(token -> token.subject(memberSubject))))
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/personal-inflation", tenantId)
+                        .with(jwt().jwt(token -> token.subject(memberSubject))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.available").value(false))
                 .andExpect(jsonPath("$.reasonCode").value("insufficient_history"));
@@ -5250,7 +5111,7 @@ class TransactionApiPostgresTest {
     }
 
     @Test
-    void recurringProjectionUsesOnlyAuthenticatedActiveMemberForApiAndBff() throws Exception {
+    void recurringProjectionUsesOnlyAuthenticatedActiveMemberForApi() throws Exception {
         LAST_RECURRING_REQUEST.set("");
         mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/recurring", tenantId)
                         .with(jwt().jwt(token -> token.subject(subject))))
@@ -5269,8 +5130,8 @@ class TransactionApiPostgresTest {
 
         String memberSubject = "keycloak|recurring-member-" + UUID.randomUUID();
         UUID memberId = addTenantMember(memberSubject, "Taylor", "member");
-        mvc.perform(get("/bff/tenants/{tenantId}/analytics/recurring", tenantId)
-                        .with(oidcLogin().idToken(token -> token.subject(memberSubject))))
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/recurring", tenantId)
+                        .with(jwt().jwt(token -> token.subject(memberSubject))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.algorithmVersion").value("recurring.v1"))
                 .andExpect(jsonPath("$.incomeSeries").isEmpty());
@@ -5327,9 +5188,9 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.expenseSeries").isEmpty())
                 .andExpect(jsonPath("$.mutedSeries[0].id").value(RECURRING_SERIES_ID));
 
-        mvc.perform(delete("/bff/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", tenantId,
+        mvc.perform(delete("/api/v1/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", tenantId,
                                 RECURRING_SERIES_ID)
-                        .with(oidcLogin().idToken(token -> token.subject(subject))).with(csrf()))
+                        .with(ownerAuth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.expenseSeries[0].id").value(RECURRING_SERIES_ID))
                 .andExpect(jsonPath("$.mutedSeries").isEmpty())
@@ -5505,23 +5366,6 @@ class TransactionApiPostgresTest {
         org.junit.jupiter.api.Assertions.assertEquals(2, reviews);
     }
 
-    @Test
-    void browserReceiptDuplicateDecisionRequiresCsrfToken() throws Exception {
-        var created = mvc.perform(post("/bff/tenants/" + tenantId + "/receipts")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))).with(csrf())
-                        .header("Idempotency-Key", "receipt-duplicate-browser-001")
-                        .contentType("application/json")
-                        .content("{\"cashTotal\":\"1.00\",\"merchant\":\"Shop\",\"items\":["
-                                + "{\"name\":\"Tea\",\"quantity\":\"1\",\"unitPrice\":\"1.00\",\"lineSum\":\"1.00\"}]}"))
-                .andExpect(status().isCreated()).andReturn();
-        String receiptId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
-
-        mvc.perform(put("/bff/tenants/" + tenantId + "/receipts/" + receiptId + "/duplicate-decision")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))).header("If-Match", "\"1\"")
-                        .contentType("application/json")
-                        .content("{\"decision\":\"independent\",\"duplicateReceiptId\":null}"))
-                .andExpect(status().isForbidden());
-    }
 
     @Test
     void receiptItemsArePagedVersionedAndOnlyExplicitSyncChangesCashTotal() throws Exception {
@@ -5628,44 +5472,6 @@ class TransactionApiPostgresTest {
                 .andExpect(status().isForbidden());
     }
 
-    @Test
-    void browserCanCreateAndReadReceiptThroughCsrfProtectedBff() throws Exception {
-        String body = """
-                {"cashTotal":"100.00","merchant":"Market","receiptDate":"2026-10-01","items":[
-                  {"name":"Tea","quantity":"1","unitPrice":"100.00","lineSum":"100.00"}]}
-                """;
-        var browser = oidcLogin().idToken(token -> token.subject(subject));
-        var created = mvc.perform(post("/bff/tenants/" + tenantId + "/receipts").with(browser).with(csrf())
-                        .header("Idempotency-Key", "receipt-browser-create-001")
-                        .contentType("application/json").content(body))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.cashTotal").value("100.00"))
-                .andReturn();
-        String receiptId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
-
-        mvc.perform(get("/bff/tenants/" + tenantId + "/receipts/" + receiptId).with(browser))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("draft"));
-        mvc.perform(post("/bff/tenants/" + tenantId + "/receipts/" + receiptId + "/items")
-                        .with(browser).with(csrf()).header("If-Match", "\"1\"")
-                        .contentType("application/json")
-                        .content("{\"name\":\"Bread\",\"quantity\":\"1\",\"unitPrice\":\"10.00\",\"lineSum\":\"10.00\"}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.cashTotal").value("100.00"))
-                .andExpect(jsonPath("$.itemsTotal").value("110.00"))
-                .andExpect(jsonPath("$.version").value(2));
-        mvc.perform(post("/bff/tenants/" + tenantId + "/receipts/" + receiptId + "/sync-total")
-                        .with(browser).with(csrf()).header("If-Match", "\"2\""))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.cashTotal").value("110.00"));
-        mvc.perform(patch("/bff/tenants/" + tenantId + "/receipts/" + receiptId + "/category")
-                        .with(browser).with(csrf()).header("If-Match", "\"3\"")
-                        .contentType("application/json").content("{\"categoryCode\":\"еда\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.categoryCode").value("еда"))
-                .andExpect(jsonPath("$.categorySource").value("human"))
-                .andExpect(jsonPath("$.version").value(4));
-    }
 
     @Test
     void receiptCategorySelectionPreservesRuleEvidenceAndRejectsStaleVersion() throws Exception {
@@ -5834,21 +5640,6 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.items[0].reviewAlgorithmVersion").value("unknown"));
     }
 
-    @Test
-    void browserBasketReviewRequiresCsrfToken() throws Exception {
-        var created = mvc.perform(post("/bff/tenants/" + tenantId + "/receipts")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))).with(csrf())
-                        .header("Idempotency-Key", "receipt-basket-browser-0001")
-                        .contentType("application/json")
-                        .content("{\"cashTotal\":\"1.00\",\"merchant\":\"Shop\",\"items\":["
-                                + "{\"name\":\"Tea\",\"quantity\":\"1\",\"unitPrice\":\"1.00\",\"lineSum\":\"1.00\"}]}"))
-                .andExpect(status().isCreated()).andReturn();
-        String receiptId = com.jayway.jsonpath.JsonPath.read(created.getResponse().getContentAsString(), "$.id");
-
-        mvc.perform(post("/bff/tenants/" + tenantId + "/receipts/" + receiptId + "/basket-review")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))).header("If-Match", "\"1\""))
-                .andExpect(status().isForbidden());
-    }
 
     @Test
     void telegramDoNotBuyActionsUseActorScopeAndPersistHumanDecision() throws Exception {
@@ -6022,9 +5813,6 @@ class TransactionApiPostgresTest {
         for (UUID item : ownItems) {
             org.junit.jupiter.api.Assertions.assertTrue(LAST_EVIDENCE_REQUEST.get().contains(item.toString()));
         }
-        mvc.perform(get("/bff/tenants/" + tenantId + "/products/do-not-buy")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.guesses[0].productKey").value("coffee"));
         SHOPPING_RESPONSE.set("""
                 {"candidates":[
                   {"productName":"Chips","purchaseCount":3,"medianIntervalDays":10,
@@ -6091,13 +5879,6 @@ class TransactionApiPostgresTest {
         mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions").with(auth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.productKeys").isEmpty())
                 .andExpect(jsonPath("$.confirmedProductKeys[0]").value(key));
-        mvc.perform(get("/bff/tenants/" + tenantId + "/products/decisions")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.confirmedProductKeys[0]").value(key));
-        mvc.perform(put("/bff/tenants/" + tenantId + "/products/" + key + "/decision")
-                        .with(oidcLogin().idToken(token -> token.subject(subject))).with(csrf())
-                        .contentType("application/json").content("{\"decision\":\"confirmed\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(1));
         mvc.perform(get("/api/v1/tenants/" + tenantId + "/products/decisions")
                         .with(jwt().jwt(token -> token.subject(otherSubject))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.confirmedProductKeys").isEmpty());
@@ -6188,13 +5969,6 @@ class TransactionApiPostgresTest {
         org.junit.jupiter.api.Assertions.assertEquals(2, events);
     }
 
-    @Test
-    void browserProductDecisionRequiresCsrfToken() throws Exception {
-        String productPath = "/bff/tenants/" + tenantId + "/products/milk/decision";
-        mvc.perform(put(productPath).with(oidcLogin().idToken(token -> token.subject(subject)))
-                        .contentType("application/json").content("{\"decision\":\"allowed\"}"))
-                .andExpect(status().isForbidden());
-    }
 
     @Test
     void repeatWarningsUseEarlierConfirmedReceiptsAndSkipCurrentOrAllowedItems() throws Exception {
@@ -6366,9 +6140,6 @@ class TransactionApiPostgresTest {
                 .andExpect(jsonPath("$.daysRemaining").value(31))
                 .andExpect(jsonPath("$.dailyExpensePace").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.projectedExpenseTotal").value(org.hamcrest.Matchers.nullValue()));
-        mvc.perform(get("/bff/tenants/" + tenantId + "/summary").with(oidcLogin()
-                        .idToken(token -> token.subject(subject))).param("month", "2026-10"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.expenseTotal").value("12.34"));
 
         mvc.perform(get(path).with(auth).param("from", "2026-10-01").param("to", "2026-10-01")
                         .param("type", "expense").param("search", "lUnCh"))
@@ -6789,19 +6560,15 @@ class TransactionApiPostgresTest {
     }
 
     @Test
-    void goalBffReadsTheSameMemberSnapshotAndRequiresCsrfForPreferenceChanges() throws Exception {
+    void goalApiKeepsMemberSnapshotAndUpdatesPreference() throws Exception {
         var apiAuth = jwt().jwt(token -> token.subject(subject));
-        var bffAuth = oidcLogin().idToken(token -> token.subject(subject));
         when(goalCandidatesClient.calculate(any())).thenAnswer(invocation -> goalCandidates(invocation.getArgument(0)));
         String api = mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(apiAuth))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         String watermark = com.jayway.jsonpath.JsonPath.read(api, "$.inputWatermark");
-        mvc.perform(get("/bff/tenants/{tenantId}/goals", tenantId).with(bffAuth))
+        mvc.perform(get("/api/v1/tenants/{tenantId}/goals", tenantId).with(apiAuth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.inputWatermark").value(watermark));
-        mvc.perform(put("/bff/tenants/{tenantId}/goals/unit", tenantId).with(bffAuth)
-                        .contentType("application/json").content("{\"unit\":\"sum\"}"))
-                .andExpect(status().isForbidden());
-        mvc.perform(put("/bff/tenants/{tenantId}/goals/unit", tenantId).with(bffAuth).with(csrf())
+        mvc.perform(put("/api/v1/tenants/{tenantId}/goals/unit", tenantId).with(apiAuth)
                         .contentType("application/json").content("{\"unit\":\"sum\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.unit").value("sum"));
     }
@@ -6971,19 +6738,16 @@ class TransactionApiPostgresTest {
     }
 
     @Test
-    void adviceAnalyticsBffUsesSameMemberJobAndRequiresCsrfForRefresh() throws Exception {
+    void adviceAnalyticsApiUsesSameMemberJobForRefresh() throws Exception {
         var apiAuth = jwt().jwt(token -> token.subject(subject));
-        var bffAuth = oidcLogin().idToken(token -> token.subject(subject));
         String created = mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(apiAuth))
                 .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
         String jobId = com.jayway.jsonpath.JsonPath.read(created, "$.id");
-        mvc.perform(get("/bff/tenants/{tenantId}/analytics/advice", tenantId).with(bffAuth))
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(apiAuth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(jobId));
-        mvc.perform(post("/bff/tenants/{tenantId}/analytics/advice", tenantId).with(bffAuth))
-                .andExpect(status().isForbidden());
-        mvc.perform(post("/bff/tenants/{tenantId}/analytics/advice", tenantId).with(bffAuth).with(csrf()))
+        mvc.perform(post("/api/v1/tenants/{tenantId}/analytics/advice", tenantId).with(apiAuth))
                 .andExpect(status().isAccepted()).andExpect(jsonPath("$.id").value(jobId));
-        mvc.perform(get("/bff/tenants/{tenantId}/analytics/advice/jobs/{jobId}", tenantId, jobId).with(bffAuth))
+        mvc.perform(get("/api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}", tenantId, jobId).with(apiAuth))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(jobId));
     }
 

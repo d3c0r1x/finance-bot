@@ -25,12 +25,12 @@ def test_openapi_document_and_operation_contracts_are_valid():
     assert "get" in spec["paths"]["/api/v1/me/tenants"]
     assert "patch" in spec["paths"]["/api/v1/tenants/{tenantId}/profile/me"]
     assert "patch" not in spec["paths"]["/api/v1/tenants/{tenantId}/summary"]
-    for path in ("/api/v1/tenants/{tenantId}/members", "/bff/tenants/{tenantId}/members"):
+    for path in ("/api/v1/tenants/{tenantId}/members",):
         operation = spec["paths"][path]["get"]
         assert "403" in operation["responses"]
         schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
         assert schema["items"]["$ref"].endswith("TenantMember")
-    for path in ("/api/v1/tenants/{tenantId}/transactions", "/bff/tenants/{tenantId}/transactions"):
+    for path in ("/api/v1/tenants/{tenantId}/transactions",):
         operation = spec["paths"][path]["get"]
         member_filter = next(parameter for parameter in operation["parameters"] if parameter["name"] == "memberId")
         assert member_filter.get("required", False) is False
@@ -44,8 +44,7 @@ def test_openapi_document_and_operation_contracts_are_valid():
     assert spec["components"]["schemas"]["TenantMembership"]["properties"]["userId"]["format"] == "uuid"
     assert {"debtId", "ownerUserId"}.issubset(spec["components"]["schemas"]["Transaction"]["properties"])
     assert "ownerUserId" in spec["components"]["schemas"]["CreateTransaction"]["properties"]
-    for path in ("/api/v1/tenants/{tenantId}/transactions/{transactionId}",
-                 "/bff/tenants/{tenantId}/transactions/{transactionId}"):
+    for path in ("/api/v1/tenants/{tenantId}/transactions/{transactionId}",):
         body = spec["paths"][path]["patch"]["requestBody"]["content"]["application/json"]["schema"]
         assert body["$ref"].endswith("UpdateTransaction")
     assert "debtId" in spec["components"]["schemas"]["UpdateTransaction"]["properties"]
@@ -60,13 +59,6 @@ def test_openapi_document_and_operation_contracts_are_valid():
         ("/api/v1/tenants/{tenantId}/transaction-drafts/{draftId}", "patch"),
         ("/api/v1/tenants/{tenantId}/transaction-drafts/{draftId}", "delete"),
         ("/api/v1/tenants/{tenantId}/transaction-drafts/{draftId}/confirm", "post"),
-        ("/bff/tenants/{tenantId}/transactions", "post"),
-        ("/bff/tenants/{tenantId}/transactions/{transactionId}", "patch"),
-        ("/bff/tenants/{tenantId}/transactions/{transactionId}/void", "post"),
-        ("/bff/tenants/{tenantId}/transaction-drafts", "post"),
-        ("/bff/tenants/{tenantId}/transaction-drafts/{draftId}", "patch"),
-        ("/bff/tenants/{tenantId}/transaction-drafts/{draftId}", "delete"),
-        ("/bff/tenants/{tenantId}/transaction-drafts/{draftId}/confirm", "post"),
     )
 
     assert all("403" in spec["paths"][path][method]["responses"] for path, method in transaction_write_paths)
@@ -75,19 +67,13 @@ def test_openapi_document_and_operation_contracts_are_valid():
     assert "post" in spec["paths"]["/api/v1/tenants/{tenantId}/budget-proposals"]
     assert "post" in spec["paths"]["/api/v1/tenants/{tenantId}/budget-proposals/history"]
     assert "post" in spec["paths"]["/api/v1/tenants/{tenantId}/budget-proposals/{proposalId}/apply"]
-    assert "post" in spec["paths"]["/bff/tenants/{tenantId}/budget-proposals"]
-    assert "post" in spec["paths"]["/bff/tenants/{tenantId}/budget-proposals/history"]
-    assert "post" in spec["paths"]["/bff/tenants/{tenantId}/budget-proposals/{proposalId}/apply"]
     proposal = spec["components"]["schemas"]["BudgetProposal"]
     assert {"proposalSource", "historyDays", "modelVersion", "promptVersion"}.issubset(proposal["required"])
     assert proposal["properties"]["historyDays"]["maximum"] == 3660
     assert "post" in spec["paths"]["/api/v1/tenants/{tenantId}/debts/{debtId}/payments"]
-    assert "post" in spec["paths"]["/bff/tenants/{tenantId}/debts/{debtId}/payments"]
-    assert "put" in spec["paths"]["/bff/tenants/{tenantId}/debts/{debtId}/balance"]
     assert "get" in spec["paths"]["/api/v1/tenants/{tenantId}/reports/month"]
     assert "get" in spec["paths"]["/api/v1/tenants/{tenantId}/reports/period"]
     assert "get" in spec["paths"]["/api/v1/tenants/{tenantId}/reports/family"]
-    assert "get" in spec["paths"]["/bff/tenants/{tenantId}/reports/period"]
     assert spec["components"]["schemas"]["FinanceReport"]["properties"]["debtPaymentTotal"]["type"] == "string"
     assert spec["components"]["schemas"]["FinanceReport"]["properties"]["weekendSharePercent"]["type"] == ["integer", "null"]
     month_pattern = spec["paths"]["/api/v1/tenants/{tenantId}/reports/month"]["get"]["parameters"][0]["schema"]["pattern"]
@@ -167,14 +153,14 @@ def test_presentation_statuses_remain_semantic_core_codes():
     assert rolling["spent"]["type"] == "string"
 
 
-def test_csv_export_request_and_status_contract_are_exposed_to_api_and_bff():
+def test_csv_export_request_and_status_contract_are_exposed_to_api():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
-    for path in ("/api/v1/tenants/{tenantId}/exports", "/bff/tenants/{tenantId}/exports"):
+    for path in ("/api/v1/tenants/{tenantId}/exports",):
         assert "post" in spec["paths"][path]
         assert "202" in spec["paths"][path]["post"]["responses"]
         assert spec["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"]["$ref"] \
             .endswith("CreateExport")
-    for path in ("/api/v1/tenants/{tenantId}/exports/{exportId}", "/bff/tenants/{tenantId}/exports/{exportId}"):
+    for path in ("/api/v1/tenants/{tenantId}/exports/{exportId}",):
         assert "get" in spec["paths"][path]
         response = spec["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
         assert response["$ref"].endswith("ExportJob")
@@ -202,8 +188,7 @@ def test_csv_export_worker_contract_is_service_authenticated_and_lease_fenced():
 
 def test_csv_export_download_contract_is_authorized_and_short_lived():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
-    for path in ("/api/v1/tenants/{tenantId}/exports/{exportId}",
-                 "/bff/tenants/{tenantId}/exports/{exportId}"):
+    for path in ("/api/v1/tenants/{tenantId}/exports/{exportId}",):
         assert "authorized" in spec["paths"][path]["get"]["summary"].lower()
     download = spec["components"]["schemas"]["ExportJob"]["properties"]["downloadUrl"]
     assert download["type"] == ["string", "null"]
@@ -268,12 +253,11 @@ def test_transaction_response_contract_accepts_core_budget_threshold_alerts():
         })
 
 
-def test_receipt_price_history_is_exposed_through_authenticated_core_and_bff_routes():
+def test_receipt_price_history_is_exposed_through_authenticated_core_route():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
 
     for path, expected_security in (
         ("/api/v1/tenants/{tenantId}/products/price-history", None),
-        ("/bff/tenants/{tenantId}/products/price-history", [{"bffSession": []}]),
     ):
         operation = spec["paths"][path]["get"]
         assert operation.get("security") == expected_security
@@ -292,7 +276,6 @@ def test_product_catalog_is_member_scoped_with_distinct_catalog_and_search_thres
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for path, expected_security in (
         ("/api/v1/tenants/{tenantId}/products", None),
-        ("/bff/tenants/{tenantId}/products", [{"bffSession": []}]),
     ):
         operation = spec["paths"][path]["get"]
         assert operation.get("security") == expected_security
@@ -341,7 +324,7 @@ def test_shopping_candidates_are_member_scoped_and_explicitly_not_inventory():
 
     for path, expected_security in (
             ("/api/v1/tenants/{tenantId}/shopping", None),
-            ("/bff/tenants/{tenantId}/shopping", [{"bffSession": []}])):
+            ):
         operation = public["paths"][path]["get"]
         assert operation.get("security") == expected_security
         assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
@@ -369,21 +352,11 @@ def test_shopping_candidates_are_member_scoped_and_explicitly_not_inventory():
             ("/api/v1/tenants/{tenantId}/shopping/{productKey}/bought", "post", "markShoppingCandidateBought"),
             ("/api/v1/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "put", "muteShoppingCandidate"),
             ("/api/v1/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "delete", "unmuteShoppingCandidate"),
-            ("/bff/tenants/{tenantId}/shopping/{productKey}/bought", "post", "markBrowserShoppingCandidateBought"),
-            ("/bff/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "put", "muteBrowserShoppingCandidate"),
-            ("/bff/tenants/{tenantId}/suggestions/shopping/{productKey}/mute", "delete", "unmuteBrowserShoppingCandidate")):
+            ):
         operation = public["paths"][path][method]
         assert operation["operationId"] == operation_id
         assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
             "ShoppingList")
-    for path in ("/bff/tenants/{tenantId}/shopping/{productKey}/bought",
-                 "/bff/tenants/{tenantId}/suggestions/shopping/{productKey}/mute"):
-        for method in ("post", "put", "delete"):
-            if method in public["paths"][path]:
-                assert {"bffSession": []} in public["paths"][path][method]["security"]
-                assert any(parameter["$ref"].endswith("CsrfToken")
-                           for parameter in public["paths"][path][method]["parameters"])
-
     operation = internal["paths"]["/internal/v1/shopping/candidates"]["post"]
     assert operation["security"] == [{"serviceBearer": []}]
     assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
@@ -513,17 +486,10 @@ def test_receipt_item_edits_are_versioned_and_total_sync_is_explicit():
     assert any(parameter.get("name") == "If-Match" for parameter in sync["parameters"])
     assert "412" in sync["responses"]
 
-    bff_items = spec["paths"]["/bff/tenants/{tenantId}/receipts/{receiptId}/items"]
-    for method in ["get", "post"]:
-        operation = bff_items[method]
-        assert operation["security"] == [{"bffSession": []}]
-        csrf_parameter = any(parameter.get("$ref", "").endswith("CsrfToken")
-                             for parameter in operation.get("parameters", []))
-        assert csrf_parameter is (method == "post")
     assert "itemCount" in spec["components"]["schemas"]["Receipt"]["required"]
 
 
-def test_receipt_category_override_is_versioned_and_available_in_bff():
+def test_receipt_category_override_is_versioned():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     path = "/api/v1/tenants/{tenantId}/receipts/{receiptId}/category"
     operation = spec["paths"][path]["patch"]
@@ -532,9 +498,6 @@ def test_receipt_category_override_is_versioned_and_available_in_bff():
     assert operation["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("ReceiptCategorySelection")
     receipt = spec["components"]["schemas"]["Receipt"]
     assert {"categoryCode", "categorySource", "categoryAlgorithmVersion", "alcoholShare", "leisureShare", "leisure"}.issubset(receipt["required"])
-    bff = spec["paths"]["/bff/tenants/{tenantId}/receipts/{receiptId}/category"]["patch"]
-    assert bff["security"] == [{"bffSession": []}]
-    assert any(parameter.get("$ref", "").endswith("CsrfToken") for parameter in bff["parameters"])
 
 
 def test_receipt_basket_review_is_versioned_private_and_amount_free():
@@ -547,9 +510,6 @@ def test_receipt_basket_review_is_versioned_private_and_amount_free():
     assert "requestBody" not in operation
     assert {"verdict", "advice", "reviewReason", "reviewAction", "verdictSource", "reviewProvider",
             "reviewModelVersion", "reviewPromptVersion", "reviewAlgorithmVersion", "version"}.issubset(item["required"])
-    bff = spec["paths"]["/bff/tenants/{tenantId}/receipts/{receiptId}/basket-review"]["post"]
-    assert bff["security"] == [{"bffSession": []}]
-    assert any(parameter.get("$ref", "").endswith("CsrfToken") for parameter in bff["parameters"])
 
 
 def test_product_decision_is_user_scoped_reversible_and_disputed_items_are_paged():
@@ -562,16 +522,10 @@ def test_product_decision_is_user_scoped_reversible_and_disputed_items_are_paged
     decision = spec["paths"][decision_path]
     assert "put" in decision and "delete" in decision
     assert decision["put"]["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("ProductDecisionSelection")
-    bff = spec["paths"]["/bff/tenants/{tenantId}/products/{productKey}/decision"]
-    for method in ("put", "delete"):
-        assert bff[method]["security"] == [{"bffSession": []}]
-        assert any(parameter.get("$ref", "").endswith("CsrfToken") for parameter in bff[method]["parameters"])
     assert spec["components"]["schemas"]["ReceiptItem"]["properties"]["productKey"]["type"] == "string"
     allowed_path = "/api/v1/tenants/{tenantId}/products/decisions"
     allowed = spec["paths"][allowed_path]["get"]
     assert allowed["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("ProductDecisionKeys")
-    browser_allowed = spec["paths"]["/bff/tenants/{tenantId}/products/decisions"]["get"]
-    assert browser_allowed["security"] == [{"bffSession": []}]
 
 
 def test_product_decisions_expose_separate_confirmed_and_allowed_keys():
@@ -585,12 +539,8 @@ def test_product_decisions_expose_separate_confirmed_and_allowed_keys():
 def test_do_not_buy_contract_separates_model_guesses_from_shopping_blocks():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     schemas = spec["components"]["schemas"]
-    for prefix, security in (("/api/v1", [{"bearerAuth": []}]), ("/bff", [{"bffSession": []}])):
-        path = prefix + "/tenants/{tenantId}/products/do-not-buy"
-        operation = spec["paths"][path]["get"]
-        if prefix == "/bff":
-            assert operation["security"] == security
-        assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("AdviceEvidenceReport")
+    operation = spec["paths"]["/api/v1/tenants/{tenantId}/products/do-not-buy"]["get"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("AdviceEvidenceReport")
     assert {"available", "reasonCode", "algorithmVersion", "inputVersion", "banned", "guesses"} == set(
         schemas["AdviceEvidenceReport"]["required"])
     assert schemas["AdviceEvidenceGroup"]["properties"]["modelOnly"]["type"] == "boolean"
@@ -640,8 +590,6 @@ def test_f43_routes_are_member_scoped_and_worker_is_service_token_protected():
     public = paths["/api/v1/tenants/{tenantId}/analytics/advice"]
     assert "get" in public and "post" in public
     assert paths["/api/v1/tenants/{tenantId}/analytics/advice/jobs/{jobId}"]["get"]
-    assert "post" in paths["/bff/tenants/{tenantId}/analytics/advice"]
-    assert "get" in paths["/bff/tenants/{tenantId}/analytics/advice/jobs/{jobId}"]
     claim = paths["/internal/v1/analytics/advice-jobs/claim"]["post"]
     result = paths["/internal/v1/analytics/advice-jobs/{jobId}/result"]["post"]
     assert claim["security"] == [] and result["security"] == []
@@ -666,11 +614,9 @@ def test_f43_durable_job_tables_keep_member_rls_and_worker_lease_bounds():
 
 def test_repeat_warnings_only_describe_prior_confirmed_item_evidence():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
-    for path in ("/api/v1/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings",
-                 "/bff/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings"):
+    for path in ("/api/v1/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings",):
         operation = spec["paths"][path]["get"]
         assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("ReceiptRepeatWarnings")
-    assert spec["paths"]["/bff/tenants/{tenantId}/receipts/{receiptId}/repeat-warnings"]["get"]["security"] == [{"bffSession": []}]
     warning = spec["components"]["schemas"]["ReceiptRepeatWarning"]
     assert {"itemId", "name", "verdict", "count", "lastSum", "advice"}.issubset(warning["required"])
 
@@ -682,9 +628,6 @@ def test_receipt_duplicate_candidate_and_decision_are_versioned():
     decision = spec["paths"]["/api/v1/tenants/{tenantId}/receipts/{receiptId}/duplicate-decision"]["put"]
     assert any(parameter.get("name") == "If-Match" for parameter in decision["parameters"])
     assert "412" in decision["responses"] and "409" in decision["responses"]
-    bff = spec["paths"]["/bff/tenants/{tenantId}/receipts/{receiptId}/duplicate-decision"]["put"]
-    assert bff["security"] == [{"bffSession": []}]
-    assert any(parameter.get("$ref", "").endswith("CsrfToken") for parameter in bff["parameters"])
     assert "duplicateDecision" in spec["components"]["schemas"]["Receipt"]["required"]
 
 
@@ -695,8 +638,6 @@ def test_receipt_confirmation_is_versioned_and_idempotent():
     assert {"If-Match", "Idempotency-Key"}.issubset(names)
     assert "409" in route["responses"] and "412" in route["responses"]
     assert route["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith("Receipt")
-    bff = spec["paths"]["/bff/tenants/{tenantId}/receipts/{receiptId}/confirm"]["post"]
-    assert any(parameter.get("$ref", "").endswith("CsrfToken") for parameter in bff["parameters"])
     receipt = spec["components"]["schemas"]["Receipt"]
     assert {"transactionId", "duplicateDecision", "duplicateOfReceiptId"}.issubset(receipt["required"])
 
@@ -1243,13 +1184,6 @@ def test_finance_report_waste_contract_accepts_complete_and_unavailable_results(
 def test_bank_import_preview_contract_is_strict_and_exposes_web_and_api_routes():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for route in (
-        "/bff/tenants/{tenantId}/imports",
-        "/bff/tenants/{tenantId}/imports/{importId}/preview",
-        "/bff/tenants/{tenantId}/imports/{importId}/rows/{rowId}",
-        "/bff/tenants/{tenantId}/imports/{importId}/rows/{rowId}/category",
-        "/bff/tenants/{tenantId}/imports/{importId}/classify",
-        "/bff/tenants/{tenantId}/imports/{importId}/confirm",
-        "/bff/tenants/{tenantId}/imports/{importId}/undo",
         "/api/v1/tenants/{tenantId}/imports",
         "/api/v1/tenants/{tenantId}/imports/{importId}/preview",
         "/api/v1/tenants/{tenantId}/imports/{importId}/rows/{rowId}",
@@ -1260,10 +1194,10 @@ def test_bank_import_preview_contract_is_strict_and_exposes_web_and_api_routes()
         "/api/v1/tenants/{tenantId}/imports/{importId}/undo",
     ):
         assert route in spec["paths"]
-    assert spec["paths"]["/bff/tenants/{tenantId}/imports"]["post"]["requestBody"]["content"].keys() == {
+    assert spec["paths"]["/api/v1/tenants/{tenantId}/imports"]["post"]["requestBody"]["content"].keys() == {
         "multipart/form-data"
     }
-    confirm = spec["paths"]["/bff/tenants/{tenantId}/imports/{importId}/confirm"]["post"]
+    confirm = spec["paths"]["/api/v1/tenants/{tenantId}/imports/{importId}/confirm"]["post"]
     assert "If-Match" in [p.get("name") for p in confirm["parameters"]]
     assert any(p.get("$ref", "").endswith("/IdempotencyKey") for p in confirm["parameters"])
     assert "409" in spec["paths"]["/api/v1/tenants/{tenantId}/imports/{importId}/undo"]["post"]["responses"]
@@ -1314,7 +1248,6 @@ def test_bank_import_row_kind_contracts_include_transfer_in():
 def test_merchant_classification_and_mapping_contracts_are_scoped_and_strict():
     finance_api = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     intelligence_api = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
-    assert "/bff/tenants/{tenantId}/merchant-mappings" in finance_api["paths"]
     assert "/api/v1/tenants/{tenantId}/merchant-mappings" in finance_api["paths"]
     assert "/internal/v1/merchant-classifications" in intelligence_api["paths"]
     assert "merchant-classification" in intelligence_api["components"]["parameters"]["AiTaskKind"]["schema"]["enum"]
@@ -1330,7 +1263,7 @@ def test_merchant_classification_and_mapping_contracts_are_scoped_and_strict():
     assert list(result_validator.iter_errors(valid_result)) == []
     assert list(result_validator.iter_errors({**valid_result, "unexpected": True}))
 
-    for route_prefix in ("/bff", "/api/v1"):
+    for route_prefix in ("/api/v1",):
         preview_path = f"{route_prefix}/tenants/{{tenantId}}/merchant-reclassifications/preview"
         apply_path = f"{route_prefix}/tenants/{{tenantId}}/merchant-reclassifications/apply"
         assert preview_path in finance_api["paths"]
@@ -1344,11 +1277,6 @@ def test_merchant_classification_and_mapping_contracts_are_scoped_and_strict():
             "/MerchantReclassificationApplyRequest"
         )
         assert "412" in preview["responses"] and "412" in apply["responses"]
-        if route_prefix == "/bff":
-            assert preview["security"] == [{"bffSession": []}]
-            assert apply["security"] == [{"bffSession": []}]
-            assert any(p.get("$ref", "").endswith("/CsrfToken") for p in preview["parameters"])
-            assert any(p.get("$ref", "").endswith("/CsrfToken") for p in apply["parameters"])
         assert any(p.get("$ref", "").endswith("/MerchantReclassificationIdempotencyKey")
                    for p in apply["parameters"])
 
@@ -1363,7 +1291,7 @@ def test_merchant_classification_and_mapping_contracts_are_scoped_and_strict():
 
 def test_receipt_photo_jobs_are_owner_scoped_idempotent_and_private():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
-    for prefix in ("/bff", "/api/v1"):
+    for prefix in ("/api/v1",):
         upload_path = f"{prefix}/tenants/{{tenantId}}/receipts/photo-jobs"
         status_path = f"{prefix}/tenants/{{tenantId}}/receipt-jobs/{{jobId}}"
         assert upload_path in spec["paths"]
@@ -1379,10 +1307,6 @@ def test_receipt_photo_jobs_are_owner_scoped_idempotent_and_private():
         assert status["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
             "/ReceiptProcessingJob"
         )
-        if prefix == "/bff":
-            assert upload["security"] == [{"bffSession": []}]
-            assert status["security"] == [{"bffSession": []}]
-            assert any(p.get("$ref", "").endswith("/CsrfToken") for p in upload["parameters"])
     assert spec["components"]["schemas"]["ReceiptProcessingJob"]["additionalProperties"] is False
 
 
@@ -1420,13 +1344,10 @@ def test_personal_inflation_is_member_scoped_and_has_an_explicit_no_history_cont
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     paths = spec["paths"]
     schema = spec["components"]["schemas"]["PersonalInflation"]
-    for path in ("/api/v1/tenants/{tenantId}/analytics/personal-inflation",
-                 "/bff/tenants/{tenantId}/analytics/personal-inflation"):
+    for path in ("/api/v1/tenants/{tenantId}/analytics/personal-inflation",):
         operation = paths[path]["get"]
         assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
             "PersonalInflation")
-    assert paths["/bff/tenants/{tenantId}/analytics/personal-inflation"]["get"]["security"] == [
-        {"bffSession": []}]
     telegram = paths["/internal/v1/telegram/actions/personal-inflation"]["post"]
     assert telegram["security"] == [{"telegramServiceToken": []}]
     assert telegram["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
@@ -1497,7 +1418,6 @@ def test_recurring_projection_routes_require_member_bound_responses():
     spec = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     for path, security in (
         ("/api/v1/tenants/{tenantId}/analytics/recurring", None),
-        ("/bff/tenants/{tenantId}/analytics/recurring", [{"bffSession": []}]),
     ):
         operation = spec["paths"][path]["get"]
         assert operation.get("security") == security
@@ -1512,14 +1432,10 @@ def test_recurring_projection_routes_require_member_bound_responses():
     )
     for path, security, csrf_required in (
         ("/api/v1/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", None, False),
-        ("/bff/tenants/{tenantId}/analytics/recurring/{seriesId}/mute", [{"bffSession": []}], True),
     ):
         for method in ("put", "delete"):
             operation = spec["paths"][path][method]
             assert operation.get("security") == security
-            if csrf_required:
-                assert any(parameter == {"$ref": "#/components/parameters/CsrfToken"}
-                           for parameter in operation["parameters"])
             assert operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
                 "RecurringProjection"
             )

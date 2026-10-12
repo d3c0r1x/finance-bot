@@ -8,8 +8,7 @@ public HTTPS tunnel cannot use this configuration yet.
 2. Replace `replace-me` for `POSTGRES_PASSWORD`, `DATABASE_PASSWORD`,
    `DATABASE_MIGRATION_PASSWORD`, `KEYCLOAK_ADMIN_USERNAME`, and
    `KEYCLOAK_ADMIN_PASSWORD` with local values. Keep `.env.dev` private and
-   uncommitted. The checked-in Web client secret is a development-only value
-   matching `ops/keycloak/realm-finance.json`.
+   uncommitted.
 3. Start the local profile:
 
    ```powershell

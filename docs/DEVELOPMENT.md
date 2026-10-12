@@ -41,7 +41,7 @@ Infisical is optional. When installed and configured, the script runs the select
 
 ## SaaS services and tests
 
-The active SaaS code lives under `services/core`, `services/python`, `services/analytics-go`, and `apps/web` / `apps/android`. Use each service's build and test instructions while developing that service. `PLAN.md` section 17 defines intended Compose profiles and commands. Those commands are targets only until `infra/compose/compose.yml` is added and validated.
+The active SaaS code lives under `services/core`, `services/python`, `services/analytics-go`, and `apps/android`. Use each service's build and test instructions while developing that service. `PLAN.md` section 17 defines intended Compose profiles and commands. Those commands are targets only until `infra/compose/compose.yml` is added and validated.
 
 Create a local template copy only when needed:
 
@@ -58,7 +58,7 @@ cp .env.example .env.dev
 ## Runtime status
 
 - Legacy Python bot/panel can run locally with their existing configuration.
-- SaaS API, Web, Android, Go, and Python slices have independent local checks documented by their owning code and plan goals.
+- SaaS API, Android, Go, and Python slices have independent local checks documented by their owning code and plan goals.
 - No complete all-service local stack or production deployment is currently provided by this repository.
 - `start_bot.bat` and `start_panel.bat` run foreground processes. They do not configure Windows service recovery or 24/7 hosting.
 

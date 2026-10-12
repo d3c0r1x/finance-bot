@@ -8,7 +8,6 @@ import com.decorix.finance.core.api.ReceiptRecalculationApi.RunDetail;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -50,29 +49,4 @@ public class ReceiptRecalculationController {
         return recalculations.historyDetail(tenantId, jwt.getSubject(), runId, limit, cursor);
     }
 
-    @PostMapping("/bff/tenants/{tenantId}/review-recalculations/preview")
-    Preview previewBff(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user) {
-        return recalculations.preview(tenantId, user.getSubject());
-    }
-
-    @PostMapping("/bff/tenants/{tenantId}/review-recalculations/apply")
-    ApplyResult applyBff(@PathVariable UUID tenantId, @RequestBody ApplyRequest request,
-                         @AuthenticationPrincipal OidcUser user) {
-        return recalculations.apply(tenantId, user.getSubject(), request);
-    }
-
-    @GetMapping("/bff/tenants/{tenantId}/review-recalculations")
-    HistoryPage historyBff(@PathVariable UUID tenantId, @AuthenticationPrincipal OidcUser user,
-                           @RequestParam(defaultValue = "20") int limit,
-                           @RequestParam(required = false) String cursor) {
-        return recalculations.history(tenantId, user.getSubject(), limit, cursor);
-    }
-
-    @GetMapping("/bff/tenants/{tenantId}/review-recalculations/{runId}")
-    RunDetail historyDetailBff(@PathVariable UUID tenantId, @PathVariable UUID runId,
-                               @AuthenticationPrincipal OidcUser user,
-                               @RequestParam(defaultValue = "100") int limit,
-                               @RequestParam(required = false) String cursor) {
-        return recalculations.historyDetail(tenantId, user.getSubject(), runId, limit, cursor);
-    }
 }
