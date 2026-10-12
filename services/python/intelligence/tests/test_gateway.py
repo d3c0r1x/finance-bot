@@ -1,3 +1,7 @@
+import asyncio
+import json
+
+import httpx
 import pytest
 
 from services.python.intelligence.gateway import (
@@ -10,6 +14,11 @@ from services.python.intelligence.gateway import (
     require_capabilities,
 )
 from services.python.intelligence.vision import OllamaVisionProvider
+from services.python.intelligence.transaction_drafts import (
+    PROMPT_VERSION as TRANSACTION_DRAFT_PROMPT_VERSION,
+    build_draft_prompt,
+    validate_draft_context,
+)
 
 
 @pytest.mark.parametrize("host", ["http://localhost:11434", "http://127.0.0.1:11434", "http://ollama:11434",
@@ -69,11 +78,276 @@ def test_capability_router_rejects_remote_match_under_local_only():
         ProviderRouter([remote]).select({"vision", "structured_output"}, "local-only", "receipt-vision")
 
 
-def test_vertex_provider_is_disabled_until_explicit_evaluation_and_canary_gate():
+@pytest.mark.parametrize("policy", ["local-only", "cloud-opt-in"])
+def test_vertex_provider_is_disabled_by_default_and_router_fails_closed(policy):
     provider = VertexAIProvider()
 
     assert provider.name == "vertex_ai"
     assert provider.enabled is False
     assert provider.capabilities == frozenset()
+    assert provider.supported_tasks == frozenset()
+    with pytest.raises(UnsupportedCapability):
+        ProviderRouter([provider]).select({"text", "structured_output"}, policy, "transaction-draft")
+    assert provider.enabled is False
+
+
+@pytest.mark.parametrize("policy", ["local-only", "cloud-opt-in"])
+def test_configured_vertex_declares_only_transaction_draft_text_capabilities_and_stays_disabled(policy):
+    provider = VertexAIProvider(
+        project_id="test-project",
+        location="us-central1",
+        model_id="gemini-test",
+        access_token_supplier=lambda: "injected-token",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(500)),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    assert provider.capabilities == frozenset({"text", "structured_output"})
+    assert provider.supported_tasks == frozenset({"transaction-draft"})
+    assert provider.enabled is False
+    with pytest.raises(UnsupportedCapability):
+        ProviderRouter([provider]).select({"text", "structured_output"}, policy, "transaction-draft")
+
+
+def test_vertex_provider_cannot_be_enabled_without_explicit_gate():
+    provider = VertexAIProvider()
+
     with pytest.raises(PolicyDenied):
         provider.enable(gate_approved=False, execution_policy="cloud-opt-in")
+
+
+def transaction_draft_context():
+    return {
+        "text": "Обед 250 рублей",
+        "timezone": "Europe/Moscow",
+        "now": "2026-10-12T12:30:00+03:00",
+    }
+
+
+def valid_transaction_draft():
+    return {
+        "type": "expense",
+        "amount": "250",
+        "categoryCode": "еда",
+        "subcategoryCode": None,
+        "description": "Обед",
+        "occurredAt": "2026-10-12T12:00:00+03:00",
+    }
+
+
+def vertex_success_response(draft):
+    return {
+        "candidates": [{
+            "content": {"role": "model", "parts": [{"text": json.dumps(draft, ensure_ascii=False)}]},
+            "finishReason": "STOP",
+        }],
+        "modelVersion": "gemini-test-version",
+    }
+
+
+def test_vertex_transaction_draft_uses_shared_prompt_and_validated_output_offline():
+    requests = []
+    access_tokens = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json=vertex_success_response(valid_transaction_draft()))
+
+    def access_token_supplier():
+        access_tokens.append("requested")
+        return "injected-vertex-access-token"
+
+    provider = VertexAIProvider(
+        project_id="finance-test-project",
+        location="europe-west4",
+        model_id="gemini-test-model",
+        access_token_supplier=access_token_supplier,
+        transport=httpx.MockTransport(respond),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    result = asyncio.run(provider.execute(
+        "transaction-draft", transaction_draft_context(), timeout=3.5, api_key="generic-ollama-secret",
+    ))
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == "POST"
+    assert request.url == (
+        "https://europe-west4-aiplatform.googleapis.com/v1/projects/finance-test-project/locations/"
+        "europe-west4/publishers/google/models/gemini-test-model:generateContent"
+    )
+    assert request.headers["Authorization"] == "Bearer injected-vertex-access-token"
+    assert b"generic-ollama-secret" not in request.content
+    assert request.extensions["timeout"] == {
+        "connect": 3.5, "read": 3.5, "write": 3.5, "pool": 3.5,
+    }
+    payload = json.loads(request.content)
+    assert set(payload) == {"contents", "generationConfig"}
+    assert payload["contents"][0]["parts"][0]["text"] == build_draft_prompt(
+        validate_draft_context(transaction_draft_context())
+    )
+    assert payload["generationConfig"]["responseMimeType"] == "application/json"
+    assert payload["generationConfig"]["maxOutputTokens"] == 512
+    schema = payload["generationConfig"]["responseSchema"]
+    assert schema["type"] == "OBJECT"
+    assert set(schema["properties"]) == {
+        "type", "amount", "categoryCode", "subcategoryCode", "description", "occurredAt",
+    }
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["properties"]["type"]["enum"] == ["expense", "income", "debt_payment"]
+    assert schema["properties"]["subcategoryCode"]["type"] == "STRING"
+    assert schema["properties"]["subcategoryCode"]["nullable"] is True
+    assert access_tokens == ["requested"]
+    assert result == {
+        "type": "expense",
+        "amount": "250.00",
+        "categoryCode": "еда",
+        "subcategoryCode": None,
+        "description": "Обед",
+        "occurredAt": "2026-10-12T12:00:00+03:00",
+        "modelVersion": "gemini-test-version",
+        "promptVersion": TRANSACTION_DRAFT_PROMPT_VERSION,
+    }
+
+
+def test_vertex_rejects_unsupported_task_before_token_or_transport_call():
+    calls = []
+    provider = VertexAIProvider(
+        project_id="p",
+        location="us-central1",
+        model_id="gemini-test-model",
+        access_token_supplier=lambda: calls.append("token"),
+        transport=httpx.MockTransport(lambda request: calls.append(request)),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    with pytest.raises(UnsupportedCapability):
+        asyncio.run(provider.execute("budget-proposal", {}, timeout=2))
+
+    assert calls == []
+
+
+def test_vertex_missing_access_token_fails_before_network_call():
+    calls = []
+    provider = VertexAIProvider(
+        project_id="p",
+        location="us-central1",
+        model_id="gemini-test-model",
+        access_token_supplier=None,
+        transport=httpx.MockTransport(lambda request: calls.append(request)),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    with pytest.raises(PolicyDenied):
+        asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=2))
+
+    assert calls == []
+
+
+def test_vertex_rejects_unsafe_project_path_before_token_or_network_call():
+    calls = []
+    provider = VertexAIProvider(
+        project_id="bad/project",
+        location="us-central1",
+        model_id="gemini-test-model",
+        access_token_supplier=lambda: calls.append("token"),
+        transport=httpx.MockTransport(lambda request: calls.append(request)),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    with pytest.raises(ValueError):
+        asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=2))
+
+    assert calls == []
+
+
+@pytest.mark.parametrize("body", [
+    {"candidates": []},
+    {"candidates": [{"content": {"parts": []}}]},
+    {"candidates": [{"content": {"parts": [{"text": "not JSON"}]}}]},
+    {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "MAX_TOKENS"}]},
+])
+def test_vertex_malformed_response_fails_closed_without_retry(body):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, json=body)
+
+    provider = VertexAIProvider(
+        project_id="p", location="us-central1", model_id="gemini-test-model",
+        access_token_supplier=lambda: "injected-token", transport=httpx.MockTransport(respond),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    with pytest.raises(ValueError):
+        asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=2))
+
+    assert len(calls) == 1
+
+
+def test_vertex_non_json_http_body_fails_closed_without_retry():
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, content=b"not-json")
+
+    provider = VertexAIProvider(
+        project_id="p", location="us-central1", model_id="gemini-test-model",
+        access_token_supplier=lambda: "injected-token", transport=httpx.MockTransport(respond),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    with pytest.raises(ValueError):
+        asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=2))
+
+    assert len(calls) == 1
+
+
+def test_vertex_oversized_response_is_rejected_without_retry():
+    calls = []
+    response_body = vertex_success_response(valid_transaction_draft())
+    response_body["padding"] = "x" * (16 * 1024)
+    oversized_body = json.dumps(response_body, ensure_ascii=False).encode()
+    assert len(oversized_body) > 16 * 1024
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, content=oversized_body)
+
+    provider = VertexAIProvider(
+        project_id="p", location="us-central1", model_id="gemini-test-model",
+        access_token_supplier=lambda: "injected-token", transport=httpx.MockTransport(respond),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    with pytest.raises(ValueError):
+        asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=2))
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("draft", [
+    {**valid_transaction_draft(), "unexpected": "field"},
+    {**valid_transaction_draft(), "amount": "0"},
+    {**valid_transaction_draft(), "type": "transfer"},
+])
+def test_vertex_invalid_transaction_draft_fails_closed_without_retry(draft):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, json=vertex_success_response(draft))
+
+    provider = VertexAIProvider(
+        project_id="p", location="us-central1", model_id="gemini-test-model",
+        access_token_supplier=lambda: "injected-token", transport=httpx.MockTransport(respond),
+        declared_capabilities=frozenset({"text", "structured_output"}),
+    )
+
+    with pytest.raises(ValueError):
+        asyncio.run(provider.execute("transaction-draft", transaction_draft_context(), timeout=2))
+
+    assert len(calls) == 1

@@ -2173,3 +2173,13 @@ Updated: 2026-10-12, Europe/Moscow.
 - Limits: this tests the Activity-to-launch-callback handoff, not Android's system resolver UI, live OIDC/Core authorization, export worker/S3, browser transfer or downloaded-byte integrity. F52 Android remains PARTIAL.
 - Commit/push: `28704c67586a3cd4b2c0675398e31b2624fe4efa` (`feat(F52): verify Android CSV chooser handoff`) pushed; `git ls-remote` verified the remote branch at that SHA. GitHub CI remains unconfirmed unless a workflow run is found.
 - Next: continue F59 with an independently closable feature; production runtime/public HTTPS/auth remain release blockers, and no system/network settings have been changed.
+
+## F60.1 Vertex transaction-draft adapter seam — GREEN locally; COMMIT_PENDING — 2026-10-12
+
+- Authority: approved V1 F60 and `docs/specs/CONTINUATION.md` §C. Detailed bounded-slice plan: `docs/superpowers/plans/2026-10-12-f60-vertex-transaction-draft-adapter.md`.
+- TDD RED: gateway tests failed before implementation (16 failed, 12 passed); after adding bounded-output assertions, 2 failed, 27 passed. Failures identified the missing Vertex adapter contract, missing `maxOutputTokens`, and missing response-byte cap. No cloud calls or credentials were used.
+- Implementation: Vertex supports only transaction drafts with declared text/structured-output capabilities. It stays `enabled=False`, and ProviderRouter rejects it under both policies. Uses injected OAuth token supplier only; ignores the generic Ollama API key; reuses shared draft context/prompt/output validation; requests JSON schema; rejects non-STOP, malformed and invalid draft responses; records Vertex model and prompt versions. HTTP response is streamed with a 16 KiB cap and generation is capped at 512 output tokens. App wiring and live traffic remain unchanged.
+- GREEN: focused gateway tests 29/29. Full Python intelligence plus contract regression passed: 200 passed, 1 skipped. `compileall`, `git diff --check`, and independent read-only review passed. One initial broad run had an intermittent local-server `WinError 10053` in existing oversized-request test; isolated rerun and complete rerun both passed.
+- Limits: no live credentials, cloud request, model capability certification, quality evaluation, quotas/policy rollout, canary, rollback, or provider activation. F60 remains partial.
+- Repository / branch / observed HEAD before feature commit: `feat/saas-rewrite` / `dad4a1f6d0bf5ea6781f3e675eca89a7138e0f38`.
+- Status: COMMIT_PENDING. Next: commit only the plan, gateway adapter, tests, and this progress record; then verify/push the feature and progress commits.
