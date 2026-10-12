@@ -109,7 +109,26 @@ def test_f08_android_registry_records_os_process_death_evidence_and_remaining_li
     assert process_death_test in android["tests"]
     assert (ROOT / "apps/android/scripts/verify-f08-process-death.ps1").is_file()
     evidence = android["evidence"].lower()
-    assert "force-stop" in evidence and "api-27" in evidence
+    assert "force-stopped" in evidence and "api-27" in evidence
     assert "recovered exact synthetic" in evidence
     assert "authenticated mainactivity restoration" in android["gap"].lower()
     assert "live authenticated core/oidc" in android["gap"].lower()
+
+
+def test_f49_android_registry_records_tenant_checkpoint_process_death_and_preview_evidence():
+    feature = next(item for item in _features() if item["id"] == "F49")
+    android = feature["android"]
+    process_test = (
+        "apps/android/app/src/androidTest/java/com/decorix/finance/"
+        "BankImportCheckpointProcessDeathTest.kt"
+    )
+    api_test = "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt"
+
+    assert android["status"] == "partial"
+    assert process_test in android["tests"]
+    assert api_test in android["tests"]
+    assert (ROOT / "apps/android/scripts/verify-f49-process-death.ps1").is_file()
+    evidence = " ".join(android["evidence"]).lower()
+    assert "force-stop/relaunch" in evidence and "api 27" in evidence
+    assert "undo key" in evidence
+    assert "live android core/oidc" in android["gap"].lower()

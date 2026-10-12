@@ -1,5 +1,6 @@
 param(
-    [string]$DeviceSerial = "emulator-5554"
+    [string]$DeviceSerial = "emulator-5554",
+    [string]$ExpectedAvdName = "CodexFinanceBotApi27"
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,11 @@ if ($api -ne "27") { throw "Expected isolated Android API 27 emulator, found API
 $isEmulator = (& $adb -s $DeviceSerial shell getprop ro.kernel.qemu).Trim()
 if ($DeviceSerial -notmatch '^emulator-' -or $isEmulator -ne "1") {
     throw "Refusing to run destructive force-stop check on a non-emulator device ($DeviceSerial, ro.kernel.qemu=$isEmulator)."
+}
+$avdNameOutput = @(& $adb -s $DeviceSerial emu avd name)
+$avdName = if ($avdNameOutput.Count -gt 0) { $avdNameOutput[0].Trim() } else { "" }
+if ($LASTEXITCODE -ne 0 -or $avdName -ne $ExpectedAvdName) {
+    throw "Refusing force-stop outside the dedicated AVD '$ExpectedAvdName'; connected AVD is '$avdName'."
 }
 
 $androidDir = Split-Path -Parent $PSScriptRoot

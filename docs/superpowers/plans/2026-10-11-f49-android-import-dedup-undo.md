@@ -14,9 +14,17 @@ DoD: Android shows Core-owned import outcomes and safely undoes only a committed
 
 ## Execution result
 
-Locally GREEN; parity remains PARTIAL pending live Android/Core OIDC, process-kill recovery, and tenant-isolation E2E. Core owns dedupe and atomic undo; Android stores only a tenant-scoped import UUID because Core exposes preview by import UUID but no import-list recovery route.
+Locally GREEN; parity remains PARTIAL pending live Android/Core OIDC and tenant-isolation E2E. Core owns dedupe and atomic undo; Android stores only a tenant-scoped import UUID because Core exposes preview by import UUID but no import-list recovery route. A 2026-10-12 API-27 force-stop follow-up verifies tenant-pointer and undo-key survival; a separate same-process test verifies the scoped preview GET contract.
 
 - RED/GREEN: API/UI instrumentation first exposed invalid fractional integer coercion, offscreen Compose assertions, and session/tenant navigation races. Tests and strict parsing/refresh guards were fixed. A new session-generation race test first failed compilation because the protected-request policy was absent; it now proves stale generations do not enter the request block and account replacement serializes against an active undo call.
 - Final local checks: Android import API/UI regression 45/45 on isolated API 27; JVM checkpoint/key/response/session-request policy 15/15; contracts 63/63; debug and AndroidTest APK builds pass; fresh debug APK installed and `MainActivity` resumed on isolated API 27. APK SHA-256 `F7B58D2930D36254F783641AD00354944383A6F30A53E09D669BDD26128D6E9E`; `git diff --check` passes.
 - Session replacement is serialized only across the explicit undo call (20-second call timeout); AppAuth token persistence runs on a background executor so that this guard does not block the UI thread.
-- Remaining evidence gate: no live authenticated Android/Core OIDC, real process-kill recovery, or external tenant-isolation E2E was run.
+- Remaining evidence gate before follow-up: no live authenticated Android/Core OIDC, real process-kill recovery, or external tenant-isolation E2E was run.
+
+### Process-death recovery follow-up — 2026-10-12
+
+- Added `BankImportCheckpointProcessDeathTest` with an isolated test-only SharedPreferences file. It seeds two synthetic tenant/import UUID pairs, then after a host-verified target-process force-stop asserts both pointers and deterministic undo keys survive while an unrelated tenant resolves no pointer.
+- Added `FinanceBankImportApiTest.recoveredCheckpointLoadsOnlyItsTenantScopedPreviewWithoutMutation`: a recovered pointer drives only `GET /api/v1/tenants/{tenant}/imports/{import}/preview`; it checks response identity and asserts no second request (upload/confirm/undo) occurs.
+- `verify-f49-process-death.ps1` requires the dedicated `CodexFinanceBotApi27` AVD (or an explicitly selected expected AVD), API 27, and exactly one connected device; it checks the app PID before and after force-stop, launches MainActivity, runs the recovery method in a fresh instrumentation invocation, and always attempts fixture cleanup.
+- The preview GET assertion is a separate same-process MockWebServer check that saves then reloads a checkpoint. It is not represented as an HTTP request performed after the force-stop.
+- This proves local Android storage/request scoping only. It does not exercise authenticated MainActivity restore with a live Core/OIDC or prove production tenant authorization.

@@ -1133,15 +1133,18 @@ features:
     android:
       status: partial
       scenario: "Android counterpart for F49: Дедупликация импорта, bulk insert, undo именно партии"
-      gap: "Live Android Core/OIDC undo, process-kill recovery, and real tenant-isolation E2E remain unverified."
+      gap: "Live Android Core/OIDC undo and real tenant-isolation E2E remain unverified."
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoApiTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoScreensTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportApiTest.kt
+        - apps/android/app/src/androidTest/java/com/decorix/finance/BankImportCheckpointProcessDeathTest.kt
+        - apps/android/scripts/verify-f49-process-death.ps1
         - apps/android/app/src/test/java/com/decorix/finance/BankImportCheckpointStoreTest.kt
         - apps/android/app/src/test/java/com/decorix/finance/BankImportUndoKeyTest.kt
         - apps/android/app/src/test/java/com/decorix/finance/FinanceSessionRequestPolicyTest.kt
       evidence:
-        - "Android F47/F48/F49 import API/UI regression passes 54/54 on isolated API 27; with a synthetic Core-shaped preview DTO (state=reverted), Compose renders localized terminal status when the transient undo response is absent and offers no batch-undo action. JVM suite and debug/AndroidTest APK builds pass. This does not prove OS process-death recovery, live Core/OIDC, or tenant-isolation E2E."
+        - "Previously recorded Android F47/F48/F49 API/UI baseline passes 54/54 on isolated API 27. With a synthetic Core-shaped preview DTO (state=reverted), Compose renders localized terminal status after transient undo response loss and offers no batch-undo action; that baseline does not prove OS process-death recovery. Separately, the host-verified API-27 force-stop/relaunch test passes all 3 seed/recovery/cleanup phases: synthetic import UUIDs for two tenants and deterministic undo keys survive; another tenant reads no pointer. A distinct same-process MockWebServer test in the updated FinanceBankImportApiTest passes as part of 11/11 API tests; it saves/loads a pointer and verifies only the tenant/import-scoped preview GET occurs, with no upload/confirm/undo mutation. JVM suite and debug/AndroidTest APK builds pass. Live Core/OIDC and real tenant-isolation E2E remain unverified."
     intentional_differences: []
   - id: F50
     feature: "Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"

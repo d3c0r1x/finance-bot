@@ -92,6 +92,31 @@ class FinanceBankImportApiTest {
         }
     }
 
+    @Test fun recoveredCheckpointLoadsOnlyItsTenantScopedPreviewWithoutMutation() {
+        val preferences = ApplicationProvider.getApplicationContext<Context>()
+            .getSharedPreferences("bank_import_checkpoint_preview_recovery_test", Context.MODE_PRIVATE)
+        preferences.edit().clear().commit()
+        server.enqueue(MockResponse().setBody(previewJson(quality = "valid")))
+
+        try {
+            val store = BankImportCheckpointStore(preferences)
+            assertTrue(store.save(TENANT_ID, IMPORT_ID))
+            val recoveredImportId = requireNotNull(store.load(TENANT_ID))
+            val preview = api().bankImportPreview(TENANT_ID, recoveredImportId)
+
+            assertEquals(IMPORT_ID, preview.id)
+            assertEquals(TENANT_ID, preview.tenantId)
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("GET", request.method)
+            assertEquals("/api/v1/tenants/$TENANT_ID/imports/$IMPORT_ID/preview", request.path)
+            assertEquals("Bearer bank-import-token", request.getHeader("Authorization"))
+            assertNull("Recovery must not upload, confirm, or undo the saved import",
+                server.takeRequest(250, TimeUnit.MILLISECONDS))
+        } finally {
+            preferences.edit().clear().commit()
+        }
+    }
+
     @Test fun previewGetCanRefreshAfter401AndReturnsSecondResponse() {
         server.enqueue(MockResponse().setResponseCode(401).setBody("""{"code":"expired"}"""))
         server.enqueue(MockResponse().setResponseCode(200).setBody(
