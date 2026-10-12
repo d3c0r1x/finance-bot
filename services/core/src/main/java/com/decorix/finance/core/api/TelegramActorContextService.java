@@ -31,18 +31,21 @@ public class TelegramActorContextService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final MemberProfileService memberProfiles;
+    private final TelegramAccessPolicy accessPolicy;
     private final SecureRandom random = new SecureRandom();
     private final Clock clock = Clock.systemUTC();
 
     public TelegramActorContextService(JdbcTemplate jdbc, TransactionTemplate transactions,
-                                       MemberProfileService memberProfiles) {
+                                       MemberProfileService memberProfiles, TelegramAccessPolicy accessPolicy) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.memberProfiles = memberProfiles;
+        this.accessPolicy = accessPolicy;
     }
 
     public TenantListResponse listTenants(Long telegramUserId, String telegramDisplayName) {
         validateTelegramUserId(telegramUserId);
+        accessPolicy.requireAllowed(telegramUserId);
         return transactions.execute(status -> {
             enableServiceContext();
             UUID userId = activeLinkedUser(telegramUserId);
@@ -66,6 +69,7 @@ public class TelegramActorContextService {
     public ActorContextResponse issue(IssueRequest request) {
         if (request == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Actor context is required");
         validateTelegramUserId(request.telegramUserId());
+        accessPolicy.requireAllowed(request.telegramUserId());
         if (request.tenantId() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tenant is required");
         return transactions.execute(status -> {
             enableServiceContext();
@@ -134,6 +138,14 @@ public class TelegramActorContextService {
                     rs.getTimestamp("expires_at").toInstant()), contextHash, Timestamp.from(clock.instant()));
             if (stored.isEmpty()) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Telegram actor context expired");
             StoredContext context = stored.get(0);
+            accessPolicy.requireAllowed(context.telegramUserId());
+            String configuredSubject = accessPolicy.accountSubject(context.telegramUserId()).orElseThrow(
+                    () -> new ResponseStatusException(HttpStatus.FORBIDDEN,
+                            "Telegram account mapping is no longer configured"));
+            if (!context.userId().equals(configuredAccountUser(configuredSubject))) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                        "Telegram account mapping no longer matches this actor context");
+            }
             setTenantContext(context.tenantId());
             List<ActorIdentity> identities = jdbc.query("""
                     SELECT keycloak.subject, membership.role
@@ -162,12 +174,55 @@ public class TelegramActorContextService {
     }
 
     private UUID activeLinkedUser(Long telegramUserId) {
+        jdbc.query("SELECT pg_advisory_xact_lock(?)", rs -> null, telegramUserId);
         List<UUID> users = jdbc.query("""
                 SELECT identities.user_id FROM external_identities identities
                 JOIN users ON users.id = identities.user_id
                 WHERE identities.provider = 'telegram' AND identities.subject = ? AND users.status = 'active'
                 """, (rs, row) -> rs.getObject("user_id", UUID.class), Long.toString(telegramUserId));
-        if (users.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Linked Telegram user not found");
+        String configuredSubject = accessPolicy.accountSubject(telegramUserId).orElse(null);
+        if (!users.isEmpty()) {
+            UUID existingUserId = users.get(0);
+            if (configuredSubject != null && !existingUserId.equals(configuredAccountUser(configuredSubject))) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Telegram account mapping conflicts with its existing identity");
+            }
+            return existingUserId;
+        }
+        if (configuredSubject == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Telegram account mapping is not configured");
+        }
+
+        UUID userId = configuredAccountUser(configuredSubject);
+        Integer telegramIdentityCount = jdbc.queryForObject(
+                "SELECT count(*) FROM external_identities WHERE provider = 'telegram' AND user_id = ?",
+                Integer.class, userId);
+        if (telegramIdentityCount != null && telegramIdentityCount > 0) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Android account already has a different Telegram identity");
+        }
+        int inserted = jdbc.update("INSERT INTO external_identities (user_id, provider, subject) "
+                        + "VALUES (?, 'telegram', ?) ON CONFLICT DO NOTHING",
+                userId, Long.toString(telegramUserId));
+        if (inserted != 1) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Telegram account mapping conflicts with an existing identity");
+        }
+        return userId;
+    }
+
+    private UUID configuredAccountUser(String keycloakSubject) {
+        List<UUID> users = jdbc.query("""
+                SELECT identity.user_id FROM external_identities identity
+                JOIN users ON users.id = identity.user_id AND users.status = 'active'
+                WHERE identity.provider = 'keycloak' AND identity.subject = ?
+                  AND EXISTS (SELECT 1 FROM memberships membership
+                              WHERE membership.user_id = users.id AND membership.status = 'active')
+                """, (rs, row) -> rs.getObject("user_id", UUID.class), keycloakSubject);
+        if (users.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "Configured Android account is missing or inactive");
+        }
         return users.get(0);
     }
 

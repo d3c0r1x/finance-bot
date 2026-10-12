@@ -1,4 +1,4 @@
-"""Narrow authenticated client for Telegram identity-link redemption."""
+"""Narrow authenticated client for Telegram's server-scoped finance actions."""
 
 from __future__ import annotations
 
@@ -41,20 +41,6 @@ class TelegramCoreClient:
     def __init__(self, base_url: str, service_token: str):
         self.base_url = base_url.strip().rstrip("/")
         self.service_token = service_token.strip()
-
-    async def redeem_link_code(self, code: str, telegram_user_id: int,
-                               telegram_display_name: str | None = None) -> str:
-        payload = {
-            "code": code,
-            "telegramUserId": telegram_user_id,
-        }
-        display_name = _safe_telegram_display_name(telegram_display_name)
-        if display_name is not None:
-            payload["telegramDisplayName"] = display_name
-        body = await self._post_json("link-codes/redeem", payload, expected_status=200)
-        if body.get("status") == "linked":
-            return "linked"
-        raise TelegramCoreError("unavailable")
 
     async def list_telegram_tenants(self, telegram_user_id: int,
                                     telegram_display_name: str | None = None) -> list[dict[str, str]]:

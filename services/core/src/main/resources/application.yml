@@ -68,6 +68,8 @@ finance:
       timeout: ${FINANCE_ANALYTICS_TIMEOUT:PT5S}
   telegram:
     service-token: ${FINANCE_TELEGRAM_SERVICE_TOKEN:}
+    allowed-user-ids: ${FINANCE_TELEGRAM_ALLOWED_USER_IDS:}
+    account-mappings: ${FINANCE_TELEGRAM_ACCOUNT_MAPPINGS:}
   imports:
     parser:
       url: ${FINANCE_IMPORT_PARSER_URL:${FINANCE_AI_RECEIPT_URL:}}

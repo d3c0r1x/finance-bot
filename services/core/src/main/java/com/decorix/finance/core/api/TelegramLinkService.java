@@ -27,13 +27,16 @@ public class TelegramLinkService {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate transactions;
     private final MemberProfileService memberProfiles;
+    private final TelegramAccessPolicy accessPolicy;
     private final SecureRandom random = new SecureRandom();
     private final Clock clock = Clock.systemUTC();
 
-    public TelegramLinkService(JdbcTemplate jdbc, TransactionTemplate transactions, MemberProfileService memberProfiles) {
+    public TelegramLinkService(JdbcTemplate jdbc, TransactionTemplate transactions, MemberProfileService memberProfiles,
+                               TelegramAccessPolicy accessPolicy) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.memberProfiles = memberProfiles;
+        this.accessPolicy = accessPolicy;
     }
 
     public LinkCodeResponse createCode(String subject) {
@@ -81,6 +84,7 @@ public class TelegramLinkService {
         if (request == null || request.telegramUserId() == null || request.telegramUserId() <= 0) {
             return RedemptionResult.INVALID;
         }
+        accessPolicy.requireAllowed(request.telegramUserId());
         String codeHash;
         try {
             codeHash = TelegramLinkCode.hash(request.code());

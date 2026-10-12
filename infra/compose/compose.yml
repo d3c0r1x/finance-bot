@@ -43,6 +43,8 @@ services:
       KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/finance/protocol/openid-connect/certs
       KEYCLOAK_WEB_CLIENT_ID: finance-web
       KEYCLOAK_WEB_CLIENT_SECRET: finance-local-dev-secret-not-for-production
+      FINANCE_TELEGRAM_ALLOWED_USER_IDS: ${FINANCE_TELEGRAM_ALLOWED_USER_IDS:-}
+      FINANCE_TELEGRAM_ACCOUNT_MAPPINGS: ${FINANCE_TELEGRAM_ACCOUNT_MAPPINGS:-}
     ports:
       - target: 8080
         published: ${CORE_HOST_PORT:-8080}

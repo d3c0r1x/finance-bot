@@ -1155,16 +1155,13 @@ class FinanceScreensTest {
         compose.onNodeWithTag("onboarding-budget-choice").assertIsDisplayed()
     }
 
-    @Test fun profileOffersTelegramBindingCode() {
-        var requested = false
+    @Test fun profileExplainsOperatorConfiguredTelegramWithoutLinkCodes() {
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
-            memberProfile = FinanceMemberProfile("Алексей", null, "complete", "Europe/Moscow", "RUB")),
-            onCreateTelegramLink = { requested = true })
+            memberProfile = FinanceMemberProfile("Алексей", null, "complete", "Europe/Moscow", "RUB")))
 
         compose.onNodeWithText("Профиль").performScrollTo().performClick()
-        compose.onNodeWithText("Подключить Telegram").performScrollTo().performClick()
-
-        assertEquals(true, requested)
+        compose.onNodeWithText("Владелец сервиса настраивает доступ к Telegram.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Подключить Telegram").assertDoesNotExist()
     }
 
     @Test fun profileSavesMemberLocalTelegramDigestSchedule() {

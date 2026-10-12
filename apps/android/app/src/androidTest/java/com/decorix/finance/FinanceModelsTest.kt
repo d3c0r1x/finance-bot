@@ -88,14 +88,6 @@ class FinanceModelsTest {
         """.trimIndent()))
     }
 
-    @Test fun parsesTelegramLinkCodeAndExpiry() {
-        val code = FinanceModels.telegramLinkCode(JSONObject("""
-            {"code":"ABCD-EFGH-JKLM-NPQR","expiresAt":"2026-10-02T08:20:00Z"}
-        """.trimIndent()))
-        assertEquals("ABCD-EFGH-JKLM-NPQR", code.code)
-        assertEquals("2026-10-02T08:20:00Z", code.expiresAt)
-    }
-
     @Test fun parsesMemberProfileAndKeepsSkippedIncomeNull() {
         val withIncome = FinanceModels.memberProfile(JSONObject("""
             {"displayName":"Alex","plannedIncome":120000.5,"onboardingState":"complete",

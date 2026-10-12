@@ -50,14 +50,44 @@ def test_basic_commands_restore_persistent_menu(monkeypatch, command):
         assert "/inflation" in sent[0].text
 
 
-def test_link_command_redeems_code_for_telegram_sender_id_only(monkeypatch):
+def test_menu_explains_server_allowlist_denial_without_asking_for_a_link_code(monkeypatch):
     sent = []
-    redeemed = []
+
+    class FakeCore:
+        async def list_telegram_tenants(self, _telegram_user_id, _telegram_display_name=None):
+            from services.python.telegram_gateway.core_client import TelegramCoreError
+            raise TelegramCoreError("forbidden")
+
+    async def record_request(_bot, method, *_args, **_kwargs):
+        sent.append(method)
+
+    monkeypatch.setattr(Bot, "__call__", record_request)
+    message = Message(
+        message_id=4,
+        date=datetime(2026, 10, 2, tzinfo=timezone.utc),
+        chat=Chat(id=42, type="private"),
+        from_user=User(id=42, is_bot=False, first_name="Alex"),
+        text="/menu",
+        entities=[MessageEntity(type="bot_command", offset=0, length=5)],
+    )
+    bot = Bot("123456:TEST_TOKEN")
+    try:
+        asyncio.run(build_dispatcher(telegram_core=FakeCore()).feed_update(
+            bot, Update(update_id=4, message=message)))
+    finally:
+        asyncio.run(bot.session.close())
+
+    assert len(sent) == 1
+    assert "не разрешён" in sent[0].text.casefold()
+    assert "/link" not in sent[0].text
+
+
+def test_link_command_does_not_redeem_legacy_code_and_explains_operator_setup(monkeypatch):
+    sent = []
 
     class FakeCore:
         async def redeem_link_code(self, code, telegram_user_id, telegram_display_name=None):
-            redeemed.append((code, telegram_user_id, telegram_display_name))
-            return "linked"
+            raise AssertionError("Telegram link codes are no longer redeemed by the bot")
 
     async def record_request(_bot, method, *_args, **_kwargs):
         sent.append(method)
@@ -78,10 +108,9 @@ def test_link_command_redeems_code_for_telegram_sender_id_only(monkeypatch):
     finally:
         asyncio.run(bot.session.close())
 
-    assert redeemed == [("ABCD-EFGH-JKLM-NPQR", 42, "Alex")]
     assert len(sent) == 1
-    assert "привязан" in sent[0].text.casefold()
-    assert "код другим" in sent[0].text.casefold()
+    assert "владелец бота" in sent[0].text.casefold()
+    assert "код" not in sent[0].text.casefold()
 
 
 def test_link_command_rejects_group_chat_without_contacting_core(monkeypatch):
@@ -111,7 +140,7 @@ def test_link_command_rejects_group_chat_without_contacting_core(monkeypatch):
         asyncio.run(bot.session.close())
 
     assert len(sent) == 1
-    assert "личном чате" in sent[0].text.casefold()
+    assert "владелец бота" in sent[0].text.casefold()
 
 
 def test_menu_uses_revisioned_choices_and_stores_only_core_issued_actor_context(monkeypatch):

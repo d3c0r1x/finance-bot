@@ -12,12 +12,14 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.argThat;
 
 import com.nimbusds.jose.JOSEObjectType;
@@ -70,6 +72,8 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.decorix.finance.core.api.AdviceRecalculationImpactApi.Impact;
 import com.decorix.finance.core.api.GoalCandidatesApi;
@@ -149,6 +153,7 @@ class TransactionApiPostgresTest {
     @MockitoBean private GoalCandidatesClient goalCandidatesClient;
     @MockitoBean private GoalProgressClient goalProgressClient;
     @MockitoBean private ExportDownloadSigner exportDownloadSigner;
+    @MockitoBean private TelegramAccessPolicy telegramAccessPolicy;
 
     private UUID tenantId;
     private String subject;
@@ -233,6 +238,8 @@ class TransactionApiPostgresTest {
         cleanupReceiptPhotoFixtures();
         grantAppPrivileges();
         subject = "keycloak|integration-" + UUID.randomUUID();
+        lenient().when(telegramAccessPolicy.accountSubject(anyLong()))
+                .thenAnswer(invocation -> java.util.Optional.of(subject));
         tenantId = transactions.execute(status -> {
             UUID id = UUID.randomUUID();
             jdbc.queryForObject("SELECT set_config('app.tenant_id', ?, true)", String.class, id.toString());
@@ -4473,6 +4480,88 @@ class TransactionApiPostgresTest {
 
     private static long newTelegramUserId() {
         return java.util.concurrent.ThreadLocalRandom.current().nextLong(1_000_000_000L, 9_999_999_999L);
+    }
+
+    @Test
+    void explicitlyMappedAllowlistedTelegramIdReusesAndroidUserForSharedFinanceReads() throws Exception {
+        long telegramUserId = newTelegramUserId();
+        when(telegramAccessPolicy.accountSubject(telegramUserId)).thenReturn(java.util.Optional.of(subject));
+
+        String tenants = mvc.perform(post("/internal/v1/telegram/tenants")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + telegramUserId + ",\"telegramDisplayName\":\"Alex\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tenants[0].tenantId").value(tenantId.toString()))
+                .andReturn().getResponse().getContentAsString();
+        assertEquals(userIdFor(subject), jdbc.queryForObject(
+                "SELECT user_id FROM external_identities WHERE provider = 'telegram' AND subject = ?",
+                UUID.class, Long.toString(telegramUserId)));
+        assertTrue(tenants.contains("API test"));
+
+        String context = mvc.perform(post("/internal/v1/telegram/actor-contexts")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + telegramUserId + ",\"tenantId\":\"" + tenantId + "\"}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String token = com.jayway.jsonpath.JsonPath.read(context, "$.token");
+        mvc.perform(post("/api/v1/tenants/{tenantId}/transactions", tenantId)
+                        .with(jwt().jwt(jwt -> jwt.subject(subject)))
+                        .header("Idempotency-Key", "tg-map-shared-expense-0001")
+                        .contentType("application/json")
+                        .content("{\"type\":\"expense\",\"amount\":\"12.34\",\"currency\":\"RUB\","
+                                + "\"categoryCode\":\"food\",\"description\":\"Shared\","
+                                + "\"occurredAt\":\"2026-10-03T10:00:00Z\"}"))
+                .andExpect(status().isCreated());
+        mvc.perform(post("/internal/v1/telegram/summary")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content("{\"token\":\"" + token + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expenseTotal").value("12.34"))
+                .andExpect(jsonPath("$.transactionCount").value(1));
+
+        when(telegramAccessPolicy.accountSubject(telegramUserId)).thenReturn(java.util.Optional.empty());
+        mvc.perform(post("/internal/v1/telegram/summary")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content("{\"token\":\"" + token + "\"}"))
+                .andExpect(status().isForbidden());
+
+        long conflictingTelegramUserId = newTelegramUserId();
+        when(telegramAccessPolicy.accountSubject(conflictingTelegramUserId)).thenReturn(java.util.Optional.of(subject));
+        mvc.perform(post("/internal/v1/telegram/tenants")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + conflictingTelegramUserId + "}"))
+                .andExpect(status().isConflict());
+
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN))
+                .when(telegramAccessPolicy).requireAllowed(telegramUserId);
+        mvc.perform(post("/internal/v1/telegram/summary")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json").content("{\"token\":\"" + token + "\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void allowlistDenialAndMissingConfiguredAndroidAccountFailClosed() throws Exception {
+        long deniedTelegramUserId = newTelegramUserId();
+        doThrow(new ResponseStatusException(HttpStatus.FORBIDDEN))
+                .when(telegramAccessPolicy).requireAllowed(deniedTelegramUserId);
+        mvc.perform(post("/internal/v1/telegram/tenants")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + deniedTelegramUserId + "}"))
+                .andExpect(status().isForbidden());
+
+        long unmappedTelegramUserId = newTelegramUserId();
+        when(telegramAccessPolicy.accountSubject(unmappedTelegramUserId))
+                .thenReturn(java.util.Optional.of("missing-android-subject"));
+        mvc.perform(post("/internal/v1/telegram/tenants")
+                        .header("X-Finance-Service-Token", TELEGRAM_SERVICE_TOKEN)
+                        .contentType("application/json")
+                        .content("{\"telegramUserId\":" + unmappedTelegramUserId + "}"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

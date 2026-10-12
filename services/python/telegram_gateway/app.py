@@ -81,7 +81,8 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             tenants = await core.list_telegram_tenants(message.from_user.id, telegram_name)
         except TelegramCoreError as error:
             text = {
-                "not_found": "Сначала привяжите аккаунт Finance командой /link из личного чата.",
+                "not_found": "Доступ к аккаунту ещё не настроен. Обратитесь к владельцу бота.",
+                "forbidden": "Этот Telegram-аккаунт не разрешён для бота.",
                 "unavailable": "Пространства временно недоступны. Попробуйте позже.",
                 "unauthorized": "Сессия бота устарела. Повторите /menu.",
             }.get(error.code, "Не удалось загрузить пространства. Попробуйте позже.")
@@ -89,7 +90,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
             return
         if not tenants:
             await state.clear()
-            await message.answer("Для привязанного аккаунта нет активных пространств.", reply_markup=MAIN_MENU)
+            await message.answer("Для аккаунта нет активных пространств.", reply_markup=MAIN_MENU)
             return
         if len(tenants) == 1:
             tenant = tenants[0]
@@ -150,11 +151,11 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
 
     async def help_command(message: Message) -> None:
         await message.answer(
-            "Команды: /start, /menu, /help, /link <код>, /add <описание операции>, /history, /debts, "
+            "Команды: /start, /menu, /help, /add <описание операции>, /history, /debts, "
             "/price [название товара], /shopping, /nobuy, /inflation, /budget [set <family|personal> <category|total|food_week> <amount>|reset|propose|suggest <income>], "
             "/report, /recalculate. /recalculate показывает старый и новый разбор чека; применение — отдельной кнопкой. "
             "/budget propose строит предложение по истории, /budget suggest <income> — по доходу. "
-            "Для финансов сначала привяжите аккаунт и выберите пространство.",
+            "Доступ к Telegram настраивает владелец бота по вашему Telegram ID. Затем выберите пространство.",
             reply_markup=MAIN_MENU,
         )
 
@@ -1165,34 +1166,8 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
         await callback.message.edit_text(
             f"Лимиты применены за {overview.get('month', 'текущий месяц')}.", reply_markup=None)
 
-    async def link_account(message: Message, command: CommandObject) -> None:
-        if message.chat.type != "private":
-            await message.answer("Привязка доступна только в личном чате с ботом.", reply_markup=MAIN_MENU)
-            return
-        if message.from_user is None:
-            await message.answer("Не удалось определить Telegram-пользователя.", reply_markup=MAIN_MENU)
-            return
-        arguments = (command.args or "").strip().split()
-        if len(arguments) != 1:
-            await message.answer("Использование: /link <код из профиля Finance>.", reply_markup=MAIN_MENU)
-            return
-        try:
-            telegram_name = getattr(message.from_user, "full_name", "") or getattr(message.from_user, "username", "")
-            result = await core.redeem_link_code(arguments[0], message.from_user.id, telegram_name)
-        except TelegramCoreError as error:
-            response = {
-                "invalid_code": "Код недействителен или истёк. Создайте новый код в профиле Finance.",
-                "already_linked": "Этот Telegram-аккаунт уже привязан или не подходит для связи.",
-                "rate_limited": "Слишком много попыток. Повторите позже.",
-                "unavailable": "Не удалось привязать аккаунт. Попробуйте позже.",
-            }.get(error.code, "Не удалось привязать аккаунт. Попробуйте позже.")
-            await message.answer(response, reply_markup=MAIN_MENU)
-            return
-        if result != "linked":
-            await message.answer("Не удалось привязать аккаунт. Создайте новый код в профиле Finance.",
-                                 reply_markup=MAIN_MENU)
-            return
-        await message.answer("Аккаунт Finance привязан. Не передавайте код другим.", reply_markup=MAIN_MENU)
+    async def legacy_link_command(message: Message) -> None:
+        await message.answer("Доступ к Telegram настраивает владелец бота.", reply_markup=MAIN_MENU)
 
     router.message.register(start, Command("start"))
     router.message.register(menu, Command("menu"))
@@ -1206,7 +1181,7 @@ def build_dispatcher(deduplicator: UpdateDeduplicator | None = None,
     router.message.register(show_recurring, Command("recurring"))
     router.message.register(show_debts, Command("debts"))
     router.message.register(show_budget, Command("budget"))
-    router.message.register(link_account, Command("link"))
+    router.message.register(legacy_link_command, Command("link"))
     router.message.register(add_transaction, Command("add"))
     router.message.register(show_history, Command("history"))
     router.message.register(menu, F.text.casefold() == MENU_BUTTON.casefold())

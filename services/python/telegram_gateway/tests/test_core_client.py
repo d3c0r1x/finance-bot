@@ -7,29 +7,6 @@ import pytest
 from services.python.telegram_gateway.core_client import TelegramCoreClient, TelegramCoreError
 
 
-def test_core_client_sends_code_identity_and_telegram_name_with_service_credential():
-    seen = {}
-
-    async def redeem(request):
-        seen["token"] = request.headers.get("X-Finance-Service-Token")
-        seen["body"] = await request.json()
-        return web.json_response({"status": "linked"})
-
-    async def exercise():
-        app = web.Application()
-        app.router.add_post("/internal/v1/telegram/link-codes/redeem", redeem)
-        async with TestServer(app) as server:
-            client = TelegramCoreClient(str(server.make_url("")), "test-service-secret")
-            return await client.redeem_link_code("ABCD-EFGH-JKLM-NPQR", 42, "Alex Example")
-
-    assert asyncio.run(exercise()) == "linked"
-    assert seen == {
-        "token": "test-service-secret",
-        "body": {"code": "ABCD-EFGH-JKLM-NPQR", "telegramUserId": 42,
-                 "telegramDisplayName": "Alex Example"},
-    }
-
-
 def test_core_client_claims_durable_digests_and_acknowledges_delivery():
     seen = []
     report = {
@@ -937,26 +914,6 @@ def test_actor_context_client_maps_errors_without_forwarding_core_details(status
             client = TelegramCoreClient(str(server.make_url("")), "test-service-secret")
             with pytest.raises(TelegramCoreError) as error:
                 await client.resolve_actor_context("opaque-context")
-            return error.value.code, str(error.value)
-
-    code, message = asyncio.run(exercise())
-    assert code == expected
-    assert "database secret" not in message
-
-
-@pytest.mark.parametrize(("status", "expected"), [(400, "invalid_code"), (409, "already_linked"),
-                                                       (429, "rate_limited"), (503, "unavailable")])
-def test_core_client_maps_failures_without_forwarding_core_details(status, expected):
-    async def reject(_request):
-        return web.Response(status=status, text="database secret must not reach Telegram")
-
-    async def exercise():
-        app = web.Application()
-        app.router.add_post("/internal/v1/telegram/link-codes/redeem", reject)
-        async with TestServer(app) as server:
-            client = TelegramCoreClient(str(server.make_url("")), "test-service-secret")
-            with pytest.raises(TelegramCoreError) as error:
-                await client.redeem_link_code("ABCD-EFGH-JKLM-NPQR", 42)
             return error.value.code, str(error.value)
 
     code, message = asyncio.run(exercise())

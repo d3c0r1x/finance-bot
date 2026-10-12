@@ -201,7 +201,6 @@ class MainActivity : ComponentActivity() {
                     FinanceScreen(ui, language, onLanguage = { language = it }, onLogin = ::startLogin,
                         onRefresh = ::loadTenants, onCreate = ::createTenantAndRefresh,
                         onProfileSave = ::saveMemberProfile, onRepeatProfileSave = ::saveMemberProfileForRepeat,
-                        onCreateTelegramLink = ::createTelegramLinkCode,
                         onNotificationPreferencesSave = ::saveNotificationPreferences,
                         onBudgetKeep = ::keepBudgetProposal,
                         onCreateDraft = ::createTransactionDraft, onUpdateDraft = ::updateTransactionDraft,
@@ -2365,14 +2364,6 @@ class MainActivity : ComponentActivity() {
         val updated = api.updateNotificationPreferences(activeTenantId(), preferences)
         workspaceData(notificationPreferences = updated)
     }
-    private fun createTelegramLinkCode() {
-        ui = ui.copy(busy = true, error = null, telegramLinkCode = null)
-        executor.execute {
-            runCatching { api.createTelegramLinkCode() }
-                .onSuccess { code -> ui = ui.copy(busy = false, telegramLinkCode = code) }
-                .onFailure { error -> ui = ui.copy(busy = false, error = error.message ?: "Request failed") }
-        }
-    }
     private fun createTransactionDraft(text: String, idempotencyKey: String) = runApi {
         val tenantId = activeTenantId()
         workspaceData(draft = api.createTransactionDraft(tenantId, text, idempotencyKey))
@@ -3795,7 +3786,6 @@ data class FinanceUiState(
     val familyBudgetFoodRefreshToken: Long = 0L,
     val transactionDraft: FinanceTransactionDraft? = null,
     val memberProfile: FinanceMemberProfile? = null,
-    val telegramLinkCode: FinanceTelegramLinkCode? = null,
     val notificationPreferences: FinanceNotificationPreferences? = null,
     val budgetAlerts: List<FinanceBudgetAlert> = emptyList(),
     val shoppingList: FinanceShoppingList? = null,
@@ -4140,7 +4130,6 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onRecalculationHistory: (String?) -> Unit = {},
                           onRecalculationDetail: (String, String?) -> Unit = { _, _ -> },
                           onFamilyBudgetFoodStatusLoad: (String) -> Unit = {},
-                          onCreateTelegramLink: () -> Unit = {},
                           onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit = {},
                           onShoppingLoad: () -> Unit = {},
                           onShoppingDecision: (String, String) -> Unit = { _, _ -> },
@@ -4675,8 +4664,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             onboardingProfileSavePending = false
                             repeatOnboarding = true
                             onboardingStep = "welcome"
-                        }, onCreateTelegramLink,
-                        onNotificationPreferencesSave,
+                        },
+                        onNotificationPreferencesSave = onNotificationPreferencesSave,
                         onBack = { activeScreen = "overview" })
                     else -> {
                         LazyColumn(Modifier.weight(1f).testTag("transaction-history"),
@@ -7173,7 +7162,6 @@ private fun shoppingClipboardText(shopping: FinanceShoppingList, russian: Boolea
 @androidx.compose.runtime.Composable
 private fun ProfileScreen(modifier: Modifier, state: FinanceUiState, language: String,
                           onSave: (String, String?) -> Unit, onRepeatSetup: (String, String?) -> Unit,
-                          onCreateTelegramLink: () -> Unit,
                           onNotificationPreferencesSave: (FinanceNotificationPreferences) -> Unit, onBack: () -> Unit) {
     val russian = language == "ru"
     val profile = state.memberProfile
@@ -7233,12 +7221,8 @@ private fun ProfileScreen(modifier: Modifier, state: FinanceUiState, language: S
         }
         Text(if (russian) "Часовой пояс: ${profile.timezone} · Валюта: ${profile.currency}"
             else "Timezone: ${profile.timezone} · Currency: ${profile.currency}")
-        Text(if (russian) "Откройте личный чат с ботом, отправьте /link и код ниже. Код действует 10 минут."
-            else "Open a private chat with the bot, then send /link and the code below. Code expires in 10 minutes.")
-        state.telegramLinkCode?.let { Text(if (russian) "Код: ${it.code}" else "Code: ${it.code}") }
-        TextButton(onClick = onCreateTelegramLink, enabled = !state.busy) {
-            Text(if (russian) "Подключить Telegram" else "Connect Telegram")
-        }
+        Text(if (russian) "Владелец сервиса настраивает доступ к Telegram."
+            else "The service owner configures Telegram access.")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { onSave(name.trim(), normalizedIncomeInput(income)) },
                 enabled = !state.busy && name.isNotBlank() && validIncome) {
@@ -7253,7 +7237,8 @@ private fun ProfileScreen(modifier: Modifier, state: FinanceUiState, language: S
             Text(if (notificationPreferences.telegramLinked) {
                 if (russian) "Telegram подключён" else "Telegram is connected"
             } else {
-                if (russian) "Сначала подключите Telegram, чтобы получать сводки." else "Connect Telegram to receive digests."
+                if (russian) "Попросите владельца сервиса настроить Telegram, чтобы получать сводки."
+                else "Ask the service owner to configure Telegram to receive digests."
             })
             Text(if (russian) "Часовой пояс: ${notificationPreferences.timezone}"
                 else "Time zone: ${notificationPreferences.timezone}")
