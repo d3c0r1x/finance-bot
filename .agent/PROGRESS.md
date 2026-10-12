@@ -2349,3 +2349,11 @@ Updated: 2026-10-12, Europe/Moscow.
 - Limits: local synthetic execution only. No live Core/OIDC, real bearer URL, worker/S3, browser transfer, downloaded-byte integrity, or elapsed wall-clock test was run. F52 Android remains PARTIAL and the server deployment gates remain open.
 - Commit/push: `35ac4cef178864a1508247b861dcafa7269d56a8` (`test(F52): cover stale Android export completion`) is pushed; `git ls-remote` confirmed `origin/feat/saas-rewrite` at this SHA. `gh run list --commit 35ac4ce` returned no workflow runs.
 - Next: continue the next approved V1 gate; do not mark F52 complete based on this local integration test.
+
+## F59.42 Android parity evidence reconciliation — GREEN locally — 2026-10-12
+
+- Authority: approved `PLAN.md` F45/F52 behavior, F59 parity registry, and local evidence already recorded above and in F45.5/F59.41.
+- TDD RED: two new registry regression checks failed because F45 still said the Android counterpart was missing and F52 still listed delayed MainActivity response coverage as unverified.
+- Change: removed the stale F45 Android-missing statement while preserving F45's live OIDC/tenant-isolation and legacy SQLite gates. Updated F52's gap/evidence: delayed completion is now synthetic local coverage; live OIDC/Core, worker/S3, resolver/browser transfer, byte integrity and elapsed wall-clock checks remain open.
+- GREEN: `tests/test_f59_android_parity.py` 9/9; `git diff --check` passed. No runtime code changed.
+- Next: inspect the approved F08 authenticated MainActivity restoration gap; keep process-death and live Core/OIDC claims separate.

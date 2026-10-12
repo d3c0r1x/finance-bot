@@ -132,3 +132,34 @@ def test_f49_android_registry_records_tenant_checkpoint_process_death_and_previe
     assert "force-stop/relaunch" in evidence and "api 27" in evidence
     assert "undo key" in evidence
     assert "live android core/oidc" in android["gap"].lower()
+
+
+def test_f45_android_registry_records_existing_local_progress_and_history_coverage():
+    feature = next(item for item in _features() if item["id"] == "F45")
+    android = feature["android"]
+
+    assert android["status"] == "partial"
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceGoalsScreensTest.kt" in android["tests"]
+    assert "apps/android/app/src/test/java/com/decorix/finance/GoalResponsePolicyTest.kt" in android["tests"]
+    evidence = " ".join(feature.get("evidence", [])).lower()
+    assert "android counterpart remains missing" not in evidence
+    assert "f45.5 renders" in " ".join(android.get("evidence", [])).lower()
+    gap = android["gap"].lower()
+    assert "live authenticated android-to-core oidc" in gap
+    assert "tenant-isolation" in gap
+    assert "legacy sqlite" in gap
+
+
+def test_f52_android_registry_no_longer_claims_delayed_mainactivity_test_is_open():
+    feature = next(item for item in _features() if item["id"] == "F52")
+    android = feature["android"]
+
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceFlowTest.kt" in android["tests"]
+    gap = android["gap"].lower()
+    assert "delayed mainactivity http response" not in gap
+    assert "live android oidc/core" in gap
+    evidence = " ".join(android.get("evidence", [])).lower()
+    assert "f59.41" in evidence
+    assert "financeflowtest" in evidence
+    assert "tenant-only and session-only" in evidence
+    assert "505/505" in evidence
