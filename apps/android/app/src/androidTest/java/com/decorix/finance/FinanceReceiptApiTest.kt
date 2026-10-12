@@ -285,17 +285,32 @@ class FinanceReceiptApiTest {
             debtId = "debt-22", ownerUserId = "user-17",
         )
 
-        val voided = api.voidTransaction("tenant-17", payment)
+        val idempotencyKey = "void-debt-payment-test-key-0001"
+        val sessionGeneration = api.authSessionGeneration
+        val voided = api.voidTransaction("tenant-17", payment, idempotencyKey, sessionGeneration)
 
+        assertEquals(payment.id, voided.id)
+        assertEquals(payment.tenantId, voided.tenantId)
         assertEquals("voided", voided.status)
-        assertEquals(6L, voided.version)
-        assertEquals("debt-22", voided.debtId)
+        assertEquals(payment.version + 1, voided.version)
+        assertEquals(payment.type, voided.type)
+        assertEquals(payment.amount, voided.amount)
+        assertEquals(payment.currency, voided.currency)
+        assertEquals(payment.categoryCode, voided.categoryCode)
+        assertEquals(payment.subcategoryCode, voided.subcategoryCode)
+        assertEquals(payment.description, voided.description)
+        assertEquals(payment.source, voided.source)
+        assertEquals(payment.occurredAt, voided.occurredAt)
+        assertEquals(payment.accountId, voided.accountId)
+        assertEquals(payment.createdAt, voided.createdAt)
+        assertEquals(payment.debtId, voided.debtId)
+        assertEquals(payment.ownerUserId, voided.ownerUserId)
         val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertEquals("POST", request.method)
         assertEquals("/api/v1/tenants/tenant-17/transactions/debt-payment-1/void", request.path)
         assertEquals("{}", request.body.readUtf8())
         assertEquals("\"5\"", request.getHeader("If-Match"))
-        assertUuidIdempotencyKey(request)
+        assertEquals(idempotencyKey, request.getHeader("Idempotency-Key"))
     }
 
     @Test fun photoUploadRefreshesAfter401AndReplaysSameMultipartFileAndKey() {

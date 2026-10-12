@@ -2391,9 +2391,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun voidTransaction(transaction: FinanceTransaction) = runApi {
-        api.voidTransaction(activeTenantId(), transaction)
-        workspaceData()
+    private fun voidTransaction(transaction: FinanceTransaction) {
+        val requestContext = FinanceVoidRequestContext(activeTenantId(), api.authSessionGeneration)
+        runApi {
+            check(requestContext.matchesCurrent(activeTenantId(), api.authSessionGeneration)) {
+                "Workspace or sign-in session changed; retry the action."
+            }
+            val attempt = TransactionVoidAttempts.begin(requestContext.tenantId, transaction,
+                requestContext.sessionGeneration)
+            api.voidTransaction(attempt.tenantId, attempt.original, attempt.idempotencyKey,
+                attempt.sessionGeneration)
+            workspaceData().also {
+                TransactionVoidAttempts.complete(attempt.tenantId, attempt.original.id,
+                    attempt.sourceVersion, attempt.sessionGeneration)
+            }
+        }
     }
 
     private fun updateTransaction(edit: FinanceTransactionEdit) = runApi {

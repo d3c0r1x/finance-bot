@@ -561,12 +561,40 @@ class FinanceApi internal constructor(
         return repeated
     }
 
-    fun voidTransaction(tenantId: String, transaction: FinanceTransaction): FinanceTransaction {
+    fun voidTransaction(tenantId: String, transaction: FinanceTransaction,
+                        idempotencyKey: String, expectedSessionGeneration: Long): FinanceTransaction {
+        require(tenantId.isNotBlank() && transaction.tenantId == tenantId) {
+            "Transaction does not belong to tenant"
+        }
         require(transaction.status == "posted") { "Transaction is no longer posted" }
-        return FinanceModels.transaction(JSONObject(execute(
+        require(transaction.version in 1 until Long.MAX_VALUE) { "Invalid transaction version" }
+        require(idempotencyKey.length in 16..128) { "Invalid idempotency key" }
+        val voided = FinanceModels.transaction(JSONObject(execute(
             "/api/v1/tenants/$tenantId/transactions/${transaction.id}/void", "POST", "{}",
-            UUID.randomUUID().toString(), transaction.version,
+            idempotencyKey, transaction.version,
+            expectedSessionGeneration = expectedSessionGeneration,
+            guardExpectedSessionDuringRequest = true,
         )))
+        val matchesSource = voided.id == transaction.id &&
+            voided.tenantId == transaction.tenantId &&
+            voided.type == transaction.type &&
+            voided.amount == transaction.amount &&
+            voided.currency == transaction.currency &&
+            voided.categoryCode == transaction.categoryCode &&
+            voided.subcategoryCode == transaction.subcategoryCode &&
+            voided.description == transaction.description &&
+            voided.source == transaction.source &&
+            voided.occurredAt == transaction.occurredAt &&
+            voided.accountId == transaction.accountId &&
+            voided.status == "voided" &&
+            voided.version == transaction.version + 1 &&
+            voided.createdAt == transaction.createdAt &&
+            voided.debtId == transaction.debtId &&
+            voided.ownerUserId == transaction.ownerUserId
+        if (!matchesSource) {
+            throw ApiFailure(502, "Voided transaction response does not match source")
+        }
+        return voided
     }
 
     fun budgets(tenantId: String): BudgetOverview = FinanceModels.budgetOverview(
