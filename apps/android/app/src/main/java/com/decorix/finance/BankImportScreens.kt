@@ -241,6 +241,12 @@ internal fun BankImportPreviewSection(
                     }
                 }
             }
+            if (statement.state == "reverted" && currentUndoResult == null) item(key = "restored-undo-result") {
+                Text(
+                    if (russian) "Импорт отменён" else "Import undone",
+                    modifier = Modifier.testTag("bank-import-undo-result"),
+                )
+            }
             if (statement.state == "needs_review" && canUpload && role != "viewer" && statement.includedCount > 0) {
                 item(key = "confirm") {
                     androidx.compose.material3.Button(

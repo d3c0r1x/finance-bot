@@ -1136,7 +1136,7 @@ features:
         - apps/android/app/src/test/java/com/decorix/finance/BankImportUndoKeyTest.kt
         - apps/android/app/src/test/java/com/decorix/finance/FinanceSessionRequestPolicyTest.kt
       evidence:
-        - "Android F47/F48/F49 import API/UI regression passes 45/45 on isolated API 27; JVM checkpoint/key/response/session-request policies pass 15/15; parity contracts pass 63/63; debug and AndroidTest APK builds pass. Installed and launched APK SHA-256: F7B58D2930D36254F783641AD00354944383A6F30A53E09D669BDD26128D6E9E. Live Android Core/OIDC E2E pending."
+        - "Android F47/F48/F49 import API/UI regression passes 54/54 on isolated API 27; with a synthetic Core-shaped preview DTO (state=reverted), Compose renders localized terminal status when the transient undo response is absent and offers no batch-undo action. JVM suite and debug/AndroidTest APK builds pass. This does not prove OS process-death recovery, live Core/OIDC, or tenant-isolation E2E."
     intentional_differences: []
   - id: F50
     feature: "Категории merchant: правила, AI batches, кэш, уточнения/гипотезы"

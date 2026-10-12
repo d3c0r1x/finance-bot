@@ -2230,4 +2230,17 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN: `FinanceExportsScreensTest` 17/17; combined `FinanceExportsModelsTest`, `FinanceExportsApiTest`, `FinanceExportsScreensTest`, and `FinanceFlowTest` 46/46 on isolated Android 8.1/API 27 emulator `emulator-5554`; Android JVM 80/80; parity/contracts 81 passed, 2 skipped; debug and AndroidTest APK builds pass; `git diff --check` clean. Tests use synthetic fixtures and mocked API only.
 - Review: independent read-only reviewer found no blocker after confirming all mapped error labels, active-job poll-error rendering, and that polling-delay tests inject an immediate fake delay. No end-to-end HTTP status 401 mapper coverage was added in this presentation-only slice.
 - Limits: F52 Android remains PARTIAL. Live OIDC/Core roles, worker/S3, system resolver UI, actual browser transfer/downloaded bytes, session/tenant cancellation, in-flight response across lifecycle change, and elapsed wall-clock cadence remain unverified.
-- Next: commit and push the scoped presentation tests, F52 registry evidence, plan, and progress; then continue an independently closable V1 goal without claiming external delivery.
+- Commit/push: `eadeee58f5b920879e7e2ef2f6f82a313d02dbf7` (`test(F52): cover Android export locales`) is pushed; `git ls-remote` confirmed the same remote SHA.
+- Next: complete F49 restored Android import terminal-state presentation; keep OS force-stop, live Core/OIDC, and tenant-isolation gates open.
+
+## F59.32 F49 restored Android import terminal state — COMMIT_PENDING; PARTIAL
+
+- Authority: approved V1 `PLAN.md` F49 and `.agent/specs/F49-android-import-dedup-undo.md` acceptance criteria 2 and 7. Bounded plan: `docs/superpowers/plans/2026-10-12-f49-android-restored-terminal-state.md`.
+- TDD RED: added a Compose test for Core `state = reverted` with no transient `undoResult`; API-27 run failed because the batch terminal-result tag was absent.
+- Implementation: restored reverted previews show localized RU/EN “Импорт отменён” / “Import undone”. Existing live undo response keeps its exact Core count. Reverted previews never offer Undo; no count, API behavior, or financial state is fabricated.
+- GREEN/regression: focused restored-state test 1/1; F47-F51 Android import API/UI regression 54/54 on isolated Android 8.1/API 27 `emulator-5554`; Android JVM suite 80/80; debug and AndroidTest APK builds pass; parity/contracts 81 passed, 2 skipped; `git diff --check` clean.
+- Runtime: installed debug app resumed `MainActivity` on isolated `emulator-5554` and stayed active for 5 seconds; no `FATAL EXCEPTION` appeared in inspected logcat. This did not exercise Core/OIDC or force-stop recovery.
+- Review: independent review found no blocker; verified synthetic Core-shaped state, RU/EN labels, no duplicate message when matching response exists, and no Undo on reverted state.
+- Limits: this is synthetic Compose/API coverage. It does not prove OS force-stop/relaunch, live Android Core/OIDC, or real tenant isolation.
+- Commit pending: stage only the F49 screen, instrumentation test, parity evidence/contract, bounded plan, and this progress record; leave user-owned untracked paths untouched.
+- Next: commit/push this scoped F49 slice and verify remote SHA.

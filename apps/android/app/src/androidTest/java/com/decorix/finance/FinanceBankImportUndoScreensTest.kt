@@ -147,6 +147,35 @@ class FinanceBankImportUndoScreensTest {
         compose.onAllNodesWithTag("bank-import-undo").assertCountEquals(0)
     }
 
+    @Test fun recoveredRevertedPreviewShowsTerminalStateWithoutTransientUndoResponse() {
+        val language = mutableStateOf("ru")
+        compose.setContent {
+            MaterialTheme {
+                BankImportPreviewSection(
+                    role = "owner",
+                    language = language.value,
+                    preview = preview(state = "reverted", revision = 3,
+                        rows = listOf(row(id = "reverted", description = "Закупка", outcome = "reverted"))),
+                    busy = false,
+                    error = null,
+                    onRefresh = {},
+                    canUpload = true,
+                    undoResult = null,
+                    onUndo = { error("A recovered reverted import cannot be undone again") },
+                )
+            }
+        }
+
+        scrollTo("bank-import-undo-result")
+        compose.onNodeWithTag("bank-import-undo-result").assertIsDisplayed()
+        compose.onNodeWithTag("bank-import-undo-result").assert(hasText("Импорт отменён"))
+        compose.onAllNodesWithTag("bank-import-undo").assertCountEquals(0)
+
+        compose.runOnIdle { language.value = "en" }
+        compose.onNodeWithTag("bank-import-undo-result").assert(hasText("Import undone"))
+        compose.onAllNodesWithTag("bank-import-undo").assertCountEquals(0)
+    }
+
     @Test fun viewerNeverSeesBatchUndo() {
         show(role = "viewer", preview = preview(state = "committed"), canUpload = true,
             onUndo = { error("Viewer must never invoke undo") })

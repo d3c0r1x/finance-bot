@@ -1014,7 +1014,9 @@ def test_f49_android_contract_tracks_local_undo_and_live_identity_gap():
     assert android["status"] == "partial"
     assert "f49" in android["scenario"].lower() and "undo" in android["scenario"].lower()
     assert "live android core/oidc" in android["gap"].lower()
-    assert "45/45" in android["evidence"][0]
+    assert "54/54" in android["evidence"][0]
+    assert "synthetic core-shaped preview dto" in android["evidence"][0].lower()
+    assert "does not prove os process-death recovery" in android["evidence"][0].lower()
     assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoApiTest.kt" in android["tests"]
     assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceBankImportUndoScreensTest.kt" in android["tests"]
     assert "apps/android/app/src/test/java/com/decorix/finance/BankImportCheckpointStoreTest.kt" in android["tests"]
