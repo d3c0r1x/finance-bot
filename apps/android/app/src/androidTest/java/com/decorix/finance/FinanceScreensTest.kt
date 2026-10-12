@@ -1536,6 +1536,51 @@ class FinanceScreensTest {
         assertEquals("draft-1" to 2L, confirmation)
     }
 
+    @Test fun pendingExpenseCanBeSavedAsIncomeBeforeExplicitConfirmationOfRefreshedVersion() {
+        var saved: TransactionDraftEdit? = null
+        var confirmation: Pair<String, Long>? = null
+        val ui = mutableStateOf(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),
+            transactionDraft = draft(version = 7)))
+        show(ui.value, stateHolder = ui,
+            onUpdateDraft = { saved = it },
+            onConfirmDraft = { id, version -> confirmation = id to version })
+
+        compose.onNodeWithText("Операции").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(1)
+        compose.onNodeWithText("Предложение операции").assertIsDisplayed()
+        compose.onNodeWithText("Подтвердить").assertIsEnabled()
+
+        compose.onNodeWithText("Доход").performScrollTo().performClick()
+        compose.onNodeWithText("Тип: Доход").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Подтвердить").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Сохранить изменения").performScrollTo().performClick()
+
+        assertEquals(TransactionDraftEdit(
+            id = "draft-1", version = 7L, type = "income", amount = "2000.00",
+            categoryCode = "транспорт", subcategoryCode = "такси", description = "Такси",
+            occurredAt = "2026-10-01T12:00:00Z", debtId = null,
+        ), saved)
+        assertEquals(null, confirmation)
+        compose.onNodeWithText("Подтвердить").assertIsNotEnabled()
+
+        val savedDraft = requireNotNull(saved)
+        ui.value = ui.value.copy(transactionDraft = draft(version = 8).copy(
+            type = savedDraft.type,
+            amount = savedDraft.amount,
+            categoryCode = savedDraft.categoryCode,
+            subcategoryCode = savedDraft.subcategoryCode,
+            description = savedDraft.description,
+            occurredAt = savedDraft.occurredAt,
+        ))
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Тип: Доход").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Подтвердить").performScrollTo().assertIsEnabled()
+        assertEquals(null, confirmation)
+        compose.onNodeWithText("Подтвердить").performClick()
+        assertEquals("draft-1" to 8L, confirmation)
+    }
+
     @Test fun transactionDraftCanBeCancelledAtItsCurrentVersion() {
         var cancelled: Pair<String, Long>? = null
         show(FinanceUiState(authenticated = true, tenants = listOf(tenant("owner")),

@@ -2443,3 +2443,14 @@ Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850e
 - Limits: MockWebServer proves Android HTTP construction/parsing only. Live Core ordering, authenticated Android-to-Core/OIDC, and tenant isolation remain unverified; F09 Android stays PARTIAL.
 - Files: Android test, parity evidence, bounded plan, and this progress record. User-owned untracked paths remain excluded.
 - Next: choose next locally actionable unfinished V1 gap; keep public runtime/OIDC integration as external gate until host dependencies are available.
+
+## F59.49 F07 Android income draft UI — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F07; bounded plan `docs/superpowers/plans/2026-10-12-f07-android-income-ui.md`.
+- Goal: prove the Android draft editor can save a pending operation as income and requires explicit confirmation of the refreshed draft version.
+- Test-first: added a focused Compose instrumentation case. The existing editor already supports this behavior, so no production changes or artificial RED were added.
+- Coverage: start from expense draft version 7; choose income; confirm remains disabled while edits are unsaved; save callback has exact `type=income`, amount, description, date and version 7; no auto-confirm occurs; only refreshed version 8 enables confirmation, and explicit tap confirms version 8.
+- GREEN/review: direct test `FinanceScreensTest#pendingExpenseCanBeSavedAsIncomeBeforeExplicitConfirmationOfRefreshedVersion` passed 1/1 on dedicated `CodexFinanceBotApi27` / API 27 (`emulator-5554`); debug and AndroidTest APK assembly passed. Independent review found no false positives. Production code unchanged.
+- Limits: Compose uses in-memory synthetic state; Core persistence, actual income totals/budget behavior, and authenticated Android-to-Core/OIDC remain covered by separate tests or external integration gates. F07 Android remains PARTIAL for live integration.
+- Files: `FinanceScreensTest.kt`, bounded plan, parity evidence, and this progress record. User-owned untracked paths remain excluded.
+- Next: choose next locally actionable unfinished V1 gap; public runtime/OIDC still awaits host prerequisites.

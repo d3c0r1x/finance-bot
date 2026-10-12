@@ -137,7 +137,7 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceIncomeDraftApiTest.kt"
-      evidence: "MockWebServer Android API test proves income draft fields, stable idempotency key, explicit versioned confirmation, and income history fields including source and offset-bearing date. It checks that draft review sends no confirmation or direct transaction request. Existing PostgreSQL acceptance covers pending income totals and budget spend; live Android-to-Core/OIDC remains unverified."
+      evidence: "Compose instrumentation verifies changing a pending expense draft to income, saving the exact amount/description/type against the current version, keeping confirm disabled until Core returns the refreshed version, and confirming only after an explicit tap. MockWebServer API coverage checks stable idempotency, draft/confirm request order, and income history fields including source and offset-bearing date. Both synthetic API tests use isolated token storage. Existing PostgreSQL acceptance covers pending income totals and budget spend; live Android-to-Core/OIDC remains unverified."
       gap: "No authenticated live Android-to-Core/OIDC integration test. MockWebServer test does not prove database persistence."
     intentional_differences: []
   - id: F08
