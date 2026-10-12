@@ -2186,7 +2186,7 @@ Updated: 2026-10-12, Europe/Moscow.
 - Push: `git push origin feat/saas-rewrite` succeeded; `git ls-remote origin refs/heads/feat/saas-rewrite` verified exact SHA `c397cbcc45b5acf6a332bfbdb4d48106baa696fa`, including the feature and progress commits.
 - Status: COMPLETE for this narrow slice locally and on origin. Next: continue another approved V1 slice; keep full F60 and public runtime/auth gates partial or blocked until their separate criteria pass.
 
-## F60.2 Explicit AI provider locality — COMMIT_PENDING — 2026-10-12
+## F60.2 Explicit AI provider locality — COMMITTED; PUSH_PENDING — 2026-10-12
 
 - Authority: approved V1 F60 and `docs/specs/CONTINUATION.md` §A03. Slice plan: `docs/superpowers/plans/2026-10-12-f60-2-provider-locality.md`.
 - TDD RED: locality tests first failed against the endpoint-shape router (3 failed, 31 passed); separate mixed/remote Vision-pool test failed (1 failed, 34 deselected). Initial regression exposed five unclassified test doubles; assigned explicit locality to those fixtures. No production behavior was weakened.
@@ -2194,5 +2194,6 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN/regression: `.venv\\Scripts\\python.exe -m pytest services/python/intelligence/tests tools/contracts/test_contracts.py -q -p no:cacheprovider` — 206 passed, 1 skipped (38.11s). `.venv\\Scripts\\python.exe -m compileall -q services/python/intelligence` and `git diff --check` pass.
 - Independent review: no locality or policy-intersection hole found; focused reviewer run passed 69 tests but hit one intermittent existing oversized-request HTTP server `WinError 10053`. Full final regression above passed including that test.
 - Limits: F60 remains partial; no live model quality comparison, cloud consent UX, quotas, canary, OIDC, or production deployment proof.
+- Feature commit: `c225516bbf6a1795ab901ee22562ba81f422b1ea` (`fix(F60): fail closed on provider locality`).
 - Repository/branch: `feat/saas-rewrite`; pre-slice HEAD `cede10265f158f2087f7c093b64d5723c6cd63dd`. User-owned untracked paths remain excluded.
-- Next: commit only F60.2 implementation, focused tests, plan, parity evidence, and this progress record; then push and verify remote SHA.
+- Next: push branch, verify origin SHA, then record remote evidence. Android «Участники → их операции» is already covered by F53; remaining gap is live authenticated Core/OIDC E2E.
