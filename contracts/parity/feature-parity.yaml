@@ -1283,9 +1283,13 @@ features:
     feature: "Проверки receipt inventory, synthetic/private samples, CI"
     target: "P evaluation tools; polyglot CI"
     acceptance: "`--vision`, `--strict`, `--json` сохранены в новом CLI; private samples не входят в CI artifacts"
-    status: planned
-    tests: []
-    evidence: []
+    status: complete
+    tests:
+      - tools/evaluation/tests/test_receipt_inventory.py
+      - tests/test_f56_parity_registry.py
+      - tools/contracts/test_contracts.py
+    evidence:
+      - "Approved plan docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md; 11 focused synthetic tests passed, including JSON-only empty inventory and private-path guard. GitHub Actions run 37577879007 passed the private receipt tracking guard, regression suites and empty-inventory JSON CLI smoke; no receipt artifacts are uploaded. No private owner photos or sample manifest were inspected."
     android:
       status: not_applicable
       scenario: "Android counterpart for F56: Проверки receipt inventory, synthetic/private samples, CI"

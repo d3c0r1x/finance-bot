@@ -2274,3 +2274,12 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN: `tests/test_f59_android_parity.py` plus `tools/contracts/test_contracts.py` passed 68/68; `git diff --check` clean. Previously recorded F10.1 instrumentation remains 94/94 on isolated API-27 emulator; live OIDC/Core is still unverified.
 - Commit/push: `8d931d8e414b2dfd675dab7a6a87d727ae1c4c9c` (`fix(parity): correct F10 Android gap`) pushed to `feat/saas-rewrite`; `git ls-remote` confirmed the same SHA. User-owned untracked files and local tooling caches remained excluded.
 - Next: continue an independently executable V1 slice; keep live Android/Core/OIDC and production runtime gates open.
+
+## F59.36 F56 parity registry reconciliation — GREEN; COMMIT_PENDING
+
+- Authority: completed approved F56 plan `docs/superpowers/plans/2026-10-07-f56-receipt-evaluation.md`; implementation and CI evidence already existed, while the parity registry still said `planned`.
+- TDD RED: added `tests/test_f56_parity_registry.py`; it failed on the observed `planned` status. The baseline also had no test links or evidence.
+- Change: marked only F56 complete and linked the existing synthetic receipt-inventory tests, contract suite, and this registry regression. Preserved Android N/A authority. Evidence cites the verified historical Actions run `37577879007`; no private receipt files were accessed.
+- GREEN: focused registry plus receipt-inventory suite passed 12/12; `tools/contracts/test_contracts.py` passed 63/63; `git diff --check` clean.
+- Scope: parity metadata only; no product code changed. Commit/push pending; user-owned untracked paths remain excluded.
+- Next: commit and push this metadata correction, then continue the next incomplete V1 goal. Live Android/Core/OIDC and production runtime gates remain open.
