@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-12, Europe/Moscow.
+Updated: 2026-10-12, Europe/Moscow; verified at `37bc524b8e4e9269819935822035bfd4f9539186`.
 
 ## Global plan
 
@@ -19,6 +19,7 @@ Updated: 2026-10-12, Europe/Moscow.
 ## Current goal
 
 - F59 Android parity remains IN PROGRESS. Current registry: 52 partial, 0 missing, 5 justified N/A, 1 implemented (58 mappings total). F11 has synthetic Android provenance/fallback acceptance; live authenticated OIDC/Core remains open.
+- Next execution priority: M2 Core runtime bootstrap, beginning with a RED acceptance suite for the plan's repeatable `core` Compose profile; Docker/WSL remain unavailable, so local runtime proof is NOT_RUN. Preserve user constraints: no unsafe system/network changes, public HTTPS required, no Tailscale.
 - F59.12 F49 Android duplicate outcomes and safe batch undo is locally GREEN; parity is PARTIAL pending live OIDC/Core, process-kill, and tenant-isolation E2E. Spec/plan: `.agent/specs/F49-android-import-dedup-undo.md` and `docs/superpowers/plans/2026-10-11-f49-android-import-dedup-undo.md`.
 - F59.13 F50 Android merchant classification is locally GREEN; parity is PARTIAL pending live OIDC/Core, deployed AI availability, and tenant-isolation E2E. Spec/plan: `.agent/specs/F50-android-merchant-classification.md` and `docs/superpowers/plans/2026-10-11-f50-android-merchant-classification.md`.
 - F59.14 F51 Android historical merchant reclassification is locally GREEN; parity is PARTIAL pending live OIDC/Core and tenant-isolation E2E. Spec/plan: `.agent/specs/F51-android-merchant-reclassification.md` and `docs/superpowers/plans/2026-10-11-f51-android-merchant-reclassification.md`.
@@ -2406,5 +2407,5 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN/regression: `AndroidEncryptedMutationCheckpointStorageTest` passed 4/4 on dedicated Android 8.1/API 27 `CodexFinanceBotApi27`; parity plus contracts passed 75/75; `git diff --check` passed. An initial parity run passed 10 tests and failed only on the deliberately missing evidence phrase.
 - Review: independent read-only review approved the isolated fixture and fail-closed assertions; wording corrected to claim unchanged ciphertext, not recovery after key deletion.
 - Limits: this verifies ciphertext preservation and refusal to replace an unreadable checkpoint, not decryption recovery after permanent key loss. F08 Android remains PARTIAL for live Core/OIDC idempotency and production tenant-isolation E2E.
-- Status: COMMIT_PENDING.
-- Next: commit this bounded test/parity/progress slice, push it, and verify the remote SHA; continue with the next V1 runtime/bootstrap gate.
+- Status: COMPLETE locally; COMMITTED/PUSHED as `37bc524b8e4e9269819935822035bfd4f9539186`; remote SHA verified by `git ls-remote`.
+- Next: create the RED acceptance suite for the first repeatable `core` runtime/bootstrap slice; keep actual Docker startup, database durability and public HTTPS as NOT_RUN until the runtime is available.
