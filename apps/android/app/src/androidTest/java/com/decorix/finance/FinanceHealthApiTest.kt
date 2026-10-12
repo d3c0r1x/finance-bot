@@ -24,7 +24,7 @@ class FinanceHealthApiTest {
         override fun after() = server.shutdown()
     }
 
-    @Test fun statusUsesAuthenticatedTenantBffAndParsesOnlySanitizedCapabilities() {
+    @Test fun statusUsesAuthenticatedTenantApiAndParsesOnlySanitizedCapabilities() {
         server.enqueue(MockResponse().setBody("""
             {"capabilities":{
               "localAi":{"status":"available","diagnosticCode":null},
@@ -39,7 +39,7 @@ class FinanceHealthApiTest {
         assertEquals("MODEL_MISSING", health.capabilities.getValue("receiptVision").diagnosticCode)
         val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
         assertEquals("GET", request.method)
-        assertEquals("/bff/tenants/$TENANT_ID/health", request.path)
+        assertEquals("/api/v1/tenants/$TENANT_ID/health", request.path)
         assertEquals("Bearer health-token", request.getHeader("Authorization"))
     }
 

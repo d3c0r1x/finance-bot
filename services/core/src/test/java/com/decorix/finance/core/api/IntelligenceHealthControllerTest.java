@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.server.ResponseStatusException;
 
 class IntelligenceHealthControllerTest {
@@ -20,7 +20,7 @@ class IntelligenceHealthControllerTest {
         var profiles = mock(MemberProfileService.class);
         var client = mock(IntelligenceHealthClient.class);
         var controller = new IntelligenceHealthController(profiles, client);
-        var user = mock(OidcUser.class);
+        var user = mock(Jwt.class);
         var tenantId = UUID.randomUUID();
         when(user.getSubject()).thenReturn("member-subject");
         when(profiles.listMembers(tenantId, "member-subject")).thenReturn(List.of());
@@ -37,7 +37,7 @@ class IntelligenceHealthControllerTest {
         var profiles = mock(MemberProfileService.class);
         var client = mock(IntelligenceHealthClient.class);
         var controller = new IntelligenceHealthController(profiles, client);
-        var user = mock(OidcUser.class);
+        var user = mock(Jwt.class);
         var tenantId = UUID.randomUUID();
         when(user.getSubject()).thenReturn("outsider");
         when(profiles.listMembers(tenantId, "outsider")).thenThrow(new ResponseStatusException(

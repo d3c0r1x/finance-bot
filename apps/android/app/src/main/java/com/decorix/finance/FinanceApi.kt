@@ -87,7 +87,7 @@ class FinanceApi internal constructor(
         expectedSessionGeneration: Long? = null,
     ): FinanceHealthStatus {
         require(isUuid(tenantId)) { "Invalid tenant identifier" }
-        val body = executeRequest("/bff/tenants/$tenantId/health", "GET", null,
+        val body = executeRequest("/api/v1/tenants/$tenantId/health", "GET", null,
             expectedSessionGeneration = expectedSessionGeneration)
         return FinanceModels.intelligenceHealth(JSONObject(body))
     }

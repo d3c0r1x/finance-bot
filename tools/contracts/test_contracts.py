@@ -1542,8 +1542,9 @@ def test_health_status_contracts_are_authenticated_and_exclude_provider_secrets(
     public = yaml.safe_load((ROOT / "contracts/openapi/finance-api-v1.yaml").read_text("utf-8"))
     private = yaml.safe_load((ROOT / "contracts/openapi/finance-intelligence-v1.yaml").read_text("utf-8"))
 
-    browser_health = public["paths"]["/bff/tenants/{tenantId}/health"]["get"]
-    assert browser_health["security"] == [{"bffSession": []}]
+    api_health = public["paths"]["/api/v1/tenants/{tenantId}/health"]["get"]
+    assert api_health["security"] == [{"bearerAuth": []}]
+    assert "/bff/tenants/{tenantId}/health" not in public["paths"]
     public_schema = public["components"]["schemas"]["IntelligenceHealthStatus"]
     assert public_schema["additionalProperties"] is False
     assert set(public_schema["properties"]["capabilities"]["properties"]) == {"localAi", "receiptVision", "receiptOcr"}

@@ -98,14 +98,14 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /bff/tenants/{tenantId}/health:
+  /api/v1/tenants/{tenantId}/health:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     get:
-      operationId: getBrowserIntelligenceHealth
+      operationId: getIntelligenceHealth
       summary: Read sanitized availability of AI and receipt processing capabilities
       security:
-        - bffSession: []
+        - bearerAuth: []
       responses:
         '200':
           description: Safe capability states; provider addresses, models, paths, and raw errors are excluded
