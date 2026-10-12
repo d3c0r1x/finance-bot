@@ -71,3 +71,27 @@ def test_receipt_provider_and_server_only_flows_have_accurate_android_mapping():
     assert "OCR" in ocr_pipeline["reason"]
     assert provider_configuration["status"] == "not_applicable"
     assert "operator" in provider_configuration["reason"].lower()
+
+
+def test_f10_android_registry_tracks_receipt_upload_and_only_live_e2e_gap():
+    feature = next(item for item in _features() if item["id"] == "F10")
+    android = feature["android"]
+
+    expected_tests = {
+        "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt",
+        "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptPollingPolicyTest.kt",
+        "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt",
+    }
+    assert expected_tests.issubset(android["tests"])
+    assert all((ROOT / path).is_file() for path in expected_tests)
+
+    gap = android["gap"].lower()
+    assert "authenticated android-to-core" in gap
+    assert not any(
+        stale_claim in gap
+        for stale_claim in (
+            "item editing",
+            "duplicate decisions",
+            "confirmation remain in f15-f18",
+        )
+    )

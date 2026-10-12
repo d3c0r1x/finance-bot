@@ -209,7 +209,8 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptPollingPolicyTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptScreensTest.kt"
-      gap: "Upload, progress, and draft display are the first Android slice; receipt item editing, duplicate decisions, and confirmation remain in F15-F18 slices. Real authenticated Android-to-Core upload remains required."
+      gap: "Local Android API/UI tests cover photo upload, bounded OCR progress, and opening the returned draft. Receipt review and editing are separately covered by F14-F19 local acceptance. Only live authenticated Android-to-Core/OIDC upload E2E remains unverified."
+      evidence: "F10.1 Android upload tests cover authenticated multipart upload, same file/key replay after token refresh, bounded job polling, localized draft display, and no transaction side effect. The isolated API-27 F10.1 regression passed 94/94; synthetic MockWebServer and Compose tests do not prove live OIDC/Core integration."
     intentional_differences: []
   - id: F11
     feature: "Vision: подготовка фото, строгий JSON, выбор модели/тега, повторный проход"
