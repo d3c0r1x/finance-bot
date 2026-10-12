@@ -2428,6 +2428,18 @@ Updated: 2026-10-12, Europe/Moscow; verified at `2e30ffa796eddce5c93e7b48b1d850e
 - Test-first: added a MockWebServer instrumentation test. Initial compile exposed nullable `Request.path`; fixed the test. No behavioral RED: existing `FinanceApi` already passed the accepted request contract, so production code stayed unchanged.
 - Coverage: exact decimal amount, description, pending state, offset-bearing date, draft endpoint and idempotency key; no confirm/direct transaction request during review; versioned explicit confirm; history filter and exact income/source/date fields.
 - GREEN/review: Android debug and AndroidTest APK assembly passed. `FinanceIncomeDraftApiTest` passed 1/1 on dedicated `CodexFinanceBotApi27` Android 8.1/API 27 (`emulator-5554`). Independent review found no contract defect and confirmed that fixed MockWebServer history cannot prove DB persistence. Existing Core PostgreSQL test `telegramIncomeDraftPreservesSourceAndDateWithoutChangingExpenseOrBudgetSpend` verifies pending totals, post-confirm income totals, and zero expense/budget spend.
-- Limits: this test is synthetic API-boundary coverage. Authenticated Android-to-Core/OIDC remains unverified; F07 Android stays PARTIAL for live integration.
+- Limits: this test is synthetic API-boundary coverage and now stores tokens in an isolated test vault. Authenticated Android-to-Core/OIDC remains unverified; F07 Android stays PARTIAL for live integration.
 - Files: Android instrumentation test, parity evidence, and bounded plan. User-owned untracked files remain excluded.
 - Next: choose next unfinished V1 acceptance gap from parity registry; retain M2 public runtime/OIDC blockers as explicit external gates.
+
+## F59.48 F09 Android filtered transaction cursor API — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F09; bounded plan `docs/superpowers/plans/2026-10-12-f09-android-transactions-pagination-api.md`.
+- Goal: verify `FinanceApi.transactions()` sends tenant, authentication, search/type/date/member filters, round-trips opaque cursor, and parses both response pages.
+- Test-first: added MockWebServer instrumentation coverage. Existing query/model code already meets the contract, so no production change or manufactured behavioral RED was needed.
+- Coverage: synthetic bearer token; exact tenant path; all filters; page size; complete first and second transaction DTOs; opaque cursor preserved through response and next request.
+- GREEN/review: build-only AndroidTest assembly passed; direct `adb -s emulator-5554` run on dedicated `CodexFinanceBotApi27` / API 27 passed 1/1. Independent review found no contract or overclaim issue.
+- Test-safety correction: first Gradle connected invocation ignored the requested serial and ran on both attached AVDs, including `Planerka_API35_x64`. That run installed/launched the Finance debug/test packages and wrote synthetic credentials through the app's normal token vault. Tests now use isolated preferences and Keystore aliases. A temporary conditional cleanup test cleared only the known synthetic token on dedicated API 27. API 35 was left untouched because prior package/session state cannot be inferred; no further commands ran on it.
+- Limits: MockWebServer proves Android HTTP construction/parsing only. Live Core ordering, authenticated Android-to-Core/OIDC, and tenant isolation remain unverified; F09 Android stays PARTIAL.
+- Files: Android test, parity evidence, bounded plan, and this progress record. User-owned untracked paths remain excluded.
+- Next: choose next locally actionable unfinished V1 gap; keep public runtime/OIDC integration as external gate until host dependencies are available.
