@@ -260,8 +260,214 @@ class FinanceExportsScreensTest {
         assertEquals(listOf(EXPORT_ID), opened)
     }
 
+    @Test fun ruAndEnglishRenderEveryExportStatusAndExactRowCount() {
+        val language = mutableStateOf("ru")
+        val currentJob = mutableStateOf(job("queued", rows = 17))
+        compose.setContent {
+            MaterialTheme {
+                FinanceExportsSection(
+                    role = "viewer", language = language.value, timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = currentJob.value, busy = false, error = null,
+                    onCreate = {}, onRefresh = {}, onDownload = {},
+                    pollDelay = { suspendCancellableCoroutine { } },
+                )
+            }
+        }
+
+        val labels = listOf(
+            "queued" to ("Экспорт: в очереди" to "Export: queued"),
+            "processing" to ("Экспорт: готовится" to "Export: processing"),
+            "ready" to ("Экспорт: готов" to "Export: ready"),
+            "failed" to ("Экспорт: ошибка" to "Export: failed"),
+            "expired" to ("Экспорт: истёк" to "Export: expired"),
+        )
+        for ((status, expected) in labels) {
+            for ((locale, label, rowCount) in listOf(
+                Triple("ru", expected.first, "Операций: 17"),
+                Triple("en", expected.second, "Transactions: 17"),
+            )) {
+                compose.runOnIdle {
+                    language.value = locale
+                    currentJob.value = job(status, rows = 17)
+                }
+                compose.waitForIdle()
+                compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText(rowCount).performScrollTo().assertIsDisplayed()
+            }
+        }
+    }
+
+    @Test fun ruAndEnglishLocalizeDateAndCoreExportErrors() {
+        val language = mutableStateOf("ru")
+        val error = mutableStateOf<String?>(null)
+        val currentJob = mutableStateOf<FinanceExportJob?>(null)
+        val refreshes = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                FinanceExportsSection(
+                    role = "viewer", language = language.value, timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = currentJob.value, busy = false, error = error.value,
+                    onCreate = {}, onRefresh = refreshes::add, onDownload = {},
+                    pollDelay = { suspendCancellableCoroutine { } },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("export-from-date").performTextClearance()
+        compose.onNodeWithTag("export-from-date").performTextInput("invalid-date")
+        for ((locale, expected) in listOf(
+            "ru" to "Проверьте даты: период должен быть от 1 до 366 дней.",
+            "en" to "Check the dates: the period must be 1 to 366 days.",
+        )) {
+            compose.runOnIdle { language.value = locale }
+            compose.waitForIdle()
+            compose.onNodeWithText(expected).performScrollTo().assertIsDisplayed()
+        }
+
+        val mappings = listOf(
+            "too_many_rows" to ("Слишком много операций для одного файла." to "Too many transactions for one export."),
+            "forbidden" to ("Нет доступа к выбранной области экспорта." to "You cannot export the selected scope."),
+            "invalid_request" to ("Проверьте период и участников экспорта." to "Check the export period and member selection."),
+            "unauthorized" to ("Не удалось выполнить экспорт. Проверьте соединение и повторите." to
+                "Export failed. Check the connection and retry."),
+            "unavailable" to ("Не удалось выполнить экспорт. Проверьте соединение и повторите." to
+                "Export failed. Check the connection and retry."),
+            "network" to ("Не удалось выполнить экспорт. Проверьте соединение и повторите." to
+                "Export failed. Check the connection and retry."),
+        )
+        for ((key, localized) in mappings) {
+            for ((locale, expected) in listOf("ru" to localized.first, "en" to localized.second)) {
+                compose.runOnIdle {
+                    language.value = locale
+                    error.value = key
+                }
+                compose.waitForIdle()
+                compose.onNodeWithText(expected).performScrollTo().assertIsDisplayed()
+            }
+        }
+
+        compose.runOnIdle { currentJob.value = job("processing"); error.value = "unavailable" }
+        for ((locale, expectedError, refreshLabel) in listOf(
+            Triple("ru", "Не удалось выполнить экспорт. Проверьте соединение и повторите.", "Обновить статус"),
+            Triple("en", "Export failed. Check the connection and retry.", "Refresh status"),
+        )) {
+            compose.runOnIdle { language.value = locale }
+            compose.waitForIdle()
+            compose.onNodeWithText(expectedError).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(refreshLabel).performScrollTo().assertIsDisplayed().performClick()
+        }
+        assertEquals(listOf(EXPORT_ID, EXPORT_ID), refreshes)
+    }
+
+    @Test fun ruAndEnglishRenderReadyEmptyAndMissingLinkStates() {
+        val language = mutableStateOf("ru")
+        val currentJob = mutableStateOf(job("ready", rows = 0))
+        val downloads = mutableListOf<String>()
+        var expectedDownloads = 0
+        compose.setContent {
+            MaterialTheme {
+                FinanceExportsSection(
+                    role = "viewer", language = language.value, timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = currentJob.value, busy = false, error = null,
+                    onCreate = {}, onRefresh = {}, onDownload = downloads::add,
+                )
+            }
+        }
+
+        for ((locale, emptyCopy) in listOf(
+            "ru" to "За период операций нет. CSV содержит только заголовки.",
+            "en" to "No transactions for this period. The CSV contains its headers only.",
+        )) {
+            compose.runOnIdle {
+                language.value = locale
+                currentJob.value = job("ready", rows = 0)
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText(emptyCopy).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(if (locale == "ru") "Операций: 0" else "Transactions: 0")
+                .performScrollTo().assertIsDisplayed()
+            compose.runOnIdle { currentJob.value = job("ready", rows = 17) }
+            compose.waitForIdle()
+            compose.onNodeWithText(if (locale == "ru") "Скачать CSV" else "Download CSV")
+                .performScrollTo().assertIsDisplayed()
+            compose.onAllNodesWithText(DOWNLOAD_URL).assertCountEquals(0)
+            assertEquals(expectedDownloads, downloads.size)
+            compose.onNodeWithTag("download-export").performScrollTo().performClick()
+            expectedDownloads += 1
+            assertEquals(expectedDownloads, downloads.size)
+        }
+
+        val missingLinkCopies = listOf(
+            "ru" to ("Ссылка истекла или недоступна. Запросите свежую ссылку." to "Получить ссылку и скачать"),
+            "en" to ("The link expired or is unavailable. Request a fresh link." to "Refresh link and download"),
+        )
+        for ((locale, copy) in missingLinkCopies) {
+            compose.runOnIdle {
+                language.value = locale
+                currentJob.value = job("ready", rows = 17, downloadUrl = null)
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText(copy.first).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(copy.second).performScrollTo().assertIsDisplayed()
+            assertEquals(expectedDownloads, downloads.size)
+            compose.onAllNodesWithText(DOWNLOAD_URL).assertCountEquals(0)
+            compose.onNodeWithTag("download-export").performScrollTo().performClick()
+            expectedDownloads += 1
+            assertEquals(expectedDownloads, downloads.size)
+        }
+    }
+
+    @Test fun ruAndEnglishShowExplicitDuplicateRetryAndManualRefreshActions() {
+        val language = mutableStateOf("ru")
+        val retry = mutableStateOf(true)
+        val error = mutableStateOf<String?>("network")
+        val currentJob = mutableStateOf<FinanceExportJob?>(null)
+        val creates = mutableListOf<FinanceExportRequest>()
+        val refreshes = mutableListOf<String>()
+        compose.setContent {
+            MaterialTheme {
+                FinanceExportsSection(
+                    role = "viewer", language = language.value, timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = currentJob.value, busy = false, error = error.value,
+                    retryNeedsConfirmation = retry.value,
+                    onCreate = creates::add, onRefresh = refreshes::add, onDownload = {},
+                )
+            }
+        }
+
+        val retryCopies = listOf(
+            "ru" to ("Предыдущий запрос мог создать файл. Повтор может создать дубликат." to
+                "Повторить запрос (возможен дубль)"),
+            "en" to ("The previous request may have created a file. Retrying may create a duplicate." to
+                "Retry request (may create duplicate)"),
+        )
+        var retryCount = 0
+        for ((locale, copy) in retryCopies) {
+            compose.runOnIdle { language.value = locale }
+            compose.waitForIdle()
+            compose.onNodeWithText(copy.first).performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText(copy.second).performScrollTo().assertIsDisplayed().performClick()
+            retryCount += 1
+            assertEquals(retryCount, creates.size)
+            compose.runOnIdle { retry.value = false; error.value = null }
+            compose.waitForIdle()
+            compose.runOnIdle { retry.value = true; error.value = "network" }
+            compose.waitForIdle()
+        }
+
+        compose.runOnIdle { retry.value = false; error.value = null; currentJob.value = job("processing") }
+        compose.waitForIdle()
+        for ((locale, label) in listOf("ru" to "Обновить статус", "en" to "Refresh status")) {
+            compose.runOnIdle { language.value = locale }
+            compose.waitForIdle()
+            compose.onNodeWithText(label).performScrollTo().assertIsDisplayed().performClick()
+        }
+        assertEquals(listOf(EXPORT_ID, EXPORT_ID), refreshes)
+    }
+
     private fun show(
         role: String = "viewer",
+        language: String = "ru",
         members: List<FinanceTenantMember> = emptyList(),
         error: String? = null,
         retryNeedsConfirmation: Boolean = false,
@@ -270,7 +476,7 @@ class FinanceExportsScreensTest {
         compose.setContent {
             MaterialTheme {
                 FinanceExportsSection(
-                    role = role, language = "ru", timezone = "Europe/Moscow", members = members,
+                    role = role, language = language, timezone = "Europe/Moscow", members = members,
                     membersLoading = false, job = null, busy = false, error = error,
                     retryNeedsConfirmation = retryNeedsConfirmation,
                     onCreate = onCreate, onRefresh = {}, onDownload = {},
@@ -290,11 +496,11 @@ class FinanceExportsScreensTest {
         userId = if (name == "Alice") MEMBER_ID else SECOND_MEMBER_ID, displayName = name, role = "member",
     )
 
-    private fun job(status: String, rows: Int = 17) = FinanceExportJob(
+    private fun job(status: String, rows: Int = 17, downloadUrl: String? = if (status == "ready") DOWNLOAD_URL else null) = FinanceExportJob(
         id = EXPORT_ID, status = status, formatVersion = "csv-v1", fromDate = "2026-10-01",
         toDate = "2026-10-31", memberId = null, allMembers = true, rowCount = rows,
         snapshotAt = "2026-10-11T08:00:00Z", createdAt = "2026-10-11T08:00:01Z",
-        expiresAt = "2026-10-11T08:10:00Z", downloadUrl = if (status == "ready") DOWNLOAD_URL else null,
+        expiresAt = "2026-10-11T08:10:00Z", downloadUrl = downloadUrl,
     )
 
     private companion object {

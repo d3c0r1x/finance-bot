@@ -2218,4 +2218,16 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN: `TransactionVoidAttemptsTest` 4/4; `FinanceTransactionVoidApiTest` 5/5 on isolated API 27; `FinanceScreensTest` 89/89 on API 27; full Android JVM suite 80/80; updated `FinanceReceiptApiTest` 49/49; parity/contracts 63/63; `git diff --check` clean. Tests use synthetic data/MockWebServer and do not prove live Core behavior.
 - Review: final read-only review found no blockers. It flags retained in-memory snapshots after session/tenant changes and an instance-local session generation across Activity recreation; live authenticated E2E remains open.
 - Limits: F08/F59 remains PARTIAL. Retry attempts are in-memory only; process-death recovery and live authenticated Android-to-Core/OIDC repeat/void E2E are unverified.
-- Next: commit only F08 void code/tests/registry/plan/progress, push, and verify the remote branch SHA.
+- Commit/push: `6fe7cb22374e5b7b41d56e1e84426ac35af64b70` (`fix(F08): retry Android voids idempotently`) includes the implementation, tests, registry, plan, and progress; remote `origin/feat/saas-rewrite` was verified at the same SHA.
+- Next: add direct F52 Android RU/EN export presentation acceptance; retain live authenticated Core/OIDC and public-runtime gates.
+
+## F59.31 F52 Android RU/EN export acceptance — GREEN locally; PARTIAL
+
+- Authority: approved V1 `PLAN.md` F52 and `.agent/specs/F52-android-csv-export.md` acceptance criterion 10. Bounded plan: `docs/superpowers/plans/2026-10-12-f52-android-ru-en-matrix.md`.
+- Scope: test-only Compose acceptance matrix. Existing RU/EN UI strings were already present; no product code, API, Core behavior, or financial data changed.
+- TDD: direct test coverage was absent. First run exposed one test-harness counting error after two explicit locale-specific retry taps (17 tests, one failure); corrected expected callback count. No production-behavior failure was observed, so no product fix was needed.
+- Coverage: both locales assert invalid-date guidance, all five export states, exact row counts, mapped 400/401/403/413/5xx/network error copy, active-job poll failure plus explicit manual refresh, empty CSV, fresh-link and missing-link explanations/actions, explicit retry warning/action, tap-only callbacks, and no signed URL in rendered text.
+- GREEN: `FinanceExportsScreensTest` 17/17; combined `FinanceExportsModelsTest`, `FinanceExportsApiTest`, `FinanceExportsScreensTest`, and `FinanceFlowTest` 46/46 on isolated Android 8.1/API 27 emulator `emulator-5554`; Android JVM 80/80; parity/contracts 81 passed, 2 skipped; debug and AndroidTest APK builds pass; `git diff --check` clean. Tests use synthetic fixtures and mocked API only.
+- Review: independent read-only reviewer found no blocker after confirming all mapped error labels, active-job poll-error rendering, and that polling-delay tests inject an immediate fake delay. No end-to-end HTTP status 401 mapper coverage was added in this presentation-only slice.
+- Limits: F52 Android remains PARTIAL. Live OIDC/Core roles, worker/S3, system resolver UI, actual browser transfer/downloaded bytes, session/tenant cancellation, in-flight response across lifecycle change, and elapsed wall-clock cadence remain unverified.
+- Next: commit and push the scoped presentation tests, F52 registry evidence, plan, and progress; then continue an independently closable V1 goal without claiming external delivery.

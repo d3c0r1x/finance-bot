@@ -1198,7 +1198,7 @@ features:
     android:
       status: partial
       scenario: "Android counterpart for F52: CSV Excel: UTF-8 BOM, `;`, русские поля, фильтры; `services/export.py`"
-      gap: "Live Android OIDC/Core role enforcement, export worker/S3 URL, Android system resolver, actual browser transfer and downloaded-byte integrity remain unverified. App-background/session/tenant polling cancellation and the complete RU/EN state matrix still need direct coverage."
+      gap: "Live Android OIDC/Core role enforcement, export worker/S3 URL, Android system resolver, actual browser transfer and downloaded-byte integrity remain unverified. Screen-exit and ON_PAUSE cancellation of a pending poll delay are covered; session/tenant-switch cancellation, a delayed in-flight HTTP response across lifecycle change, and elapsed wall-clock polling cadence remain unverified."
       tests:
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsModelsTest.kt
         - apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsApiTest.kt
@@ -1210,6 +1210,7 @@ features:
         - "Follow-up cancellation Compose test passes; all F52 model/API/screen tests pass 29/29 on emulator-5554. Disposing the export screen cancels the suspended poll and sends no status request. Background/session/tenant-switch cancellation and elapsed wall-clock timing remain unverified."
         - "Download safety follow-up: F52 model/policy/external-intent tests 16/16, API tests 6/6, and Compose tests 12/12 pass on isolated Android 8.1/API 27 emulator-5554; complete FinanceScreensTest 88/88, Android JVM 71/71, contracts 63/63, and debug/AndroidTest APK assembly pass. Tests reject a mismatched response export ID, accept the same UUID despite hex letter case, allow only a current-session/tenant/screen ready response with a safe HTTPS URL, and build an ACTION_VIEW intent containing only the validated URL (no extras). This does not exercise Activity chooser invocation, live Core/OIDC/S3, browser transfer, or downloaded bytes."
         - "Activity handoff follow-up: Android API-27 MainActivity instrumentation captures the chooser passed after explicit handoff and verifies nested ACTION_VIEW contains only the validated HTTPS URL; unsafe input launches nothing. F52 model/API/screen regression 37/37 and FinanceFlowTest 5/5 pass; Android JVM and contracts pass. System resolver UI, live Core/OIDC/S3, browser transfer and downloaded bytes remain unverified."
+        - "RU/EN Compose presentation follow-up: FinanceExportsScreensTest directly checks all five statuses, exact row counts, date guidance, each normalized Core error label, active-job poll failure plus manual refresh, empty CSV, ready/missing-link copy and actions, duplicate-aware retry copy, explicit-click-only callbacks, and absence of signed URL in visible text. Combined F52 model/API/screen plus FinanceFlow instrumentation passes 46/46 on isolated Android 8.1/API 27 emulator-5554; Android JVM passes 80/80; contracts pass 81 with 2 skips; debug and AndroidTest APKs build. Synthetic UI/API tests only; live delivery gates remain open."
     intentional_differences: []
   - id: F53
     feature: "Вкладки Tkinter: обзор, транзакции, чеки, бюджет, пользователи, товары, аналитика, экспорт"
