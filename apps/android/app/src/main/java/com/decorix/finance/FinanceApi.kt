@@ -536,16 +536,29 @@ class FinanceApi internal constructor(
         )))
     }
 
-    fun repeatTransaction(tenantId: String, original: FinanceTransaction, occurredAt: String): FinanceTransaction {
+    fun repeatTransaction(tenantId: String, original: FinanceTransaction, occurredAt: String,
+                          idempotencyKey: String, expectedSessionGeneration: Long? = null): FinanceTransaction {
         require(original.status == "posted" && original.type != "debt_payment") { "Transaction cannot be repeated" }
+        require(original.tenantId == tenantId) { "Transaction does not belong to tenant" }
         val body = JSONObject().put("type", original.type).put("amount", original.amount)
             .put("currency", original.currency).put("categoryCode", original.categoryCode)
             .put("subcategoryCode", original.subcategoryCode ?: JSONObject.NULL)
             .put("description", original.description).put("source", original.source)
             .put("occurredAt", occurredAt).toString()
-        return FinanceModels.transaction(JSONObject(execute(
-            "/api/v1/tenants/$tenantId/transactions", "POST", body, UUID.randomUUID().toString(),
+        val repeated = FinanceModels.transaction(JSONObject(execute(
+            "/api/v1/tenants/$tenantId/transactions", "POST", body, idempotencyKey,
+            expectedSessionGeneration = expectedSessionGeneration,
+            guardExpectedSessionDuringRequest = expectedSessionGeneration != null,
         )))
+        require(isUuid(repeated.id) && !repeated.id.equals(original.id, ignoreCase = true) &&
+            repeated.tenantId == tenantId && repeated.status == "posted" && repeated.type == original.type &&
+            repeated.amount == original.amount && repeated.currency == original.currency &&
+            repeated.categoryCode == original.categoryCode && repeated.subcategoryCode == original.subcategoryCode &&
+            repeated.description == original.description && repeated.source == original.source &&
+            repeated.occurredAt == occurredAt) {
+            "Repeated transaction response does not match request"
+        }
+        return repeated
     }
 
     fun voidTransaction(tenantId: String, transaction: FinanceTransaction): FinanceTransaction {
@@ -847,9 +860,13 @@ class FinanceApi internal constructor(
     }
 
     private fun execute(path: String, method: String, body: String? = null, idempotencyKey: String? = null,
-                        ifMatchVersion: Long? = null, retryUnauthorized: Boolean = true): String {
+                        ifMatchVersion: Long? = null, retryUnauthorized: Boolean = true,
+                        expectedSessionGeneration: Long? = null,
+                        guardExpectedSessionDuringRequest: Boolean = false): String {
         val requestBody = body?.toRequestBody("application/json".toMediaType())
-        return executeRequest(path, method, requestBody, idempotencyKey, ifMatchVersion, retryUnauthorized)
+        return executeRequest(path, method, requestBody, idempotencyKey, ifMatchVersion, retryUnauthorized,
+            expectedSessionGeneration = expectedSessionGeneration,
+            guardExpectedSessionDuringRequest = guardExpectedSessionDuringRequest)
     }
 
     private fun isUuid(value: String): Boolean =

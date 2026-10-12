@@ -2383,8 +2383,12 @@ class MainActivity : ComponentActivity() {
         val tenant = ui.tenants.firstOrNull() ?: error("Create a workspace first")
         val zone = ZoneId.of(tenant.timezone)
         val occurredAt = LocalDate.now(zone).atTime(12, 0).atZone(zone).toInstant().toString()
-        api.repeatTransaction(tenant.id, transaction, occurredAt)
-        workspaceData()
+        val attempt = TransactionRepeatAttempts.begin(tenant.id, transaction, occurredAt, api.authSessionGeneration)
+        api.repeatTransaction(attempt.tenantId, attempt.original, attempt.occurredAt, attempt.idempotencyKey,
+            attempt.sessionGeneration)
+        workspaceData().also {
+            TransactionRepeatAttempts.complete(attempt.tenantId, attempt.original.id, attempt.sessionGeneration)
+        }
     }
 
     private fun voidTransaction(transaction: FinanceTransaction) = runApi {

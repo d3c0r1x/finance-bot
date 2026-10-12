@@ -156,7 +156,10 @@ features:
       tests:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceScreensTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceModelsTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceTransactionRepeatApiTest.kt"
+        - "apps/android/app/src/test/java/com/decorix/finance/TransactionRepeatAttemptsTest.kt"
       gap: "History is limited to the first 50 entries and lacks filters; live authenticated Core repeat/void E2E is still required."
+      evidence: "Android repeat now retains one immutable request/date/idempotency key per tenant, source transaction, and auth-session generation until the posted response is validated and workspace refresh succeeds. Lost-response replay, stale-session rejection, and non-posted ACK rejection pass locally; process-death recovery and live Core/OIDC E2E remain unverified."
     intentional_differences: []
   - id: F09
     feature: "Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"

@@ -2198,3 +2198,13 @@ Updated: 2026-10-12, Europe/Moscow.
 - Push: feature and progress commits pushed to `origin/feat/saas-rewrite`; `git ls-remote` confirmed branch SHA `28bd510c5d06bcdf349f38cb7cb2327354d62819`.
 - Repository/branch: `feat/saas-rewrite`; pre-slice HEAD `cede10265f158f2087f7c093b64d5723c6cd63dd`. User-owned untracked paths remain excluded.
 - Next: continue approved V1 scope. Android «Участники → их операции» is already covered by F53; remaining gap is live authenticated Core/OIDC E2E.
+
+## F59.29 F08 Android repeat retry idempotency — GREEN locally; PARTIAL — 2026-10-12
+
+- Authority: approved V1 `PLAN.md` F08 and `docs/specs/CONTINUATION.md` §A02. Bounded slice: `docs/superpowers/plans/2026-10-12-f08-android-repeat-retry.md`.
+- TDD RED: first test compile failed because the pending-attempt store and explicit idempotency-key API were absent. Added RED checks for session replacement and a `pending` response; these failed to compile until `repeatTransaction` accepted and enforced the captured auth-session generation.
+- Implementation: Android now preserves the exact transaction snapshot, chosen repeat timestamp, and idempotency key by tenant/source-operation/auth-session generation. POST is guarded against a changed auth session; the response must be a new UUID, same tenant, `posted`, and exactly match all intended fields. Pending state clears only after authoritative workspace refresh succeeds. No Core/server behavior changed.
+- GREEN: `TransactionRepeatAttemptsTest` focused JVM tests pass; `FinanceTransactionRepeatApiTest` 3/3 on isolated Android 8.1/API 27; full `FinanceScreensTest` 89/89 on API 27; full Android JVM suite passes; `git diff --check` passes. MockWebServer proves full-request lost-response replay uses identical body and idempotency key. No live user data or Core request used.
+- Limits: Android F08/F59 remains PARTIAL. Retry state is process-local; app-process death recovery is not implemented. Authenticated live Android-to-Core/OIDC repeat/void E2E remains unverified. A process death after an ambiguous POST can lose its retry key.
+- Review: read-only review found the prior session race and missing posted-status ACK; both are fixed and covered. The store intentionally does not discard ambiguous retry keys on logout. Session replacement blocks their use; snapshots remain memory-resident until success or process end.
+- Next: run parity/contracts, inspect scoped diff, commit and push only F08 files plus progress, and verify remote branch SHA.
