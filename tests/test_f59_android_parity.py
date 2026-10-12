@@ -95,3 +95,21 @@ def test_f10_android_registry_tracks_receipt_upload_and_only_live_e2e_gap():
             "confirmation remain in f15-f18",
         )
     )
+
+
+def test_f08_android_registry_records_os_process_death_evidence_and_remaining_live_gate():
+    feature = next(item for item in _features() if item["id"] == "F08")
+    android = feature["android"]
+    process_death_test = (
+        "apps/android/app/src/androidTest/java/com/decorix/finance/"
+        "AndroidMutationCheckpointProcessDeathTest.kt"
+    )
+
+    assert android["status"] == "partial"
+    assert process_death_test in android["tests"]
+    assert (ROOT / "apps/android/scripts/verify-f08-process-death.ps1").is_file()
+    evidence = android["evidence"].lower()
+    assert "force-stop" in evidence and "api-27" in evidence
+    assert "recovered exact synthetic" in evidence
+    assert "authenticated mainactivity restoration" in android["gap"].lower()
+    assert "live authenticated core/oidc" in android["gap"].lower()

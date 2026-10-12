@@ -34,8 +34,12 @@ internal interface MutationCheckpointStorage {
 }
 
 /** AES/GCM-backed durable checkpoint storage. A present but unreadable blob is never treated as empty. */
-internal class AndroidEncryptedMutationCheckpointStorage(context: Context) : MutationCheckpointStorage {
-    private val preferences = context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+internal class AndroidEncryptedMutationCheckpointStorage(
+    context: Context,
+    private val preferencesName: String = PREFERENCES_NAME,
+    private val keyAlias: String = KEY_ALIAS,
+) : MutationCheckpointStorage {
+    private val preferences = context.applicationContext.getSharedPreferences(preferencesName, Context.MODE_PRIVATE)
 
     override fun read(): List<MutationCheckpoint> = synchronized(STORAGE_LOCK) {
         readLocked()
@@ -95,14 +99,14 @@ internal class AndroidEncryptedMutationCheckpointStorage(context: Context) : Mut
 
     private fun existingKey(): SecretKey? {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-        val entry = keyStore.getEntry(KEY_ALIAS, null) ?: return null
+        val entry = keyStore.getEntry(keyAlias, null) ?: return null
         return (entry as? KeyStore.SecretKeyEntry)?.secretKey
             ?: throw IllegalStateException("Mutation checkpoint key has an unsupported type")
     }
 
     private fun createKey(): SecretKey = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         .apply {
-            init(KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            init(KeyGenParameterSpec.Builder(keyAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(KEY_SIZE_BITS)

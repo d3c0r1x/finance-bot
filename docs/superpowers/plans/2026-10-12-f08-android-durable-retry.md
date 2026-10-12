@@ -26,4 +26,11 @@ After implementation, run focused JVM and Android instrumentation suites on isol
 
 ## Limits
 
-Store-recreation tests prove encrypted persistence across store instances, not an OS force-stop or live OIDC/Core. Keep real-device process death, authenticated Core idempotency, and production tenant-isolation E2E open unless separately exercised.
+An API-27 emulator force-stop test proves encrypted snapshot persistence across target-process death. It does not exercise authenticated MainActivity recovery or live OIDC/Core. Keep physical-device process death, authenticated Core idempotency, and production tenant-isolation E2E open unless separately exercised.
+
+## OS process-death verification follow-up
+
+- Use a dedicated test-only preferences file and Android Keystore alias so the lifecycle check cannot overwrite a user's pending mutation.
+- A host PowerShell runner invokes the seed instrumentation method, force-stops only the isolated `com.decorix.finance.debug` package, confirms its PID exits, relaunches `MainActivity`, then invokes a fresh instrumentation process to compare the exact encrypted repeat and void snapshots.
+- The instrumentation suite may run its ordered seed/recovery/cleanup methods together without an OS kill; only `scripts/verify-f08-process-death.ps1` exercises the force-stop boundary. Its cleanup method is always attempted even when a phase fails.
+- This verifies Android Keystore and encrypted SharedPreferences survival across target-process death. It does not prove authenticated MainActivity restoration, Core/OIDC connectivity, production tenant isolation, or real server idempotency; those remain separate acceptance gates.

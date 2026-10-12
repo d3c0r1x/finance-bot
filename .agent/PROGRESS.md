@@ -2283,3 +2283,13 @@ Updated: 2026-10-12, Europe/Moscow.
 - GREEN: focused registry plus receipt-inventory suite passed 12/12; `tools/contracts/test_contracts.py` passed 63/63; `git diff --check` clean.
 - Scope: parity metadata only; no product code changed. Commit/push: `eb49901fe03f617989aae3020e20e6d57b7240d2` (`fix(parity): mark F56 locally complete`); remote branch verified at the same SHA. User-owned untracked paths remain excluded.
 - Next: continue the next independently actionable V1 goal. Live Android/Core/OIDC and production runtime gates remain open.
+
+## F59.37 F08 Android checkpoint process death — GREEN locally; COMMIT_PENDING; PARTIAL
+
+- Authority: approved V1 F08 and the user's encrypted, owner/tenant-bound, explicit-retry design; bounded follow-up in `docs/superpowers/plans/2026-10-12-f08-android-durable-retry.md`.
+- TDD RED: the new API-27 instrumentation fixture first failed to compile because the encrypted store had no isolated preferences/Keystore namespace. Added optional internal test namespace parameters; production defaults and persisted format remain unchanged.
+- Change: `AndroidMutationCheckpointProcessDeathTest` seeds deterministic synthetic repeat/void snapshots into its own encrypted test store. `scripts/verify-f08-process-death.ps1` rejects non-emulators, requires API 27 and exactly the selected connected device, starts `MainActivity` and confirms its PID before force-stop, confirms the PID is gone, starts a new process, then runs another instrumentation process and checks exact snapshots/key/time/source version. It always attempts test-fixture cleanup.
+- GREEN: host force-stop/relaunch harness passed on the isolated Android 8.1/API 27 emulator. Storage instrumentation 3/3, process-death class 3/3, retry UI 5/5; Android JVM suite 88/88 via a temporary ASCII junction; debug and AndroidTest APK builds passed. APK SHA-256: `58F83800B420CDD3BD8CDFBDF86140BEB0644973D2DB781E21C2CC657A806325`. Parity tests 6/6, contract suite 63/63, `git diff --check` clean.
+- Limits: the isolated fixture verifies Android Keystore/encrypted-preference survival across real target-process death; it does not exercise authenticated MainActivity restoration or prove startup is POST-free with a logged-in session. Physical-device, live OIDC/Core idempotency and real tenant-isolation E2E remain open; F08 Android stays PARTIAL.
+- Scope: test namespace, host harness, test evidence, and plan/progress only; no change to Core/API or production retry semantics. Commit/push pending; preserve unrelated user-owned untracked paths.
+- Next: commit/push after final review, then continue an independent V1 acceptance gap. Keep live auth/runtime gates explicit.
