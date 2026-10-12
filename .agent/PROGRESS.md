@@ -1,6 +1,6 @@
 # Execution progress
 
-Updated: 2026-10-12, Europe/Moscow; verification snapshot `57ee44a` on `codex/friends-mvp`.
+Updated: 2026-10-12, Europe/Moscow; verification snapshot `0223748` on `codex/friends-mvp`.
 
 ## Global plan
 
@@ -39,6 +39,7 @@ The F59 and M2.1 entries below record earlier Android/rewrite work. They do not 
 - Task 6 Web retirement source is locally complete: removed 44 React/Vite files, both BFF-only Core controllers, remaining BFF methods, browser session/CSRF/OAuth client config and Keycloak Web client. Android health now uses JWT API. The OpenAPI contract, active docs, Gradle lockfile and parity test references were updated; historical plan/evidence text remains archived history. RED architecture contract failed on `apps/web` and `oauth2Login`; GREEN: 81 Python parity/contract/surface tests, and full Core/PostgreSQL 290 tests, 0 failures, 2 skipped. The 10 removed Core tests were browser-only; mixed tests retained API assertions or were converted to API calls. Android compile and live API/OIDC checks remain separate MVP gates.
 - Task 6 was committed and pushed as `4313cc1`; Android `:app:compileDebugKotlin` then passed with the isolated JDK 17 and local SDK. Task 2 follow-up RED proved a changed configured Android subject did not revoke an old Telegram context; the fix now rejects a mismatched linked identity. Telegram recent history now queries by canonical `user_id`, including native Telegram users without Keycloak, with membership/tenant checks. Full Core/PostgreSQL regression: 293 tests, 0 failures, 2 skipped; commit `8ed1b5e`. Other Telegram actions still use Keycloak subject, so shared functionality remains partial.
 - Task 4 follow-up RED proved Gemini structured JSON accepted duplicate object keys. Such responses are now rejected before draft validation. Synthetic Gemini mock suite: 54 passed; full Intelligence suite: 176 passed, 1 skipped; commit `57ee44a`. No live Gemini request was made.
+- Task 2 follow-up `0223748`: native Telegram actor now reads dashboard, budget overview, report and transaction history by canonical `user_id`, and can create/read/edit/cancel a draft without a Keycloak subject. A disabled configured Android account no longer silently produces a second Telegram profile. RED observed for native summary, draft routing and disabled mapping; GREEN full Core/PostgreSQL suite: 298 tests, 0 failures, 2 skipped. Android attachment report test preserves the same balance. Draft confirmation, debts, budget writes, receipts and other Telegram actions still use legacy subject paths; MVP is not complete.
 - Telegram F01–F58 static audit: 22 implemented, 8 partial, 24 missing, 4 operator/developer/legacy-UI N/A; F59 remains `in_progress`. RED observed for missing Telegram mappings, unclassified N/A and stale Web acceptance. GREEN: `python -m pytest tests/test_f59_android_parity.py -q` — 16 passed; `python -m pytest tools/contracts/test_contracts.py -q` — 63 passed. N/A scopes use a closed set. Static audit only; no live service or user flow was run.
 
 ## Prior rewrite goal
