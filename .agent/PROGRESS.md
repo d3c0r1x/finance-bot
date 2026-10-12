@@ -2368,3 +2368,18 @@ Updated: 2026-10-12, Europe/Moscow.
 - Limits: all startup/API responses are synthetic through MockWebServer. Live OIDC/Core, real server idempotency, production tenant isolation and physical-device process death remain open; Android F08 stays PARTIAL.
 - Files: MainActivity, FinanceApi, TokenVault, new authenticated restore instrumentation test, F08 parity test/registry and bounded plan. User-owned untracked paths remain excluded.
 - Next: commit and push this bounded evidence slice; then assess V1 deployment/live-Core gates before adding further client behavior.
+
+## F59.44 F52 Android elapsed polling cadence - REGRESSION - 2026-10-12
+
+- Authority: approved PLAN.md F52 and .agent/specs/F52-android-csv-export.md; bounded follow-up to docs/superpowers/plans/2026-10-11-f52-android-csv-export.md polling acceptance.
+- Goal: prove the first automatic status callback waits about five elapsed seconds on API 27, beyond existing tests that only assert requested delay values.
+- Acceptance: no callback during first four seconds after the real delay starts; callback occurs at least 5 seconds later and within 12 seconds; no live Core/OIDC/S3 or other network dependency.
+- Baseline at 7338da3: existing FinanceExportsScreensTest passed 18/18 on isolated Android 8.1/API 27 emulator-5554.
+- RED: initial wall-clock test failed because Compose instrumentation's coroutine clock did not advance while the instrumentation thread waited; no callback arrived within 11 seconds. This identifies test-clock behavior, not production poll interval.
+- Test correction: only the injected test delay now uses a real kotlinx delay on Dispatchers.IO. Production polling logic remains unchanged.
+- Reviewer finding: the earlier elapsed bound left little emulator scheduling margin; the wait and maximum elapsed bound were widened to 8 and 12 seconds, while the strict 5-second minimum remains.
+- GREEN: final focused API-27 elapsed test passed 1/1 in 6.337s. Final combined F52 model/API/screen/flow instrumentation passed 50/50 on isolated Android 8.1/API 27 emulator-5554; debug and AndroidTest APKs assemble. The callback arrived after the expected five-second interval.
+- Limits: synthetic UI only; live Core/OIDC, S3/browser transfer, downloaded bytes, and server-audited timing remain open.
+- Regression: API-27 F52 model/API/screen/flow instrumentation 50/50; Android JVM 92/92 with 0 failures/errors/skips; parity plus contracts 73/73; debug and AndroidTest APK assembly pass; `git diff --check` clean.
+- Review: independent final review approved; test start time is captured at delay entry, the five-second minimum is strict, and the 12-second ceiling allows emulator scheduling margin.
+- Current status: COMMIT_PENDING; focused and regression gates, registry checks, diff check, and review are complete. Commit and push only the four scoped tracked files, then record the SHA.

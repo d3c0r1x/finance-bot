@@ -1,5 +1,6 @@
 package com.decorix.finance
 
+import android.os.SystemClock
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +22,9 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,7 +32,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 @RunWith(AndroidJUnit4::class)
 class FinanceExportsScreensTest {
@@ -167,6 +174,46 @@ class FinanceExportsScreensTest {
         compose.onNodeWithText("Обновить статус").performScrollTo().performClick()
         assertEquals(13, refreshes.size)
         assertEquals(EXPORT_ID, refreshes.last())
+    }
+
+    @Test fun activeExportWaitsAboutFiveRealSecondsBeforeFirstAutomaticRefresh() {
+        val currentJob = mutableStateOf(job("processing"))
+        val delayStartedAt = AtomicLong(0L)
+        val refreshedAt = AtomicLong(0L)
+        val delayStarted = CountDownLatch(1)
+        val firstRefresh = CountDownLatch(1)
+
+        compose.setContent {
+            MaterialTheme {
+                FinanceExportsSection(
+                    role = "owner", language = "ru", timezone = "UTC", members = emptyList(),
+                    membersLoading = false, job = currentJob.value, busy = false, error = null,
+                    onCreate = {},
+                    onRefresh = {
+                        refreshedAt.compareAndSet(0L, SystemClock.elapsedRealtime())
+                        currentJob.value = job("ready")
+                        firstRefresh.countDown()
+                    },
+                    onDownload = {},
+                    pollIdentity = FinanceExportStatusIdentity("tenant-test", 1L),
+                    pollDelay = { millis ->
+                        if (delayStartedAt.compareAndSet(0L, SystemClock.elapsedRealtime())) {
+                            delayStarted.countDown()
+                        }
+                        // Compose's test dispatcher does not advance real wall time while the test waits.
+                        withContext(Dispatchers.IO) { delay(millis) }
+                    },
+                )
+            }
+        }
+
+        assertTrue("automatic polling delay did not start", delayStarted.await(2, TimeUnit.SECONDS))
+        assertFalse("automatic refresh fired during the first four seconds", firstRefresh.await(4, TimeUnit.SECONDS))
+        assertTrue("automatic refresh did not fire after its real-time delay", firstRefresh.await(8, TimeUnit.SECONDS))
+
+        val elapsedMillis = refreshedAt.get() - delayStartedAt.get()
+        assertTrue("automatic refresh fired before five seconds: ${elapsedMillis}ms", elapsedMillis >= 5_000L)
+        assertTrue("automatic refresh exceeded the scheduling bound: ${elapsedMillis}ms", elapsedMillis <= 12_000L)
     }
 
     @Test fun leavingExportScreenCancelsPendingAutomaticStatusWait() {

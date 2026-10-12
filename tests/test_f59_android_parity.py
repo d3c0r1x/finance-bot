@@ -165,3 +165,15 @@ def test_f52_android_registry_no_longer_claims_delayed_mainactivity_test_is_open
     assert "financeflowtest" in evidence
     assert "tenant-only and session-only" in evidence
     assert "505/505" in evidence
+
+
+def test_f52_android_registry_records_real_elapsed_polling_evidence():
+    feature = next(item for item in _features() if item["id"] == "F52")
+    android = feature["android"]
+
+    assert "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceExportsScreensTest.kt" in android["tests"]
+    evidence = " ".join(android.get("evidence", [])).lower()
+    assert "f59.44" in evidence
+    assert "activeexportwaitsaboutfiverealsecondsbeforefirstautomaticrefresh" in evidence
+    assert "elapsed wall-clock polling cadence" not in android["gap"].lower()
+    assert "browser transfer" in android["gap"].lower()
