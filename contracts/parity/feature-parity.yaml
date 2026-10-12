@@ -159,10 +159,12 @@ features:
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceReceiptApiTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceTransactionRepeatApiTest.kt"
         - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceTransactionVoidApiTest.kt"
-        - "apps/android/app/src/test/java/com/decorix/finance/TransactionRepeatAttemptsTest.kt"
-        - "apps/android/app/src/test/java/com/decorix/finance/TransactionVoidAttemptsTest.kt"
-      gap: "Android repeat/void retry state is process-local; authenticated live Core/OIDC E2E remains required. F09 separately tracks history filters and paging."
-      evidence: "Android repeat and void retain an immutable request plus idempotency key by tenant, source transaction/version, and auth-session generation until the response is validated and workspace refresh succeeds. Void binds the tap to its tenant/session before queuing and rechecks before POST. API-27 MockWebServer tests cover lost-response replay, stale-session rejection, invalid ACKs, and mutable member display-name changes. Process-death recovery and live Core/OIDC E2E remain unverified."
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/AndroidEncryptedMutationCheckpointStorageTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceTenantUserIdApiTest.kt"
+        - "apps/android/app/src/androidTest/java/com/decorix/finance/FinanceTransactionRecoveryScreensTest.kt"
+        - "apps/android/app/src/test/java/com/decorix/finance/TransactionMutationAttemptsTest.kt"
+      gap: "Android checkpoints survive encrypted-store recreation and expose explicit, identity-scoped retries after request failures. Actual OS force-stop/relaunch and live authenticated Core/OIDC idempotency/tenant-isolation E2E remain unverified; F09 separately tracks history filters and paging."
+      evidence: "Android stores the immutable repeat/void body, timestamp where applicable, source version, caller userId, tenant, and idempotency key under Android Keystore AES-GCM. Retry appears only on explicit tap, including off-page/filtered results and changed source versions; new mutations and source edits are suppressed while retries are pending. Checkpoints clear only after a validated Core response and same-identity workspace refresh. API-27 tests cover store recreation, no plaintext, damaged ciphertext fail-closed, missing/parsed caller ID, lost-response replay with the same request key/body, and RU/EN explicit retry UI. OS process death and live Core/OIDC remain unverified."
     intentional_differences: []
   - id: F09
     feature: "Desktop CRUD, фильтры user/period/type/search, правка даты, удаление"

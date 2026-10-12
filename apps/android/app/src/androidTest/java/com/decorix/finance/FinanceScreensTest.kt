@@ -1629,8 +1629,10 @@ class FinanceScreensTest {
         compose.onNodeWithTag("transaction-history").performScrollToIndex(3)
         compose.onNodeWithTag("transaction-edit-tx-1").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag("transaction-edit-tx-1").performClick()
+        compose.onNodeWithTag("transaction-history").performScrollToIndex(1)
         compose.onNodeWithTag("transaction-edit-owner-picker").assertDoesNotExist()
-        compose.onNodeWithTag("transaction-edit-description").performTextReplacement("Такси уточнено")
+        compose.onNodeWithTag("transaction-edit-description").performScrollTo()
+            .performTextReplacement("Такси уточнено")
         compose.onNodeWithTag("transaction-edit-save").performScrollTo().performClick()
         assertEquals("user-1", saved?.ownerUserId)
         assertEquals(3L, saved?.version)
@@ -2011,7 +2013,8 @@ class FinanceScreensTest {
         ), saved)
     }
 
-    private fun tenant(role: String) = FinanceTenant("tenant-1", "Дом", role, "Europe/Moscow")
+    private fun tenant(role: String) = FinanceTenant("tenant-1", "Дом", role, "Europe/Moscow",
+        "7ed3e606-0000-4000-8000-000000000002")
 
     private fun transaction() = FinanceTransaction(
         id = "tx-1", tenantId = "tenant-1", type = "expense", amount = "2000.00", currency = "RUB",

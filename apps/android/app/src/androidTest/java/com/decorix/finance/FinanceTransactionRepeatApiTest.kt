@@ -10,6 +10,7 @@ import okhttp3.mockwebserver.SocketPolicy
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Rule
@@ -79,6 +80,64 @@ class FinanceTransactionRepeatApiTest {
         assertEquals(requests[0].body.clone().readUtf8(), requests[1].body.clone().readUtf8())
     }
 
+    @Test fun recoveredEncryptedAttemptWaitsForExplicitRetryAndReusesExactWireRequest() =
+        withIsolatedMutationStorage { context ->
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+            server.enqueue(MockResponse().setBody(transactionJson()))
+            val api = api(OkHttpClient.Builder().retryOnConnectionFailure(false).build())
+            val firstRepository = TransactionMutationAttempts(AndroidEncryptedMutationCheckpointStorage(context))
+            val firstAttempt = firstRepository.beginRepeat(
+                ACTOR_USER_ID, TENANT_ID, original(), OCCURRED_AT, api.authSessionGeneration,
+            )
+
+            assertEquals("creating a durable checkpoint must not send a request", 0, server.requestCount)
+            val lostResponse = runCatching {
+                api.repeatTransaction(
+                    TENANT_ID, firstAttempt.original, requireNotNull(firstAttempt.occurredAt),
+                    firstAttempt.idempotencyKey,
+                    expectedSessionGeneration = firstAttempt.sessionGeneration,
+                )
+            }.exceptionOrNull()
+            assertNotNull("first request must fail after the server receives it", lostResponse)
+
+            val firstRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("POST", firstRequest.method)
+            assertEquals("/api/v1/tenants/$TENANT_ID/transactions", firstRequest.path)
+            val firstBody = firstRequest.body.readUtf8()
+            val firstKey = firstRequest.getHeader("Idempotency-Key")
+            assertNotNull(firstKey)
+
+            val recreatedRepository = TransactionMutationAttempts(AndroidEncryptedMutationCheckpointStorage(context))
+            val recoveredAttempt = recreatedRepository.beginRepeat(
+                ACTOR_USER_ID, TENANT_ID, original().copy(description = "Changed after request"),
+                SECOND_OCCURRED_AT, api.authSessionGeneration,
+            )
+            assertEquals(ACTOR_USER_ID, recoveredAttempt.actorUserId)
+            assertEquals(TENANT_ID, recoveredAttempt.tenantId)
+            assertEquals(original(), recoveredAttempt.original)
+            assertEquals(OCCURRED_AT, recoveredAttempt.occurredAt)
+            assertEquals(firstKey, recoveredAttempt.idempotencyKey)
+            assertEquals("recovery must not auto-replay the POST", 1, server.requestCount)
+
+            val retryResult = api.repeatTransaction(
+                TENANT_ID, recoveredAttempt.original, requireNotNull(recoveredAttempt.occurredAt),
+                recoveredAttempt.idempotencyKey,
+                expectedSessionGeneration = recoveredAttempt.sessionGeneration,
+            )
+            val retryRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+
+            assertEquals(REPEATED_TRANSACTION_ID, retryResult.id)
+            assertEquals(TENANT_ID, retryResult.tenantId)
+            assertEquals("POST", retryRequest.method)
+            assertEquals("/api/v1/tenants/$TENANT_ID/transactions", retryRequest.path)
+            assertEquals("Bearer repeat-test-token", retryRequest.getHeader("Authorization"))
+            assertEquals(firstKey, retryRequest.getHeader("Idempotency-Key"))
+            assertEquals(firstBody, retryRequest.body.readUtf8())
+            assertEquals(2, server.requestCount)
+            assertNull("no request may be sent without another explicit API invocation",
+                server.takeRequest(100, TimeUnit.MILLISECONDS))
+        }
+
     @Test fun changedSessionGenerationRejectsRepeatBeforePost(): Unit {
         val api = api()
         val expectedGeneration = api.authSessionGeneration
@@ -136,10 +195,30 @@ class FinanceTransactionRepeatApiTest {
          "createdAt":"$OCCURRED_AT","memberName":"Test member","debtId":null,"ownerUserId":"member-1"}
     """.trimIndent()
 
+    private inline fun <T> withIsolatedMutationStorage(block: (Context) -> T): T {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences(MUTATION_PREFERENCES, Context.MODE_PRIVATE)
+        val previousIv = preferences.getString(MUTATION_IV_KEY, null)
+        val previousCiphertext = preferences.getString(MUTATION_CIPHERTEXT_KEY, null)
+        return try {
+            block(context)
+        } finally {
+            val editor = preferences.edit().remove(MUTATION_IV_KEY).remove(MUTATION_CIPHERTEXT_KEY)
+            if (previousIv != null) editor.putString(MUTATION_IV_KEY, previousIv)
+            if (previousCiphertext != null) editor.putString(MUTATION_CIPHERTEXT_KEY, previousCiphertext)
+            check(editor.commit())
+        }
+    }
+
     private companion object {
+        const val MUTATION_PREFERENCES = "finance_transaction_mutations"
+        const val MUTATION_IV_KEY = "iv"
+        const val MUTATION_CIPHERTEXT_KEY = "ciphertext"
+        const val ACTOR_USER_ID = "30000000-0000-4000-8000-000000000001"
         const val TENANT_ID = "7ed3e606-0000-4000-8000-000000000001"
         const val TRANSACTION_ID = "7ed3e606-0000-4000-8000-000000000002"
         const val REPEATED_TRANSACTION_ID = "7ed3e606-0000-4000-8000-000000000003"
         const val OCCURRED_AT = "2026-10-12T09:15:30+03:00"
+        const val SECOND_OCCURRED_AT = "2026-10-13T09:15:30+03:00"
     }
 }

@@ -70,6 +70,47 @@ class FinanceTransactionVoidApiTest {
         assertEquals(requests[0].body.clone().readUtf8(), requests[1].body.clone().readUtf8())
     }
 
+    @Test fun lostVoidResponseCanRetryFromFreshEncryptedRepositoryOnlyAfterExplicitApiCall() =
+        withMutationCheckpointPreferences { context ->
+            val firstApi = api(OkHttpClient.Builder().retryOnConnectionFailure(false).build())
+            val firstStorage = AndroidEncryptedMutationCheckpointStorage(context)
+            val firstRepository = TransactionMutationAttempts(firstStorage)
+            val pending = firstRepository.beginVoid(ACTOR_USER_ID, TENANT_ID, source(),
+                sessionGeneration = firstApi.authSessionGeneration)
+            assertEquals(MutationAction.VOID, pending.action)
+            assertEquals(SOURCE_VERSION, pending.original.version)
+            assertEquals(0, server.requestCount)
+
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+            server.enqueue(MockResponse().setBody(voidedJson()))
+            val lostResponse = runCatching {
+                firstApi.voidTransaction(TENANT_ID, pending.original, pending.idempotencyKey,
+                    expectedSessionGeneration = pending.sessionGeneration)
+            }.exceptionOrNull()
+            assertNotNull("Core received the first POST but the client lost its response", lostResponse)
+            val firstRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertVoidRequest(firstRequest, pending.idempotencyKey)
+
+            val freshApi = api(OkHttpClient.Builder().retryOnConnectionFailure(false).build())
+            val restored = TransactionMutationAttempts(AndroidEncryptedMutationCheckpointStorage(context))
+                .beginVoid(ACTOR_USER_ID, TENANT_ID, source(), freshApi.authSessionGeneration)
+            assertEquals("process-local generation is rebound after recovery",
+                freshApi.authSessionGeneration, restored.sessionGeneration)
+            assertEquals(pending.idempotencyKey, restored.idempotencyKey)
+            assertEquals(pending.original, restored.original)
+            assertEquals(SOURCE_VERSION, restored.original.version)
+            assertEquals(1, server.requestCount)
+
+            val acknowledged = freshApi.voidTransaction(TENANT_ID, restored.original, restored.idempotencyKey,
+                expectedSessionGeneration = restored.sessionGeneration)
+
+            assertEquals("voided", acknowledged.status)
+            assertEquals(SOURCE_VERSION + 1, acknowledged.version)
+            val retryRequest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertVoidRequest(retryRequest, pending.idempotencyKey)
+            assertEquals(2, server.requestCount)
+        }
+
     @Test fun staleAuthenticationSessionIsRejectedWithoutPostingVoid() {
         val api = api()
         val capturedGeneration = api.authSessionGeneration
@@ -157,6 +198,30 @@ class FinanceTransactionVoidApiTest {
         }
     }
 
+    private fun assertVoidRequest(request: okhttp3.mockwebserver.RecordedRequest, idempotencyKey: String) {
+        assertEquals("POST", request.method)
+        assertEquals("/api/v1/tenants/$TENANT_ID/transactions/$TRANSACTION_ID/void", request.path)
+        assertEquals("Bearer void-test-token", request.getHeader("Authorization"))
+        assertEquals(idempotencyKey, request.getHeader("Idempotency-Key"))
+        assertEquals("\"$SOURCE_VERSION\"", request.getHeader("If-Match"))
+        assertEquals("{}", request.body.clone().readUtf8())
+    }
+
+    private inline fun <T> withMutationCheckpointPreferences(block: (Context) -> T): T {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences(MUTATION_PREFERENCES_NAME, Context.MODE_PRIVATE)
+        val previousIv = preferences.getString(MUTATION_IV_KEY, null)
+        val previousCiphertext = preferences.getString(MUTATION_CIPHERTEXT_KEY, null)
+        return try {
+            block(context)
+        } finally {
+            val editor = preferences.edit().remove(MUTATION_IV_KEY).remove(MUTATION_CIPHERTEXT_KEY)
+            if (previousIv != null) editor.putString(MUTATION_IV_KEY, previousIv)
+            if (previousCiphertext != null) editor.putString(MUTATION_CIPHERTEXT_KEY, previousCiphertext)
+            check(editor.commit())
+        }
+    }
+
     private fun source(
         id: String = TRANSACTION_ID,
         tenantId: String = TENANT_ID,
@@ -187,5 +252,9 @@ class FinanceTransactionVoidApiTest {
         const val TRANSACTION_ID = "7ed3e606-0000-4000-8000-000000000002"
         const val OTHER_TRANSACTION_ID = "7ed3e606-0000-4000-8000-000000000005"
         const val SOURCE_VERSION = 4L
+        const val ACTOR_USER_ID = "7ed3e606-0000-4000-8000-000000000003"
+        const val MUTATION_PREFERENCES_NAME = "finance_transaction_mutations"
+        const val MUTATION_IV_KEY = "iv"
+        const val MUTATION_CIPHERTEXT_KEY = "ciphertext"
     }
 }

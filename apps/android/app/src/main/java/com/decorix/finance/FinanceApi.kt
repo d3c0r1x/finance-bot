@@ -74,7 +74,8 @@ class FinanceApi internal constructor(
         return (0 until list.length()).map { index ->
             val item = list.getJSONObject(index)
             FinanceTenant(item.getString("tenantId"), item.getString("displayName"),
-                item.getString("role"), item.optString("timezone", "UTC"))
+                item.getString("role"), item.optString("timezone", "UTC"),
+                userId = item.optString("userId", ""))
         }
     }
 

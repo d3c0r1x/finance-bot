@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var authService: AuthorizationService
     private val api by lazy { FinanceApi(this) }
+    private val mutationAttempts by lazy { TransactionMutationAttempts(AndroidEncryptedMutationCheckpointStorage(this)) }
     private val receiptCheckpointStore by lazy { ReceiptUploadCheckpointStore(this) }
     private val bankImportCheckpointStore by lazy { BankImportCheckpointStore(this) }
     private val budgetIdempotencyKeyStore by lazy { BudgetIdempotencyKeyStore(this) }
@@ -219,6 +220,7 @@ class MainActivity : ComponentActivity() {
                         onRecurringLoad = ::loadRecurring, onRecurringDecision = ::applyRecurringDecision,
                         onProductCatalogLoad = ::loadProductCatalog,
                         onRepeatTransaction = ::repeatTransaction, onVoidTransaction = ::voidTransaction,
+                        onRepeatMutationRetry = ::retryRepeatMutation, onVoidMutationRetry = ::retryVoidMutation,
                         onTransactionFilter = ::filterTransactions, onTransactionLoadMore = ::loadMoreTransactions,
                         onUpdateTransaction = ::updateTransaction,
                         onReceiptPick = ::launchReceiptPhotoPicker,
@@ -2379,33 +2381,96 @@ class MainActivity : ComponentActivity() {
         workspaceData(draft = null)
     }
 
-    private fun repeatTransaction(transaction: FinanceTransaction) = runApi {
-        val tenant = ui.tenants.firstOrNull() ?: error("Create a workspace first")
-        val zone = ZoneId.of(tenant.timezone)
-        val occurredAt = LocalDate.now(zone).atTime(12, 0).atZone(zone).toInstant().toString()
-        val attempt = TransactionRepeatAttempts.begin(tenant.id, transaction, occurredAt, api.authSessionGeneration)
-        api.repeatTransaction(attempt.tenantId, attempt.original, attempt.occurredAt, attempt.idempotencyKey,
-            attempt.sessionGeneration)
-        workspaceData().also {
-            TransactionRepeatAttempts.complete(attempt.tenantId, attempt.original.id, attempt.sessionGeneration)
+    private fun repeatTransaction(transaction: FinanceTransaction) {
+        val tenant = ui.tenants.firstOrNull() ?: return showMutationIdentityError()
+        val actorUserId = tenant.userId
+        val sessionGeneration = api.authSessionGeneration
+        val occurredAt = runCatching {
+            LocalDate.now(ZoneId.of(tenant.timezone)).atTime(12, 0).atZone(ZoneId.of(tenant.timezone))
+                .toInstant().toString()
+        }.getOrElse { return showMutationIdentityError() }
+        runApi(onFinished = { succeeded -> if (!succeeded) mutationAttemptFailed(actorUserId, tenant.id) }) {
+            checkMutationIdentity(actorUserId, tenant.id, sessionGeneration)
+            val attempt = mutationAttempts.beginRepeat(actorUserId, tenant.id, transaction, occurredAt,
+                sessionGeneration)
+            api.repeatTransaction(attempt.tenantId, attempt.original, attempt.occurredAt!!,
+                attempt.idempotencyKey, attempt.sessionGeneration)
+            refreshAndCompleteMutation(attempt)
         }
     }
 
     private fun voidTransaction(transaction: FinanceTransaction) {
-        val requestContext = FinanceVoidRequestContext(activeTenantId(), api.authSessionGeneration)
-        runApi {
-            check(requestContext.matchesCurrent(activeTenantId(), api.authSessionGeneration)) {
-                "Workspace or sign-in session changed; retry the action."
-            }
-            val attempt = TransactionVoidAttempts.begin(requestContext.tenantId, transaction,
-                requestContext.sessionGeneration)
+        val tenant = ui.tenants.firstOrNull() ?: return showMutationIdentityError()
+        val actorUserId = tenant.userId
+        val sessionGeneration = api.authSessionGeneration
+        runApi(onFinished = { succeeded -> if (!succeeded) mutationAttemptFailed(actorUserId, tenant.id) }) {
+            checkMutationIdentity(actorUserId, tenant.id, sessionGeneration)
+            val attempt = mutationAttempts.beginVoid(actorUserId, tenant.id, transaction, sessionGeneration)
             api.voidTransaction(attempt.tenantId, attempt.original, attempt.idempotencyKey,
                 attempt.sessionGeneration)
-            workspaceData().also {
-                TransactionVoidAttempts.complete(attempt.tenantId, attempt.original.id,
-                    attempt.sourceVersion, attempt.sessionGeneration)
-            }
+            refreshAndCompleteMutation(attempt)
         }
+    }
+
+    private fun retryRepeatMutation(checkpoint: MutationCheckpoint) {
+        val tenant = ui.tenants.firstOrNull() ?: return showMutationIdentityError()
+        val actorUserId = tenant.userId
+        val sessionGeneration = api.authSessionGeneration
+        runApi(onFinished = { succeeded -> if (!succeeded) mutationAttemptFailed(actorUserId, checkpoint.tenantId) }) {
+            check(checkpoint.actorUserId == actorUserId) { "Sign-in account changed; refresh before retrying." }
+            checkMutationIdentity(actorUserId, checkpoint.tenantId, sessionGeneration)
+            val attempt = mutationAttempts.beginRepeat(actorUserId, checkpoint.tenantId, checkpoint.original,
+                checkpoint.occurredAt ?: error("Stored repeat timestamp is missing"), sessionGeneration)
+            api.repeatTransaction(attempt.tenantId, attempt.original, attempt.occurredAt!!,
+                attempt.idempotencyKey, attempt.sessionGeneration)
+            refreshAndCompleteMutation(attempt)
+        }
+    }
+
+    private fun retryVoidMutation(checkpoint: MutationCheckpoint) {
+        val tenant = ui.tenants.firstOrNull() ?: return showMutationIdentityError()
+        val actorUserId = tenant.userId
+        val sessionGeneration = api.authSessionGeneration
+        runApi(onFinished = { succeeded -> if (!succeeded) mutationAttemptFailed(actorUserId, checkpoint.tenantId) }) {
+            check(checkpoint.actorUserId == actorUserId) { "Sign-in account changed; refresh before retrying." }
+            checkMutationIdentity(actorUserId, checkpoint.tenantId, sessionGeneration)
+            val attempt = mutationAttempts.beginVoid(actorUserId, checkpoint.tenantId, checkpoint.original,
+                sessionGeneration)
+            api.voidTransaction(attempt.tenantId, attempt.original, attempt.idempotencyKey,
+                attempt.sessionGeneration)
+            refreshAndCompleteMutation(attempt)
+        }
+    }
+
+    private fun checkMutationIdentity(actorUserId: String, tenantId: String, sessionGeneration: Long) {
+        check(actorUserId.isNotBlank() && api.authSessionGeneration == sessionGeneration &&
+            ui.tenants.firstOrNull()?.let { it.id == tenantId && it.userId == actorUserId } == true) {
+            "Workspace or sign-in session changed; retry the action."
+        }
+    }
+
+    private fun refreshAndCompleteMutation(attempt: MutationCheckpoint): FinanceWorkspaceSnapshot {
+        val refreshed = workspaceData()
+        check(refreshed.tenants.firstOrNull()?.let {
+            it.id == attempt.tenantId && it.userId == attempt.actorUserId
+        } == true) { "Workspace or sign-in changed; the request remains available to retry." }
+        when (attempt.action) {
+            MutationAction.REPEAT -> mutationAttempts.completeRepeat(attempt.actorUserId, attempt.tenantId,
+                attempt.original.id, attempt.idempotencyKey)
+            MutationAction.VOID -> mutationAttempts.completeVoid(attempt.actorUserId, attempt.tenantId,
+                attempt.original.id, attempt.original.version, attempt.idempotencyKey)
+        }
+        return refreshed.copy(pendingMutationCheckpoints = mutationAttempts.pendingFor(attempt.actorUserId,
+            attempt.tenantId))
+    }
+
+    private fun showMutationIdentityError() {
+        ui = ui.copy(error = if (language == "ru") "Не удалось безопасно проверить аккаунт и рабочее пространство."
+            else "Could not safely verify the account and workspace.")
+    }
+
+    private fun mutationAttemptFailed(actorUserId: String, tenantId: String) {
+        ui = exposeMutationRecoveryAfterFailure(ui, mutationAttempts, actorUserId, tenantId)
     }
 
     private fun updateTransaction(edit: FinanceTransactionEdit) = runApi {
@@ -2452,13 +2517,19 @@ class MainActivity : ComponentActivity() {
                 transactionFrom.trim().ifBlank { null }, transactionTo.trim().ifBlank { null },
                 transactionMemberId.trim().ifBlank { null })
             val transactions = (if (appendTransactions) ui.transactions else emptyList()) + transactionPage.items
+            val mutationCheckpoints = runCatching {
+                if (tenant.userId.isBlank()) emptyList()
+                else mutationAttempts.pendingFor(tenant.userId, tenant.id)
+            }
+            val pendingMutationCheckpoints = mutationCheckpoints.getOrDefault(emptyList())
+            val mutationCheckpointError = tenant.userId.isBlank() || mutationCheckpoints.isFailure
             FinanceWorkspaceSnapshot(tenants, transactions, members, transactionPage.nextCursor, transactionSearch, transactionType,
                 transactionFrom, transactionTo, transactionMemberId,
                 api.budgets(tenant.id), api.debts(tenant.id),
                 proposal, api.dashboardSummary(tenant.id), api.report(tenant.id, "month", "personal", month, "", ""),
                 draft, memberProfile ?: api.memberProfile(tenant.id),
                 notificationPreferences ?: api.notificationPreferences(tenant.id), budgetAlerts,
-                transactionEditSavedToken)
+                transactionEditSavedToken, pendingMutationCheckpoints, mutationCheckpointError)
         }
     }
 
@@ -2487,6 +2558,8 @@ class MainActivity : ComponentActivity() {
                     }
                     ui = ui.copy(busy = false, tenants = snapshot.tenants,
                         transactions = snapshot.transactions, transactionNextCursor = snapshot.transactionNextCursor,
+                        pendingMutationCheckpoints = snapshot.pendingMutationCheckpoints,
+                        mutationCheckpointError = snapshot.mutationCheckpointError,
                         transactionMembers = snapshot.transactionMembers,
                         transactionSearch = snapshot.transactionSearch, transactionTypeFilter = snapshot.transactionTypeFilter,
                         transactionFrom = snapshot.transactionFrom, transactionTo = snapshot.transactionTo,
@@ -3605,6 +3678,8 @@ data class FinanceUiState(
     val error: String? = null,
     val tenants: List<FinanceTenant> = emptyList(),
     val transactions: List<FinanceTransaction> = emptyList(),
+    val pendingMutationCheckpoints: List<MutationCheckpoint> = emptyList(),
+    val mutationCheckpointError: Boolean = false,
     val transactionMembers: List<FinanceTenantMember> = emptyList(),
     val transactionNextCursor: String? = null,
     val transactionSearch: String = "",
@@ -3888,6 +3963,8 @@ private data class FinanceWorkspaceSnapshot(
     val notificationPreferences: FinanceNotificationPreferences?,
     val budgetAlerts: List<FinanceBudgetAlert>,
     val transactionEditSavedToken: String? = null,
+    val pendingMutationCheckpoints: List<MutationCheckpoint> = emptyList(),
+    val mutationCheckpointError: Boolean = false,
 )
 
 internal data class ReceiptItemUpdateWithPageRefreshResult(
@@ -3943,7 +4020,8 @@ internal fun receiptItemsPageAfterDelete(requestedPage: Int, itemCount: Int): In
     return requestedPage.coerceAtMost(maxOf(1, (itemCount + 7) / 8))
 }
 
-data class FinanceTenant(val id: String, val name: String, val role: String, val timezone: String)
+data class FinanceTenant(val id: String, val name: String, val role: String, val timezone: String,
+                         val userId: String = "")
 
 internal enum class ReceiptReviewRecoveryAction {
     REFRESH_RECEIPT_AND_CANDIDATES,
@@ -3995,6 +4073,8 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                           onRecurringDecision: (String, Boolean) -> Unit = { _, _ -> },
                           onRepeatTransaction: (FinanceTransaction) -> Unit = {},
                           onVoidTransaction: (FinanceTransaction) -> Unit = {},
+                          onRepeatMutationRetry: (MutationCheckpoint) -> Unit = {},
+                          onVoidMutationRetry: (MutationCheckpoint) -> Unit = {},
                           onTransactionFilter: (String, String, String, String, String) -> Unit = { _, _, _, _, _ -> },
                           onTransactionLoadMore: () -> Unit = {},
                            onUpdateTransaction: (FinanceTransactionEdit) -> Unit = {},
@@ -4642,6 +4722,28 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                                 Text(if (russian) "Недавние операции" else "Recent transactions",
                                     style = MaterialTheme.typography.titleMedium)
                             }
+                            if (state.mutationCheckpointError) item {
+                                Text(if (russian) "Не удалось безопасно определить аккаунт для восстановления запроса."
+                                    else "Could not safely identify the account for request recovery.",
+                                    color = MaterialTheme.colorScheme.error)
+                            }
+                            val recoveryOnlyCheckpoints = mutationCheckpointsOutsideVisibleTransactions(
+                                state.pendingMutationCheckpoints, state.transactions,
+                            )
+                            if (recoveryOnlyCheckpoints.isNotEmpty()) item(key = "mutation-recovery") {
+                                TransactionMutationRecoverySection(
+                                    checkpoints = state.pendingMutationCheckpoints,
+                                    visibleTransactions = state.transactions,
+                                    language = language,
+                                    canWrite = canWriteTransactions && !state.mutationCheckpointError &&
+                                        state.tenants.firstOrNull()?.userId?.isNotBlank() == true,
+                                    busy = state.busy,
+                                    onRepeatRetry = onRepeatMutationRetry,
+                                    onVoidRetry = onVoidMutationRetry,
+                                    onRepeat = onRepeatTransaction,
+                                    onVoid = onVoidTransaction,
+                                )
+                                }
                             if (state.transactions.isEmpty() && !state.busy) item {
                                 Text(if (russian) "Нет операций по выбранным фильтрам"
                                     else "No transactions match these filters")
@@ -4649,10 +4751,20 @@ internal fun FinanceScreen(state: FinanceUiState, language: String, onLanguage: 
                             items(state.transactions) { transaction ->
                                 val canEditThisTransaction = canWriteTransactions && transaction.status == "posted" &&
                                     (canManageFamilyTransactions || transaction.ownerUserId == currentUserId)
-                                TransactionHistoryCard(transaction, language, canWriteTransactions, state.busy,
+                                TransactionHistoryCard(transaction, language,
+                                    canWriteTransactions && !state.mutationCheckpointError &&
+                                        state.tenants.firstOrNull()?.userId?.isNotBlank() == true,
+                                    state.busy,
                                     canEditThisTransaction,
                                     onEdit = { editingTransaction = it },
-                                    onRepeat = onRepeatTransaction, onVoid = onVoidTransaction)
+                                    onRepeat = onRepeatTransaction, onVoid = onVoidTransaction,
+                                    pendingRepeat = state.pendingMutationCheckpoints.firstOrNull {
+                                        it.action == MutationAction.REPEAT && it.original.id == transaction.id
+                                    },
+                                    pendingVoid = state.pendingMutationCheckpoints.firstOrNull {
+                                        it.action == MutationAction.VOID && it.original.id == transaction.id
+                                    },
+                                    onRepeatRetry = onRepeatMutationRetry, onVoidRetry = onVoidMutationRetry)
                             }
                             if (state.transactionNextCursor != null) item {
                                 Button(modifier = Modifier.testTag("transaction-load-more"), enabled = !state.busy,
@@ -6339,9 +6451,49 @@ private fun TransactionEditEditor(transaction: FinanceTransaction, debts: List<F
 }
 
 @androidx.compose.runtime.Composable
-private fun TransactionHistoryCard(transaction: FinanceTransaction, language: String, canWrite: Boolean, busy: Boolean,
+internal fun TransactionMutationRecoverySection(
+    checkpoints: List<MutationCheckpoint>,
+    visibleTransactions: List<FinanceTransaction>,
+    language: String,
+    canWrite: Boolean,
+    busy: Boolean,
+    onRepeatRetry: (MutationCheckpoint) -> Unit,
+    onVoidRetry: (MutationCheckpoint) -> Unit,
+    onRepeat: (FinanceTransaction) -> Unit,
+    onVoid: (FinanceTransaction) -> Unit,
+) {
+    val recoveryCheckpoints = mutationCheckpointsOutsideVisibleTransactions(checkpoints, visibleTransactions)
+    if (recoveryCheckpoints.isEmpty()) return
+    val russian = language == "ru"
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(if (russian) "Запросы, ожидающие повтора" else "Requests awaiting retry",
+            style = MaterialTheme.typography.titleMedium)
+        recoveryCheckpoints.forEach { checkpoint ->
+            TransactionHistoryCard(
+                transaction = checkpoint.original,
+                language = language,
+                canWrite = canWrite,
+                busy = busy,
+                canEdit = false,
+                onEdit = {},
+                onRepeat = onRepeat,
+                onVoid = onVoid,
+                pendingRepeat = checkpoint.takeIf { it.action == MutationAction.REPEAT },
+                pendingVoid = checkpoint.takeIf { it.action == MutationAction.VOID },
+                onRepeatRetry = onRepeatRetry,
+                onVoidRetry = onVoidRetry,
+            )
+        }
+    }
+}
+
+@androidx.compose.runtime.Composable
+internal fun TransactionHistoryCard(transaction: FinanceTransaction, language: String, canWrite: Boolean, busy: Boolean,
                                    canEdit: Boolean, onEdit: (FinanceTransaction) -> Unit,
-                                   onRepeat: (FinanceTransaction) -> Unit, onVoid: (FinanceTransaction) -> Unit) {
+                                   onRepeat: (FinanceTransaction) -> Unit, onVoid: (FinanceTransaction) -> Unit,
+                                   pendingRepeat: MutationCheckpoint? = null, pendingVoid: MutationCheckpoint? = null,
+                                   onRepeatRetry: (MutationCheckpoint) -> Unit = {},
+                                   onVoidRetry: (MutationCheckpoint) -> Unit = {}) {
     val russian = language == "ru"
     val posted = transaction.status == "posted"
     val income = transaction.type == "income" || transaction.type == "refund"
@@ -6356,21 +6508,29 @@ private fun TransactionHistoryCard(transaction: FinanceTransaction, language: St
                 "${transaction.memberName?.let { "$it · " } ?: ""}${transaction.categoryCode} · " +
                     if (posted) "Posted" else "Voided"
             })
-            if ((canWrite || canEdit) && posted) {
+            if (canEdit && posted && pendingRepeat == null && pendingVoid == null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (canEdit) TextButton(
+                    TextButton(
                         modifier = Modifier.testTag("transaction-edit-${transaction.id}"),
                         enabled = !busy, onClick = { onEdit(transaction) },
                     ) { Text(if (russian) "Изменить" else "Edit") }
-                    if (transaction.type != "debt_payment") TextButton(
-                        modifier = Modifier.testTag("transaction-repeat-${transaction.id}"),
-                        enabled = !busy, onClick = { onRepeat(transaction) },
-                    ) { Text(if (russian) "Повторить" else "Repeat") }
-                    TextButton(
-                        modifier = Modifier.testTag("transaction-void-${transaction.id}"),
-                        enabled = !busy, onClick = { onVoid(transaction) },
-                    ) { Text(if (russian) "Отменить" else "Void") }
                 }
+            }
+            if (canWrite && (posted || pendingRepeat != null || pendingVoid != null)) {
+                TransactionMutationActionButtons(
+                    transactionId = transaction.id,
+                    sourceStatus = transaction.status,
+                    language = language,
+                    canWrite = true,
+                    busy = busy,
+                    canRepeat = posted && transaction.type != "debt_payment",
+                    pendingRepeat = pendingRepeat != null,
+                    pendingVoid = pendingVoid != null,
+                    onRepeat = { onRepeat(transaction) },
+                    onVoid = { onVoid(transaction) },
+                    onRepeatRetry = { pendingRepeat?.let(onRepeatRetry) },
+                    onVoidRetry = { pendingVoid?.let(onVoidRetry) },
+                )
             }
         }
     }

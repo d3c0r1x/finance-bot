@@ -2233,7 +2233,7 @@ Updated: 2026-10-12, Europe/Moscow.
 - Commit/push: `eadeee58f5b920879e7e2ef2f6f82a313d02dbf7` (`test(F52): cover Android export locales`) is pushed; `git ls-remote` confirmed the same remote SHA.
 - Next: complete F49 restored Android import terminal-state presentation; keep OS force-stop, live Core/OIDC, and tenant-isolation gates open.
 
-## F59.32 F49 restored Android import terminal state — COMMIT_PENDING; PARTIAL
+## F59.32 F49 restored Android import terminal state — COMMITTED/PUSHED; PARTIAL
 
 - Authority: approved V1 `PLAN.md` F49 and `.agent/specs/F49-android-import-dedup-undo.md` acceptance criteria 2 and 7. Bounded plan: `docs/superpowers/plans/2026-10-12-f49-android-restored-terminal-state.md`.
 - TDD RED: added a Compose test for Core `state = reverted` with no transient `undoResult`; API-27 run failed because the batch terminal-result tag was absent.
@@ -2242,5 +2242,17 @@ Updated: 2026-10-12, Europe/Moscow.
 - Runtime: installed debug app resumed `MainActivity` on isolated `emulator-5554` and stayed active for 5 seconds; no `FATAL EXCEPTION` appeared in inspected logcat. This did not exercise Core/OIDC or force-stop recovery.
 - Review: independent review found no blocker; verified synthetic Core-shaped state, RU/EN labels, no duplicate message when matching response exists, and no Undo on reverted state.
 - Limits: this is synthetic Compose/API coverage. It does not prove OS force-stop/relaunch, live Android Core/OIDC, or real tenant isolation.
-- Commit pending: stage only the F49 screen, instrumentation test, parity evidence/contract, bounded plan, and this progress record; leave user-owned untracked paths untouched.
-- Next: commit/push this scoped F49 slice and verify remote SHA.
+- Commit/push: `32c09016abd4da6939b630f9447327b84f395065` (`fix(F49): show restored Android undo state`) pushed; `git ls-remote` confirmed the same remote SHA.
+- Next: assess the approved F08 Android process-death retry-recovery gap. Keep durable owner/tenant binding and explicit user retry as hard safety requirements.
+
+## F59.33 F08 Android durable repeat/void retry — IMPLEMENTED / LOCALLY VERIFIED; PARTIAL
+
+- Authority: V1 `PLAN.md` F08 plus user's explicit 2026-10-12 approval for encrypted local retry recovery. Plan: `docs/superpowers/plans/2026-10-12-f08-android-durable-retry.md`.
+- Design: persist immutable repeat/void request checkpoints under Android Keystore AES-GCM, bound to Core's authenticated `userId` and tenant. Capture in-process generation at tap. Only an explicit history action may retry. Preserve checkpoints on corrupt storage, ambiguous POST, failed ACK/refresh, or identity change; clear only after same-identity authoritative refresh.
+- TDD RED: targeted unit compilation first failed because the recovery-list helper was absent; targeted Compose run then failed because the dedicated off-page recovery UI was absent; review-driven edit-lock test failed while an Edit button was still shown for a pending void. These were product gaps and received focused fixes.
+- Implementation: Android Keystore AES-GCM stores immutable mutation checkpoints. Requests are scoped to Core caller userId and tenant, never posted automatically after startup, and retry only by explicit tap with the saved key/body. Failed POST/acknowledgement/refresh publishes the pending checkpoint immediately; requests remain reachable outside the visible filter/page and after source changes. Other mutations and source edits are blocked while a retry is pending. Acknowledged records clear only after validated response plus same-identity workspace refresh; damaged storage fails closed.
+- GREEN/regression: repository unit tests pass; full Android JVM suite passes; final F08 API-27 set passed 108/108 and the post-review retry/edit recovery screen suite passed 5/5 on `emulator-5554` (Android 8.1/API 27). Contract/Python regression passed 323, skipped 1. Debug and AndroidTest APKs assembled during connected instrumentation. Installed debug app launched with no `FATAL EXCEPTION`; `git diff --check` clean before final staging.
+- Review: independent read-only reviewer confirmed the four recovery issues were closed. Its final version-change finding was fixed test-first; the focused Compose test passed.
+- Limits: encrypted store recreation was tested, but an actual OS force-stop/relaunch, live OIDC/Core, and real tenant-isolation E2E remain unverified. F08 Android remains PARTIAL for those external acceptance gates.
+- Commit pending: stage only F08 Android implementation/tests, parity registry, bounded plan, and this progress record; exclude user-owned untracked files and local tooling caches.
+- Next: commit/push scoped F08 work, verify remote SHA, then continue remaining V1 plan work.

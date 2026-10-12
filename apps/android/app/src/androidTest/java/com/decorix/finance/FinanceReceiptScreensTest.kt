@@ -2227,7 +2227,8 @@ class FinanceReceiptScreensTest {
         "rule", null, null, null, "basket-rules.v1", 1,
     )
 
-    private fun tenant(role: String) = FinanceTenant("tenant-17", "Семья", role, "Europe/Moscow")
+    private fun tenant(role: String) = FinanceTenant("tenant-17", "Семья", role, "Europe/Moscow",
+        "7ed3e606-0000-4000-8000-000000000017")
 
     private fun receiptDraft() = FinanceReceipt(
         id = "receipt-42", tenantId = "tenant-17", documentId = "document-9", state = "review_required",
