@@ -2158,4 +2158,4 @@ Updated: 2026-10-11 13:54 MSK, Europe/Moscow.
 - GREEN/regression: Android 8.1/API 27 `FinanceReceiptScreensTest` 80/80 and `FinanceReceiptApiTest` 49/49; Android JVM 74/74 (0 failures/errors); parity/contracts 67/67; debug and Android-test APK assembly pass; `git diff --check` clean. Independent read-only review found no blockers.
 - Runtime: installed `com.decorix.finance.debug` on isolated `emulator-5554`; `MainActivity` resumed. APK SHA-256: `6DCAB03B66FACF6013E55B322168B9CCCC7FB26A16C85C3F7867378F33AA7117`.
 - Limitation: MockWebServer and emulator tests do not prove live authenticated Android-to-Core/OIDC deletion. Android F15 and global F59 remain partial until real Core/OIDC E2E; M2 public runtime remains blocked separately.
-- Commit/push: 67 parity/contract tests passed after the registry update; commit and push this slice, then record and verify the resulting SHA.
+- Commit/push: `615d1a06833138f6a29c0b22ff2d8cfe908669c6` (`feat(F15): delete receipt items on Android`) pushed; `git ls-remote` confirms the branch at this SHA. `gh run list --commit 615d1a0` returned no workflow run, so remote CI is unconfirmed.
